@@ -16,30 +16,38 @@ low_target:
  bl high_target
  ret
 // CHECK: low_target:
-// CHECK-NEXT:        8:        04 00 00 94     bl      #16
-// CHECK-NEXT:        c:        c0 03 5f d6     ret
+// CHECK-NEXT:       d8: 06 00 00 94 bl #24 <__AArch64ADRPThunk_high_target>
+// CHECK-NEXT:                 ret
 
  .hidden low_target2
  .globl low_target2
  .type low_target2, %function
 low_target2:
- // Need thunk to high_target
+ // Need thunk to high_target2
  bl high_target2
+ // .text_high+8 = high_target2
+ bl .text_high+8
  ret
 // CHECK: low_target2:
-// CHECK-NEXT:        0:        05 00 00 94     bl      #20
-// CHECK-NEXT:        4:        c0 03 5f d6     ret
+// CHECK-NEXT:       e0: 07 00 00 94 bl #28 <__AArch64ADRPThunk_high_target2>
+// CHECK-NEXT:       e4: 09 00 00 94 bl #36 <__AArch64ADRPThunk_>
+// CHECK-NEXT:                 ret
 
 // Expect range extension thunks for .text_low
 // adrp calculation is (PC + signed immediate) & (!0xfff)
 // CHECK: __AArch64ADRPThunk_high_target:
-// CHECK-NEXT:       e8:       10 00 08 90     adrp    x16, #268435456
-// CHECK-NEXT:       ec:       10 02 01 91     add     x16, x16, #64
-// CHECK-NEXT:       f0:       00 02 1f d6     br      x16
+// CHECK-NEXT:       f0: 10 00 08 90 adrp x16, #268435456
+// CHECK-NEXT:       f4: 10 02 01 91 add x16, x16, #64
+// CHECK-NEXT:                 br      x16
 // CHECK: __AArch64ADRPThunk_high_target2:
-// CHECK-NEXT:       f4:       10 00 08 90     adrp    x16, #268435456
-// CHECK-NEXT:       f8:       10 22 00 91     add     x16, x16, #8
-// CHECK-NEXT:       fc:       00 02 1f d6     br      x16
+// CHECK-NEXT:       fc: 10 00 08 90 adrp x16, #268435456
+// CHECK-NEXT:       100: 10 22 00 91 add x16, x16, #8
+// CHECK-NEXT:                 br      x16
+/// Identical to the previous one, but for the target .text_high+8.
+// CHECK: __AArch64ADRPThunk_:
+// CHECK-NEXT:      108: 10 00 08 90 adrp x16, #268435456
+// CHECK-NEXT:      10c: 10 22 00 91 add x16, x16, #8
+// CHECK-NEXT:                 br      x16
 
 
  .section .text_high, "ax", %progbits
