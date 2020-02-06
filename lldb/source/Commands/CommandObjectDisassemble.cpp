@@ -249,9 +249,8 @@ bool CommandObjectDisassemble::DoExecute(Args &command,
           m_options.arch.GetArchitectureName());
     result.SetStatus(eReturnStatusFailed);
     return false;
-  } else if (flavor_string != nullptr &&
-             !disassembler->FlavorValidForArchSpec(m_options.arch,
-                                                   flavor_string))
+  } else if (flavor_string != nullptr && !disassembler->FlavorValidForArchSpec(
+                                             m_options.arch, flavor_string))
     result.AppendWarningWithFormat(
         "invalid disassembler flavor \"%s\", using default.\n", flavor_string);
 
@@ -510,7 +509,7 @@ bool CommandObjectDisassemble::DoExecute(Args &command,
         } else {
           result.AppendErrorWithFormat(
               "Failed to disassemble memory at 0x%8.8" PRIx64 ".\n",
-              m_options.start_addr);
+              cur_range.GetBaseAddress().GetLoadAddress(target));
           result.SetStatus(eReturnStatusFailed);
         }
         if (print_sc_header)

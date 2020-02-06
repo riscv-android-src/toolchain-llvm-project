@@ -34,14 +34,10 @@ class WatchpointPythonCommandTestCase(TestBase):
 
     @skipIfFreeBSD  # timing out on buildbot
     @expectedFailureAll(
-        oslist=["windows"],
-        bugnumber="llvm.org/pr24446: WINDOWS XFAIL TRIAGE - Watchpoints not supported on Windows")
-    @expectedFailureAll(
         oslist=["linux"],
         archs=["aarch64"],
         triple=no_match(".*-android"),
         bugnumber="llvm.org/pr27710") # work on android
-    @expectedFailureNetBSD
     def test_watchpoint_command(self):
         """Test 'watchpoint command'."""
         self.build(dictionary=self.d)
@@ -106,14 +102,10 @@ class WatchpointPythonCommandTestCase(TestBase):
 
     @skipIfFreeBSD  # timing out on buildbot
     @expectedFailureAll(
-        oslist=["windows"],
-        bugnumber="llvm.org/pr24446: WINDOWS XFAIL TRIAGE - Watchpoints not supported on Windows")
-    @expectedFailureAll(
         oslist=["linux"],
         archs=["aarch64"],
         triple=no_match(".*-android"),
         bugnumber="llvm.org/pr27710") # work on android
-    @expectedFailureNetBSD
     def test_continue_in_watchpoint_command(self):
         """Test continue in a watchpoint command."""
         self.build(dictionary=self.d)

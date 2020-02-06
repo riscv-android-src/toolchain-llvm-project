@@ -11,11 +11,14 @@ class MultilineCompletionTest(PExpectTest):
 
     mydir = TestBase.compute_mydir(__file__)
 
+    # PExpect uses many timeouts internally and doesn't play well
+    # under ASAN on a loaded machine..
+    @skipIfAsan
     def test_basic_completion(self):
         """Test that we can complete a simple multiline expression"""
         self.build()
 
-        self.launch(executable=self.getBuildArtifact("a.out"))
+        self.launch(executable=self.getBuildArtifact("a.out"), dimensions=(100,500))
         self.expect("b main", substrs=["Breakpoint 1", "address ="])
         self.expect("run", substrs=["stop reason ="])
 

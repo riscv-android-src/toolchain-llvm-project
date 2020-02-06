@@ -564,6 +564,11 @@ def VirtualCallChecker : Checker<"VirtualCall">,
   HelpText<"Check virtual function calls during construction/destruction">,
   CheckerOptions<[
     CmdLineOption<Boolean,
+                  "ShowFixIts",
+                  "Enable fix-it hints for this checker",
+                  "false",
+                  InAlpha>,
+    CmdLineOption<Boolean,
                   "PureOnly",
                   "Disables the checker. Keeps cplusplus.PureVirtualCall "
                   "enabled. This option is only provided for backwards "
@@ -654,7 +659,12 @@ def DeadStoresChecker : Checker<"DeadStores">,
                   "Warns for deadstores in nested assignments."
                   "E.g.: if ((P = f())) where P is unused.",
                   "true",
-                  Released>
+                  Released>,
+    CmdLineOption<Boolean,
+                  "ShowFixIts",
+                  "Enable fix-it hints for this checker",
+                  "false",
+                  InAlpha>
   ]>,
   Documentation<HasDocumentation>;
 
@@ -1331,6 +1341,11 @@ def ExplodedGraphViewer : Checker<"ViewExplodedGraph">,
 
 def ReportStmts : Checker<"ReportStmts">,
   HelpText<"Emits a warning for every statement.">,
+  Documentation<NotDocumented>;
+
+def DebugIteratorModeling : Checker<"DebugIteratorModeling">,
+  HelpText<"Check the analyzer's understanding of C++ iterators">,
+  Dependencies<[IteratorModeling]>,
   Documentation<NotDocumented>;
 
 } // end "debug"

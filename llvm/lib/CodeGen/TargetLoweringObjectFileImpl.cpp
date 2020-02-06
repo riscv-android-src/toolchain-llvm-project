@@ -155,6 +155,7 @@ void TargetLoweringObjectFileELF::Initialize(MCContext &Ctx,
     break;
   case Triple::aarch64:
   case Triple::aarch64_be:
+  case Triple::aarch64_32:
     // The small model guarantees static code/data size < 4GB, but not where it
     // will be in memory. Most of these could end up >2GB away so even a signed
     // pc-relative 32-bit address is insufficient, theoretically.
@@ -376,7 +377,7 @@ void TargetLoweringObjectFileELF::emitPersonalityValue(
                                                    ELF::SHT_PROGBITS, Flags, 0);
   unsigned Size = DL.getPointerSize();
   Streamer.SwitchSection(Sec);
-  Streamer.EmitValueToAlignment(DL.getPointerABIAlignment(0));
+  Streamer.EmitValueToAlignment(DL.getPointerABIAlignment(0).value());
   Streamer.EmitSymbolAttribute(Label, MCSA_ELF_TypeObject);
   const MCExpr *E = MCConstantExpr::create(Size, getContext());
   Streamer.emitELFSize(Label, E);
@@ -567,6 +568,8 @@ MCSection *TargetLoweringObjectFileELF::getExplicitSectionGlobal(
       SectionName = Attrs.getAttribute("bss-section").getValueAsString();
     } else if (Attrs.hasAttribute("rodata-section") && Kind.isReadOnly()) {
       SectionName = Attrs.getAttribute("rodata-section").getValueAsString();
+    } else if (Attrs.hasAttribute("relro-section") && Kind.isReadOnlyWithRel()) {
+      SectionName = Attrs.getAttribute("relro-section").getValueAsString();
     } else if (Attrs.hasAttribute("data-section") && Kind.isData()) {
       SectionName = Attrs.getAttribute("data-section").getValueAsString();
     }
@@ -1846,18 +1849,63 @@ MCSection *TargetLoweringObjectFileXCOFF::SelectSectionForGlobal(
         SC, Kind, /* BeginSymbolName */ nullptr);
   }
 
+  if (Kind.isMergeableCString()) {
+    if (!Kind.isMergeable1ByteCString())
+      report_fatal_error("Unhandled multi-byte mergeable string kind.");
+
+    unsigned Align = GO->getParent()->getDataLayout().getPreferredAlignment(
+        cast<GlobalVariable>(GO));
+
+    unsigned EntrySize = getEntrySizeForKind(Kind);
+    std::string SizeSpec = ".rodata.str" + utostr(EntrySize) + ".";
+    SmallString<128> Name;
+    Name = SizeSpec + utostr(Align);
+
+    return getContext().getXCOFFSection(
+        Name, XCOFF::XMC_RO, XCOFF::XTY_SD,
+        TargetLoweringObjectFileXCOFF::getStorageClassForGlobal(GO),
+        Kind, /* BeginSymbolName */ nullptr);
+  }
+
   if (Kind.isText())
     return TextSection;
 
   if (Kind.isData())
     return DataSection;
 
+  // Zero initialized data must be emitted to the .data section because external
+  // linkage control sections that get mapped to the .bss section will be linked
+  // as tentative defintions, which is only appropriate for SectionKind::Common.
+  if (Kind.isBSS())
+    return DataSection;
+
+  if (Kind.isReadOnly() && !Kind.isMergeableConst())
+    return ReadOnlySection;
+
   report_fatal_error("XCOFF other section types not yet implemented.");
+}
+
+MCSection *TargetLoweringObjectFileXCOFF::getSectionForJumpTable(
+    const Function &F, const TargetMachine &TM) const {
+  assert (!TM.getFunctionSections() && "Unique sections not supported on XCOFF"
+          " yet.");
+  assert (!F.getComdat() && "Comdat not supported on XCOFF.");
+  //TODO: Enable emiting jump table to unique sections when we support it.
+  return ReadOnlySection;
 }
 
 bool TargetLoweringObjectFileXCOFF::shouldPutJumpTableInFunctionSection(
     bool UsesLabelDifference, const Function &F) const {
-  report_fatal_error("TLOF XCOFF not yet implemented.");
+  return false;
+}
+
+/// Given a mergeable constant with the specified size and relocation
+/// information, return a section that it should be placed in.
+MCSection *TargetLoweringObjectFileXCOFF::getSectionForConstant(
+    const DataLayout &DL, SectionKind Kind, const Constant *C,
+    unsigned &Align) const {
+  //TODO: Enable emiting constant pool to unique sections when we support it.
+  return ReadOnlySection;
 }
 
 void TargetLoweringObjectFileXCOFF::Initialize(MCContext &Ctx,
@@ -1888,6 +1936,7 @@ XCOFF::StorageClass TargetLoweringObjectFileXCOFF::getStorageClassForGlobal(
     const GlobalObject *GO) {
   switch (GO->getLinkage()) {
   case GlobalValue::InternalLinkage:
+  case GlobalValue::PrivateLinkage:
     return XCOFF::C_HIDEXT;
   case GlobalValue::ExternalLinkage:
   case GlobalValue::CommonLinkage:
