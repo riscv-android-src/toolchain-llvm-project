@@ -18,13 +18,17 @@ namespace lldb_private {
 
 class CompilerDeclContext {
 public:
-  // Constructors and Destructors
-  CompilerDeclContext() : m_type_system(nullptr), m_opaque_decl_ctx(nullptr) {}
+  /// Constructs an invalid CompilerDeclContext.
+  CompilerDeclContext() = default;
 
+  /// Constructs a CompilerDeclContext with the given opaque decl context
+  /// and its respective TypeSystem instance.
+  ///
+  /// Do not use this constructor directly but instead call the respective
+  /// wrapper from the TypeSystem subclass.
+  /// @see lldb_private::ClangASTContext::CreateDeclContext(clang::DeclContext*)
   CompilerDeclContext(TypeSystem *type_system, void *decl_ctx)
       : m_type_system(type_system), m_opaque_decl_ctx(decl_ctx) {}
-
-  ~CompilerDeclContext() {}
 
   // Tests
 
@@ -39,8 +43,6 @@ public:
   bool IsValid() const {
     return m_type_system != nullptr && m_opaque_decl_ctx != nullptr;
   }
-
-  bool IsClang() const;
 
   std::vector<CompilerDecl> FindDeclByName(ConstString name,
                                            const bool ignore_using_decls);
@@ -102,11 +104,9 @@ public:
 
   ConstString GetScopeQualifiedName() const;
 
-  bool IsStructUnionOrClass() const;
-
 private:
-  TypeSystem *m_type_system;
-  void *m_opaque_decl_ctx;
+  TypeSystem *m_type_system = nullptr;
+  void *m_opaque_decl_ctx = nullptr;
 };
 
 bool operator==(const CompilerDeclContext &lhs, const CompilerDeclContext &rhs);

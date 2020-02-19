@@ -277,7 +277,7 @@ def : MnemonicAlias<"vstm", "vstmia">;
 //
 let mayLoad = 1 in
 def VLLDM : AXSI4<(outs), (ins GPRnopc:$Rn, pred:$p), IndexModeNone,
-                  IIC_fpLoad_m, "vlldm${p}\t$Rn", "", []>,
+                  NoItinerary, "vlldm${p}\t$Rn", "", []>,
             Requires<[HasV8MMainline, Has8MSecExt]> {
     let Inst{24-23} = 0b00;
     let Inst{22}    = 0;
@@ -290,7 +290,7 @@ def VLLDM : AXSI4<(outs), (ins GPRnopc:$Rn, pred:$p), IndexModeNone,
 
 let mayStore = 1 in
 def VLSTM : AXSI4<(outs), (ins GPRnopc:$Rn, pred:$p), IndexModeNone,
-                  IIC_fpStore_m, "vlstm${p}\t$Rn", "", []>,
+                  NoItinerary, "vlstm${p}\t$Rn", "", []>,
             Requires<[HasV8MMainline, Has8MSecExt]> {
     let Inst{24-23} = 0b00;
     let Inst{22}    = 0;
@@ -2279,6 +2279,12 @@ def VMOVScc  : PseudoInst<(outs SPR:$Sd), (ins SPR:$Sn, SPR:$Sm, cmovpred:$p),
                     [(set (f32 SPR:$Sd),
                           (ARMcmov SPR:$Sn, SPR:$Sm, cmovpred:$p))]>,
                RegConstraint<"$Sn = $Sd">, Requires<[HasFPRegs]>;
+
+def VMOVHcc  : PseudoInst<(outs HPR:$Sd), (ins HPR:$Sn, HPR:$Sm, cmovpred:$p),
+                    IIC_fpUNA16,
+                    [(set (f16 HPR:$Sd),
+                          (ARMcmov HPR:$Sn, HPR:$Sm, cmovpred:$p))]>,
+               RegConstraint<"$Sd = $Sn">, Requires<[HasFPRegs]>;
 } // hasSideEffects
 
 //===----------------------------------------------------------------------===//

@@ -4,9 +4,14 @@ endif()
 
 get_property(LLDB_ALL_PLUGINS GLOBAL PROPERTY LLDB_PLUGINS)
 
-if(NOT LLDB_DISABLE_PYTHON)
+if(LLDB_ENABLE_PYTHON)
   get_target_property(lldb_scripts_dir swig_wrapper BINARY_DIR)
   set(lldb_python_wrapper ${lldb_scripts_dir}/LLDBWrapPython.cpp)
+endif()
+
+if(LLDB_ENABLE_LUA)
+  get_target_property(lldb_scripts_dir swig_wrapper_lua BINARY_DIR)
+  set(lldb_lua_wrapper ${lldb_scripts_dir}/LLDBWrapLua.cpp)
 endif()
 
 if(LLDB_BUILD_FRAMEWORK)
@@ -85,6 +90,7 @@ add_lldb_library(liblldb SHARED ${option_framework}
   SBUnixSignals.cpp
   SystemInitializerFull.cpp
   ${lldb_python_wrapper}
+  ${lldb_lua_wrapper}
 
   LINK_LIBS
     lldbBase
@@ -130,6 +136,19 @@ if(lldb_python_wrapper)
   endif ()
 endif()
 
+if(lldb_lua_wrapper)
+  add_dependencies(liblldb swig_wrapper_lua)
+  target_include_directories(liblldb PRIVATE ${LUA_INCLUDE_DIR})
+
+  if (MSVC)
+    set_property(SOURCE ${lldb_lua_wrapper} APPEND_STRING PROPERTY COMPILE_FLAGS " /W0")
+  else()
+    set_property(SOURCE ${lldb_lua_wrapper} APPEND_STRING PROPERTY COMPILE_FLAGS " -w")
+  endif()
+
+  set_source_files_properties(${lldb_lua_wrapper} PROPERTIES GENERATED ON)
+endif()
+
 set_target_properties(liblldb
   PROPERTIES
   VERSION ${LLDB_VERSION}
@@ -154,7 +173,7 @@ endif()
 if ( CMAKE_SYSTEM_NAME MATCHES "Windows" )
   # Only MSVC has the ABI compatibility problem and avoids using FindPythonLibs,
   # so only it needs to explicitly link against ${PYTHON_LIBRARY}
-  if (MSVC AND NOT LLDB_DISABLE_PYTHON)
+  if (MSVC AND LLDB_ENABLE_PYTHON)
     target_link_libraries(liblldb PRIVATE ${PYTHON_LIBRARY})
   endif()
 else()

@@ -24,7 +24,6 @@
 #include "lldb/Interpreter/OptionGroupBoolean.h"
 #include "lldb/Interpreter/OptionGroupFile.h"
 #include "lldb/Interpreter/OptionGroupFormat.h"
-#include "lldb/Interpreter/OptionGroupPlatform.h"
 #include "lldb/Interpreter/OptionGroupString.h"
 #include "lldb/Interpreter/OptionGroupUInt64.h"
 #include "lldb/Interpreter/OptionGroupUUID.h"
@@ -53,7 +52,6 @@
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/FormatAdapters.h"
 
-#include <cerrno>
 
 using namespace lldb;
 using namespace lldb_private;
@@ -78,7 +76,7 @@ static void DumpTargetInfo(uint32_t target_idx, Target *target,
   uint32_t properties = 0;
   if (target_arch.IsValid()) {
     strm.Printf("%sarch=", properties++ > 0 ? ", " : " ( ");
-    target_arch.DumpTriple(strm);
+    target_arch.DumpTriple(strm.AsRawOstream());
     properties++;
   }
   PlatformSP platform_sp(target->GetPlatform());
@@ -812,32 +810,28 @@ protected:
   void DumpGlobalVariableList(const ExecutionContext &exe_ctx,
                               const SymbolContext &sc,
                               const VariableList &variable_list, Stream &s) {
-    size_t count = variable_list.GetSize();
-    if (count > 0) {
-      if (sc.module_sp) {
-        if (sc.comp_unit) {
-          s.Printf("Global variables for %s in %s:\n",
-                   sc.comp_unit->GetPath().c_str(),
-                   sc.module_sp->GetFileSpec().GetPath().c_str());
-        } else {
-          s.Printf("Global variables for %s\n",
-                   sc.module_sp->GetFileSpec().GetPath().c_str());
-        }
-      } else if (sc.comp_unit) {
-        s.Printf("Global variables for %s\n", sc.comp_unit->GetPath().c_str());
+    if (variable_list.Empty())
+      return;
+    if (sc.module_sp) {
+      if (sc.comp_unit) {
+        s.Format("Global variables for {0} in {1}:\n",
+                 sc.comp_unit->GetPrimaryFile(), sc.module_sp->GetFileSpec());
+      } else {
+        s.Printf("Global variables for %s\n",
+                 sc.module_sp->GetFileSpec().GetPath().c_str());
       }
+    } else if (sc.comp_unit) {
+      s.Format("Global variables for {0}\n", sc.comp_unit->GetPrimaryFile());
+    }
 
-      for (uint32_t i = 0; i < count; ++i) {
-        VariableSP var_sp(variable_list.GetVariableAtIndex(i));
-        if (var_sp) {
-          ValueObjectSP valobj_sp(ValueObjectVariable::Create(
-              exe_ctx.GetBestExecutionContextScope(), var_sp));
+    for (VariableSP var_sp : variable_list) {
+      if (!var_sp)
+        continue;
+      ValueObjectSP valobj_sp(ValueObjectVariable::Create(
+          exe_ctx.GetBestExecutionContextScope(), var_sp));
 
-          if (valobj_sp)
-            DumpValueObject(s, var_sp, valobj_sp,
-                            var_sp->GetName().GetCString());
-        }
-      }
+      if (valobj_sp)
+        DumpValueObject(s, var_sp, valobj_sp, var_sp->GetName().GetCString());
     }
   }
 
@@ -929,9 +923,9 @@ protected:
         if (!success) {
           if (frame) {
             if (comp_unit)
-              result.AppendErrorWithFormat(
-                  "no global variables in current compile unit: %s\n",
-                  comp_unit->GetPath().c_str());
+              result.AppendErrorWithFormatv(
+                  "no global variables in current compile unit: {0}\n",
+                  comp_unit->GetPrimaryFile());
             else
               result.AppendErrorWithFormat(
                   "no debug information for frame %u\n",
@@ -1295,7 +1289,7 @@ static void DumpModuleArchitecture(Stream &strm, Module *module,
     StreamString arch_strm;
 
     if (full_triple)
-      module->GetArchitecture().DumpTriple(arch_strm);
+      module->GetArchitecture().DumpTriple(arch_strm.AsRawOstream());
     else
       arch_strm.PutCString(module->GetArchitecture().GetArchitectureName());
     std::string arch_str = arch_strm.GetString();
@@ -1330,8 +1324,8 @@ static uint32_t DumpCompileUnitLineTable(CommandInterpreter &interpreter,
         if (i > 0)
           strm << "\n\n";
 
-        strm << "Line table for " << *static_cast<FileSpec *>(sc.comp_unit)
-             << " in `" << module->GetFileSpec().GetFilename() << "\n";
+        strm << "Line table for " << sc.comp_unit->GetPrimaryFile() << " in `"
+             << module->GetFileSpec().GetFilename() << "\n";
         LineTable *line_table = sc.comp_unit->GetLineTable();
         if (line_table)
           line_table->GetDescription(
@@ -1353,7 +1347,7 @@ static void DumpFullpath(Stream &strm, const FileSpec *file_spec_ptr,
       strm.Printf("%-*s", width, fullpath.c_str());
       return;
     } else {
-      file_spec_ptr->Dump(&strm);
+      file_spec_ptr->Dump(strm.AsRawOstream());
       return;
     }
   }

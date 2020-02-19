@@ -61,10 +61,6 @@ def SDT_PPCVecInsert : SDTypeProfile<1, 3, [ SDTCisVec<0>,
   SDTCisVec<1>, SDTCisVec<2>, SDTCisInt<3>
 ]>;
 
-def SDT_PPCVecReverse: SDTypeProfile<1, 1, [ SDTCisVec<0>,
-  SDTCisVec<1>
-]>;
-
 def SDT_PPCxxpermdi: SDTypeProfile<1, 3, [ SDTCisVec<0>,
   SDTCisVec<1>, SDTCisVec<2>, SDTCisInt<3>
 ]>;
@@ -204,7 +200,6 @@ def PPCaddiDtprelL   : SDNode<"PPCISD::ADDI_DTPREL_L", SDTIntBinOp>;
 def PPCvperm     : SDNode<"PPCISD::VPERM", SDT_PPCvperm, []>;
 def PPCxxsplt    : SDNode<"PPCISD::XXSPLT", SDT_PPCVecSplat, []>;
 def PPCvecinsert : SDNode<"PPCISD::VECINSERT", SDT_PPCVecInsert, []>;
-def PPCxxreverse : SDNode<"PPCISD::XXREVERSE", SDT_PPCVecReverse, []>;
 def PPCxxpermdi  : SDNode<"PPCISD::XXPERMDI", SDT_PPCxxpermdi, []>;
 def PPCvecshl    : SDNode<"PPCISD::VECSHL", SDT_PPCVecShift, []>;
 
@@ -1644,6 +1639,15 @@ let isCall = 1, isTerminator = 1, isReturn = 1, isBarrier = 1, Uses = [RM] in
 def TCRETURNri : PPCEmitTimePseudo<(outs), (ins CTRRC:$dst, i32imm:$offset),
                  "#TC_RETURNr $dst $offset",
                  []>;
+
+let isCall = 1, PPC970_Unit = 7, isCodeGenOnly = 1,
+    Defs = [LR, R2], Uses = [CTR, RM], RST = 2 in {
+  def BCTRL_LWZinto_toc:
+    XLForm_2_ext_and_DForm_1<19, 528, 20, 0, 1, 32, (outs),
+     (ins memri:$src), "bctrl\n\tlwz 2, $src", IIC_BrB,
+     [(PPCbctrl_load_toc iaddr:$src)]>, Requires<[In32BitMode]>;
+
+}
 
 
 let isCodeGenOnly = 1 in {

@@ -84,8 +84,6 @@ public:
 
   void ForEachMacro(const ModuleVector &modules,
                     std::function<bool(const std::string &)> handler) override;
-
-  clang::ExternalASTMerger::ImporterSource GetImporterSource() override;
 private:
   void
   ReportModuleExportsHelper(std::set<ClangModulesDeclVendor::ModuleID> &exports,
@@ -110,7 +108,6 @@ private:
   typedef std::set<ModuleID> ImportedModuleSet;
   ImportedModuleMap m_imported_modules;
   ImportedModuleSet m_user_imported_modules;
-  const clang::ExternalASTMerger::OriginMap m_origin_map;
   // We assume that every ASTContext has an ClangASTContext, so we also store
   // a custom ClangASTContext for our internal ASTContext.
   std::unique_ptr<ClangASTContext> m_ast_context;
@@ -160,7 +157,7 @@ ClangModulesDeclVendorImpl::ClangModulesDeclVendorImpl(
     : m_diagnostics_engine(std::move(diagnostics_engine)),
       m_compiler_invocation(std::move(compiler_invocation)),
       m_compiler_instance(std::move(compiler_instance)),
-      m_parser(std::move(parser)), m_origin_map() {
+      m_parser(std::move(parser)) {
 
   // Initialize our ClangASTContext.
   m_ast_context.reset(new ClangASTContext(m_compiler_instance->getASTContext()));
@@ -569,13 +566,6 @@ ClangModulesDeclVendorImpl::DoGetModule(clang::ModuleIdPath path,
                                          is_inclusion_directive);
 }
 
-clang::ExternalASTMerger::ImporterSource
-ClangModulesDeclVendorImpl::GetImporterSource() {
-  return clang::ExternalASTMerger::ImporterSource(
-      m_compiler_instance->getASTContext(),
-      m_compiler_instance->getFileManager(), m_origin_map);
-}
-
 static const char *ModuleImportBufferName = "LLDBModulesMemoryBuffer";
 
 lldb_private::ClangModulesDeclVendor *
@@ -704,7 +694,7 @@ ClangModulesDeclVendor::Create(Target &target) {
 
   instance->getPreprocessor().enableIncrementalProcessing();
 
-  instance->createModuleManager();
+  instance->createASTReader();
 
   instance->createSema(action->getTranslationUnitKind(), nullptr);
 

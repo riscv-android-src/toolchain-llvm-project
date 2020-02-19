@@ -751,7 +751,10 @@ void WaitcntBrackets::determineWait(InstCounterType T, uint32_t ScoreToWait,
       // with a conservative value of 0 for the counter.
       addWait(Wait, T, 0);
     } else {
-      addWait(Wait, T, UB - ScoreToWait);
+      // If a counter has been maxed out avoid overflow by waiting for
+      // MAX(CounterType) - 1 instead.
+      uint32_t NeededWait = std::min(UB - ScoreToWait, getWaitCountMax(T) - 1);
+      addWait(Wait, T, NeededWait);
     }
   }
 }
@@ -1137,7 +1140,7 @@ bool SIInsertWaitcnts::generateWaitcntInstBefore(
         Wait.VsCnt = ~0u;
       }
 
-      LLVM_DEBUG(dbgs() << "updateWaitcntInBlock\n"
+      LLVM_DEBUG(dbgs() << "generateWaitcntInstBefore\n"
                         << "Old Instr: " << MI << '\n'
                         << "New Instr: " << *II << '\n');
 
@@ -1154,7 +1157,7 @@ bool SIInsertWaitcnts::generateWaitcntInstBefore(
     TrackedWaitcntSet.insert(SWaitInst);
     Modified = true;
 
-    LLVM_DEBUG(dbgs() << "insertWaitcntInBlock\n"
+    LLVM_DEBUG(dbgs() << "generateWaitcntInstBefore\n"
                       << "Old Instr: " << MI << '\n'
                       << "New Instr: " << *SWaitInst << '\n');
   }
@@ -1170,7 +1173,7 @@ bool SIInsertWaitcnts::generateWaitcntInstBefore(
     TrackedWaitcntSet.insert(SWaitInst);
     Modified = true;
 
-    LLVM_DEBUG(dbgs() << "insertWaitcntInBlock\n"
+    LLVM_DEBUG(dbgs() << "generateWaitcntInstBefore\n"
                       << "Old Instr: " << MI << '\n'
                       << "New Instr: " << *SWaitInst << '\n');
   }
@@ -1208,7 +1211,7 @@ void SIInsertWaitcnts::updateEventWaitcntAfter(MachineInstr &Inst,
       ScoreBrackets->updateByEvent(TII, TRI, MRI, LDS_ACCESS, Inst);
     }
   } else if (TII->isFLAT(Inst)) {
-    assert(Inst.mayLoad() || Inst.mayStore());
+    assert(Inst.mayLoadOrStore());
 
     if (TII->usesVM_CNT(Inst)) {
       if (!ST->hasVscnt())

@@ -17,6 +17,7 @@
 #include "llvm/CodeGen/SelectionDAGISel.h"
 #include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/IR/Function.h" // To access function attributes.
+#include "llvm/IR/IntrinsicsWebAssembly.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/KnownBits.h"
 #include "llvm/Support/MathExtras.h"
@@ -35,12 +36,10 @@ class WebAssemblyDAGToDAGISel final : public SelectionDAGISel {
   /// right decision when generating code for different targets.
   const WebAssemblySubtarget *Subtarget;
 
-  bool ForCodeSize;
-
 public:
   WebAssemblyDAGToDAGISel(WebAssemblyTargetMachine &TM,
                           CodeGenOpt::Level OptLevel)
-      : SelectionDAGISel(TM, OptLevel), Subtarget(nullptr), ForCodeSize(false) {
+      : SelectionDAGISel(TM, OptLevel), Subtarget(nullptr) {
   }
 
   StringRef getPassName() const override {
@@ -52,7 +51,6 @@ public:
                          "********** Function: "
                       << MF.getName() << '\n');
 
-    ForCodeSize = MF.getFunction().hasOptSize();
     Subtarget = &MF.getSubtarget<WebAssemblySubtarget>();
 
     // Wasm64 is not fully supported right now (and is not specified)

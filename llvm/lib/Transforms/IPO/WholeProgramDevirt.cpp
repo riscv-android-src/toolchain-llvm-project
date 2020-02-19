@@ -488,7 +488,7 @@ struct DevirtModule {
 
   bool areRemarksEnabled();
 
-  void scanTypeTestUsers(Function *TypeTestFunc, Function *AssumeFunc);
+  void scanTypeTestUsers(Function *TypeTestFunc);
   void scanTypeCheckedLoadUsers(Function *TypeCheckedLoadFunc);
 
   void buildTypeIdentifierMap(
@@ -842,7 +842,7 @@ bool DevirtModule::tryFindVirtualCallTargets(
 bool DevirtIndex::tryFindVirtualCallTargets(
     std::vector<ValueInfo> &TargetsForSlot, const TypeIdCompatibleVtableInfo TIdInfo,
     uint64_t ByteOffset) {
-  for (const TypeIdOffsetVtableInfo P : TIdInfo) {
+  for (const TypeIdOffsetVtableInfo &P : TIdInfo) {
     // Ensure that we have at most one external linkage vtable initializer.
     assert(P.VTableVI.getSummaryList().size() == 1 ||
            llvm::count_if(
@@ -1568,8 +1568,7 @@ bool DevirtModule::areRemarksEnabled() {
   return false;
 }
 
-void DevirtModule::scanTypeTestUsers(Function *TypeTestFunc,
-                                     Function *AssumeFunc) {
+void DevirtModule::scanTypeTestUsers(Function *TypeTestFunc) {
   // Find all virtual calls via a virtual table pointer %p under an assumption
   // of the form llvm.assume(llvm.type.test(%p, %md)). This indicates that %p
   // points to a member of the type identifier %md. Group calls by (type ID,
@@ -1804,7 +1803,7 @@ bool DevirtModule::run() {
     return false;
 
   if (TypeTestFunc && AssumeFunc)
-    scanTypeTestUsers(TypeTestFunc, AssumeFunc);
+    scanTypeTestUsers(TypeTestFunc);
 
   if (TypeCheckedLoadFunc)
     scanTypeCheckedLoadUsers(TypeCheckedLoadFunc);

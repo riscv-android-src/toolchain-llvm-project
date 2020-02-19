@@ -512,13 +512,14 @@ static bool isInt64Immediate(SDValue N, uint64_t &Imm) {
   return isInt64Immediate(N.getNode(), Imm);
 }
 
-static unsigned getBranchHint(unsigned PCC, FunctionLoweringInfo *FuncInfo,
+static unsigned getBranchHint(unsigned PCC,
+                              const FunctionLoweringInfo &FuncInfo,
                               const SDValue &DestMBB) {
   assert(isa<BasicBlockSDNode>(DestMBB));
 
-  if (!FuncInfo->BPI) return PPC::BR_NO_HINT;
+  if (!FuncInfo.BPI) return PPC::BR_NO_HINT;
 
-  const BasicBlock *BB = FuncInfo->MBB->getBasicBlock();
+  const BasicBlock *BB = FuncInfo.MBB->getBasicBlock();
   const Instruction *BBTerm = BB->getTerminator();
 
   if (BBTerm->getNumSuccessors() != 2) return PPC::BR_NO_HINT;
@@ -526,8 +527,8 @@ static unsigned getBranchHint(unsigned PCC, FunctionLoweringInfo *FuncInfo,
   const BasicBlock *TBB = BBTerm->getSuccessor(0);
   const BasicBlock *FBB = BBTerm->getSuccessor(1);
 
-  auto TProb = FuncInfo->BPI->getEdgeProbability(BB, TBB);
-  auto FProb = FuncInfo->BPI->getEdgeProbability(BB, FBB);
+  auto TProb = FuncInfo.BPI->getEdgeProbability(BB, TBB);
+  auto FProb = FuncInfo.BPI->getEdgeProbability(BB, FBB);
 
   // We only want to handle cases which are easy to predict at static time, e.g.
   // C++ throw statement, that is very likely not taken, or calling never
@@ -547,7 +548,7 @@ static unsigned getBranchHint(unsigned PCC, FunctionLoweringInfo *FuncInfo,
   if (std::max(TProb, FProb) / Threshold < std::min(TProb, FProb))
     return PPC::BR_NO_HINT;
 
-  LLVM_DEBUG(dbgs() << "Use branch hint for '" << FuncInfo->Fn->getName()
+  LLVM_DEBUG(dbgs() << "Use branch hint for '" << FuncInfo.Fn->getName()
                     << "::" << BB->getName() << "'\n"
                     << " -> " << TBB->getName() << ": " << TProb << "\n"
                     << " -> " << FBB->getName() << ": " << FProb << "\n");
@@ -2181,12 +2182,12 @@ class BitPermutationSelector {
 
         SDValue ANDIVal, ANDISVal;
         if (ANDIMask != 0)
-          ANDIVal = SDValue(CurDAG->getMachineNode(PPC::ANDIo8, dl, MVT::i64,
+          ANDIVal = SDValue(CurDAG->getMachineNode(PPC::ANDI8o, dl, MVT::i64,
                                                    ExtendToInt64(VRot, dl),
                                                    getI32Imm(ANDIMask, dl)),
                             0);
         if (ANDISMask != 0)
-          ANDISVal = SDValue(CurDAG->getMachineNode(PPC::ANDISo8, dl, MVT::i64,
+          ANDISVal = SDValue(CurDAG->getMachineNode(PPC::ANDIS8o, dl, MVT::i64,
                                                     ExtendToInt64(VRot, dl),
                                                     getI32Imm(ANDISMask, dl)),
                              0);
@@ -2330,10 +2331,10 @@ class BitPermutationSelector {
 
         SDValue ANDIVal, ANDISVal;
         if (ANDIMask != 0)
-          ANDIVal = SDValue(CurDAG->getMachineNode(PPC::ANDIo8, dl, MVT::i64,
+          ANDIVal = SDValue(CurDAG->getMachineNode(PPC::ANDI8o, dl, MVT::i64,
                               ExtendToInt64(Res, dl), getI32Imm(ANDIMask, dl)), 0);
         if (ANDISMask != 0)
-          ANDISVal = SDValue(CurDAG->getMachineNode(PPC::ANDISo8, dl, MVT::i64,
+          ANDISVal = SDValue(CurDAG->getMachineNode(PPC::ANDIS8o, dl, MVT::i64,
                                ExtendToInt64(Res, dl), getI32Imm(ANDISMask, dl)), 0);
 
         if (!ANDIVal)
@@ -2623,7 +2624,7 @@ SDNode *IntegerCompareEliminator::tryLogicOpOfCompares(SDNode *N) {
     assert((NewOpc != -1 || !IsBitwiseNegate) &&
            "No record form available for AND8/OR8/XOR8?");
     WideOp =
-      SDValue(CurDAG->getMachineNode(NewOpc == -1 ? PPC::ANDIo8 : NewOpc, dl,
+      SDValue(CurDAG->getMachineNode(NewOpc == -1 ? PPC::ANDI8o : NewOpc, dl,
                                      MVT::i64, MVT::Glue, LHS, RHS), 0);
   }
 
@@ -3597,7 +3598,7 @@ SDValue IntegerCompareEliminator::getSETCCInGPR(SDValue Compare,
 
   if (ConvOpts == SetccInGPROpts::ZExtInvert ||
       ConvOpts == SetccInGPROpts::SExtInvert)
-    CC = ISD::getSetCCInverse(CC, true);
+    CC = ISD::getSetCCInverse(CC, InputVT);
 
   bool Inputs32Bit = InputVT == MVT::i32;
 
@@ -4790,7 +4791,7 @@ void PPCDAGToDAGISel::Select(SDNode *N) {
     assert((InVT == MVT::i64 || InVT == MVT::i32) &&
            "Invalid input type for ANDIo_1_EQ_BIT");
 
-    unsigned Opcode = (InVT == MVT::i64) ? PPC::ANDIo8 : PPC::ANDIo;
+    unsigned Opcode = (InVT == MVT::i64) ? PPC::ANDI8o : PPC::ANDIo;
     SDValue AndI(CurDAG->getMachineNode(Opcode, dl, InVT, MVT::Glue,
                                         N->getOperand(0),
                                         CurDAG->getTargetConstant(1, dl, InVT)),
@@ -5002,7 +5003,7 @@ void PPCDAGToDAGISel::Select(SDNode *N) {
     // Prevent PPC::PRED_* from being selected into LI.
     unsigned PCC = cast<ConstantSDNode>(N->getOperand(1))->getZExtValue();
     if (EnableBranchHint)
-      PCC |= getBranchHint(PCC, FuncInfo, N->getOperand(3));
+      PCC |= getBranchHint(PCC, *FuncInfo, N->getOperand(3));
 
     SDValue Pred = getI32Imm(PCC, dl);
     SDValue Ops[] = { Pred, N->getOperand(2), N->getOperand(3),
@@ -5045,7 +5046,7 @@ void PPCDAGToDAGISel::Select(SDNode *N) {
     }
 
     if (EnableBranchHint)
-      PCC |= getBranchHint(PCC, FuncInfo, N->getOperand(4));
+      PCC |= getBranchHint(PCC, *FuncInfo, N->getOperand(4));
 
     SDValue CondCode = SelectCC(N->getOperand(2), N->getOperand(3), CC, dl);
     SDValue Ops[] = { getI32Imm(PCC, dl), CondCode,
@@ -6304,8 +6305,8 @@ void PPCDAGToDAGISel::PeepholePPC64ZExt() {
       case PPC::ORI:       NewOpcode = PPC::ORI8; break;
       case PPC::ORIS:      NewOpcode = PPC::ORIS8; break;
       case PPC::AND:       NewOpcode = PPC::AND8; break;
-      case PPC::ANDIo:     NewOpcode = PPC::ANDIo8; break;
-      case PPC::ANDISo:    NewOpcode = PPC::ANDISo8; break;
+      case PPC::ANDIo:     NewOpcode = PPC::ANDI8o; break;
+      case PPC::ANDISo:    NewOpcode = PPC::ANDIS8o; break;
       }
 
       // Note: During the replacement process, the nodes will be in an

@@ -58,8 +58,8 @@
 #include "VPRecipeBuilder.h"
 #include "VPlan.h"
 #include "VPlanHCFGBuilder.h"
-#include "VPlanHCFGTransforms.h"
 #include "VPlanPredicator.h"
+#include "VPlanTransforms.h"
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
@@ -428,6 +428,11 @@ public:
   /// new unrolled loop, where UF is the unroll factor.
   using VectorParts = SmallVector<Value *, 2>;
 
+  /// Vectorize a single GetElementPtrInst based on information gathered and
+  /// decisions taken during planning.
+  void widenGEP(GetElementPtrInst *GEP, unsigned UF, unsigned VF,
+                bool IsPtrLoopInvariant, SmallBitVector &IsIndexLoopInvariant);
+
   /// Vectorize a single PHINode in a block. This method handles the induction
   /// variable canonicalization. It supports both VF = 1 for unrolled loops and
   /// arbitrary length vectors.
@@ -525,6 +530,9 @@ protected:
   /// Fix a reduction cross-iteration phi. This is the second phase of
   /// vectorizing this phi node.
   void fixReduction(PHINode *Phi);
+
+  /// Clear NSW/NUW flags from reduction instructions if necessary.
+  void clearReductionWrapFlags(RecurrenceDescriptor &RdxDesc);
 
   /// The Loop exit block may have single value PHI nodes with some
   /// incoming value. While vectorizing we only handled real values
@@ -1205,14 +1213,14 @@ public:
 
   /// Returns true if the target machine supports masked scatter operation
   /// for the given \p DataType.
-  bool isLegalMaskedScatter(Type *DataType) {
-    return TTI.isLegalMaskedScatter(DataType);
+  bool isLegalMaskedScatter(Type *DataType, MaybeAlign Alignment) {
+    return TTI.isLegalMaskedScatter(DataType, Alignment);
   }
 
   /// Returns true if the target machine supports masked gather operation
   /// for the given \p DataType.
-  bool isLegalMaskedGather(Type *DataType) {
-    return TTI.isLegalMaskedGather(DataType);
+  bool isLegalMaskedGather(Type *DataType, MaybeAlign Alignment) {
+    return TTI.isLegalMaskedGather(DataType, Alignment);
   }
 
   /// Returns true if the target machine can represent \p V as a masked gather
@@ -1223,7 +1231,9 @@ public:
     if (!LI && !SI)
       return false;
     auto *Ty = getMemInstValueType(V);
-    return (LI && isLegalMaskedGather(Ty)) || (SI && isLegalMaskedScatter(Ty));
+    MaybeAlign Align = getLoadStoreAlignment(V);
+    return (LI && isLegalMaskedGather(Ty, Align)) ||
+           (SI && isLegalMaskedScatter(Ty, Align));
   }
 
   /// Returns true if \p I is an instruction that will be scalarized with
@@ -3551,17 +3561,27 @@ void InnerLoopVectorizer::fixFirstOrderRecurrence(PHINode *Phi) {
   // among all unrolled iterations, due to the order of their construction.
   Value *PreviousLastPart = getOrCreateVectorValue(Previous, UF - 1);
 
-  // Set the insertion point after the previous value if it is an instruction.
+  // Find and set the insertion point after the previous value if it is an
+  // instruction.
+  BasicBlock::iterator InsertPt;
   // Note that the previous value may have been constant-folded so it is not
-  // guaranteed to be an instruction in the vector loop. Also, if the previous
-  // value is a phi node, we should insert after all the phi nodes to avoid
-  // breaking basic block verification.
-  if (LI->getLoopFor(LoopVectorBody)->isLoopInvariant(PreviousLastPart) ||
-      isa<PHINode>(PreviousLastPart))
-    Builder.SetInsertPoint(&*LoopVectorBody->getFirstInsertionPt());
-  else
-    Builder.SetInsertPoint(
-        &*++BasicBlock::iterator(cast<Instruction>(PreviousLastPart)));
+  // guaranteed to be an instruction in the vector loop.
+  // FIXME: Loop invariant values do not form recurrences. We should deal with
+  //        them earlier.
+  if (LI->getLoopFor(LoopVectorBody)->isLoopInvariant(PreviousLastPart))
+    InsertPt = LoopVectorBody->getFirstInsertionPt();
+  else {
+    Instruction *PreviousInst = cast<Instruction>(PreviousLastPart);
+    if (isa<PHINode>(PreviousLastPart))
+      // If the previous value is a phi node, we should insert after all the phi
+      // nodes in the block containing the PHI to avoid breaking basic block
+      // verification. Note that the basic block may be different to
+      // LoopVectorBody, in case we predicate the loop.
+      InsertPt = PreviousInst->getParent()->getFirstInsertionPt();
+    else
+      InsertPt = ++PreviousInst->getIterator();
+  }
+  Builder.SetInsertPoint(&*InsertPt);
 
   // We will construct a vector for the recurrence by combining the values for
   // the current and previous iterations. This is the required shuffle mask.
@@ -3694,16 +3714,20 @@ void InnerLoopVectorizer::fixReduction(PHINode *Phi) {
     }
   }
 
+  // Wrap flags are in general invalid after vectorization, clear them.
+  clearReductionWrapFlags(RdxDesc);
+
   // Fix the vector-loop phi.
 
   // Reductions do not have to start at zero. They can start with
   // any loop invariant values.
   BasicBlock *Latch = OrigLoop->getLoopLatch();
   Value *LoopVal = Phi->getIncomingValueForBlock(Latch);
+
   for (unsigned Part = 0; Part < UF; ++Part) {
     Value *VecRdxPhi = getOrCreateVectorValue(Phi, Part);
     Value *Val = getOrCreateVectorValue(LoopVal, Part);
-    // Make sure to add the reduction stat value only to the
+    // Make sure to add the reduction start value only to the
     // first unroll part.
     Value *StartVal = (Part == 0) ? VectorStart : Identity;
     cast<PHINode>(VecRdxPhi)->addIncoming(StartVal, LoopVectorPreHeader);
@@ -3840,6 +3864,37 @@ void InnerLoopVectorizer::fixReduction(PHINode *Phi) {
   Phi->setIncomingValue(IncomingEdgeBlockIdx, LoopExitInst);
 }
 
+void InnerLoopVectorizer::clearReductionWrapFlags(
+    RecurrenceDescriptor &RdxDesc) {
+  RecurrenceDescriptor::RecurrenceKind RK = RdxDesc.getRecurrenceKind();
+  if (RK != RecurrenceDescriptor::RK_IntegerAdd &&
+      RK != RecurrenceDescriptor::RK_IntegerMult)
+    return;
+
+  Instruction *LoopExitInstr = RdxDesc.getLoopExitInstr();
+  assert(LoopExitInstr && "null loop exit instruction");
+  SmallVector<Instruction *, 8> Worklist;
+  SmallPtrSet<Instruction *, 8> Visited;
+  Worklist.push_back(LoopExitInstr);
+  Visited.insert(LoopExitInstr);
+
+  while (!Worklist.empty()) {
+    Instruction *Cur = Worklist.pop_back_val();
+    if (isa<OverflowingBinaryOperator>(Cur))
+      for (unsigned Part = 0; Part < UF; ++Part) {
+        Value *V = getOrCreateVectorValue(Cur, Part);
+        cast<Instruction>(V)->dropPoisonGeneratingFlags();
+      }
+
+    for (User *U : Cur->users()) {
+      Instruction *UI = cast<Instruction>(U);
+      if ((Cur != LoopExitInstr || OrigLoop->contains(UI->getParent())) &&
+          Visited.insert(UI).second)
+        Worklist.push_back(UI);
+    }
+  }
+}
+
 void InnerLoopVectorizer::fixLCSSAPHIs() {
   for (PHINode &LCSSAPhi : LoopExitBlock->phis()) {
     if (LCSSAPhi.getNumIncomingValues() == 1) {
@@ -3961,6 +4016,75 @@ void InnerLoopVectorizer::fixNonInductionPHIs() {
   }
 }
 
+void InnerLoopVectorizer::widenGEP(GetElementPtrInst *GEP, unsigned UF,
+                                   unsigned VF, bool IsPtrLoopInvariant,
+                                   SmallBitVector &IsIndexLoopInvariant) {
+  // Construct a vector GEP by widening the operands of the scalar GEP as
+  // necessary. We mark the vector GEP 'inbounds' if appropriate. A GEP
+  // results in a vector of pointers when at least one operand of the GEP
+  // is vector-typed. Thus, to keep the representation compact, we only use
+  // vector-typed operands for loop-varying values.
+
+  if (VF > 1 && IsPtrLoopInvariant && IsIndexLoopInvariant.all()) {
+    // If we are vectorizing, but the GEP has only loop-invariant operands,
+    // the GEP we build (by only using vector-typed operands for
+    // loop-varying values) would be a scalar pointer. Thus, to ensure we
+    // produce a vector of pointers, we need to either arbitrarily pick an
+    // operand to broadcast, or broadcast a clone of the original GEP.
+    // Here, we broadcast a clone of the original.
+    //
+    // TODO: If at some point we decide to scalarize instructions having
+    //       loop-invariant operands, this special case will no longer be
+    //       required. We would add the scalarization decision to
+    //       collectLoopScalars() and teach getVectorValue() to broadcast
+    //       the lane-zero scalar value.
+    auto *Clone = Builder.Insert(GEP->clone());
+    for (unsigned Part = 0; Part < UF; ++Part) {
+      Value *EntryPart = Builder.CreateVectorSplat(VF, Clone);
+      VectorLoopValueMap.setVectorValue(GEP, Part, EntryPart);
+      addMetadata(EntryPart, GEP);
+    }
+  } else {
+    // If the GEP has at least one loop-varying operand, we are sure to
+    // produce a vector of pointers. But if we are only unrolling, we want
+    // to produce a scalar GEP for each unroll part. Thus, the GEP we
+    // produce with the code below will be scalar (if VF == 1) or vector
+    // (otherwise). Note that for the unroll-only case, we still maintain
+    // values in the vector mapping with initVector, as we do for other
+    // instructions.
+    for (unsigned Part = 0; Part < UF; ++Part) {
+      // The pointer operand of the new GEP. If it's loop-invariant, we
+      // won't broadcast it.
+      auto *Ptr = IsPtrLoopInvariant
+                      ? GEP->getPointerOperand()
+                      : getOrCreateVectorValue(GEP->getPointerOperand(), Part);
+
+      // Collect all the indices for the new GEP. If any index is
+      // loop-invariant, we won't broadcast it.
+      SmallVector<Value *, 4> Indices;
+      for (auto Index : enumerate(GEP->indices())) {
+        Value *User = Index.value().get();
+        if (IsIndexLoopInvariant[Index.index()])
+          Indices.push_back(User);
+        else
+          Indices.push_back(getOrCreateVectorValue(User, Part));
+      }
+
+      // Create the new GEP. Note that this GEP may be a scalar if VF == 1,
+      // but it should be a vector, otherwise.
+      auto *NewGEP =
+          GEP->isInBounds()
+              ? Builder.CreateInBoundsGEP(GEP->getSourceElementType(), Ptr,
+                                          Indices)
+              : Builder.CreateGEP(GEP->getSourceElementType(), Ptr, Indices);
+      assert((VF == 1 || NewGEP->getType()->isVectorTy()) &&
+             "NewGEP is not a pointer vector");
+      VectorLoopValueMap.setVectorValue(GEP, Part, NewGEP);
+      addMetadata(NewGEP, GEP);
+    }
+  }
+}
+
 void InnerLoopVectorizer::widenPHIInstruction(Instruction *PN, unsigned UF,
                                               unsigned VF) {
   PHINode *P = cast<PHINode>(PN);
@@ -4063,76 +4187,8 @@ void InnerLoopVectorizer::widenInstruction(Instruction &I) {
   switch (I.getOpcode()) {
   case Instruction::Br:
   case Instruction::PHI:
+  case Instruction::GetElementPtr:
     llvm_unreachable("This instruction is handled by a different recipe.");
-  case Instruction::GetElementPtr: {
-    // Construct a vector GEP by widening the operands of the scalar GEP as
-    // necessary. We mark the vector GEP 'inbounds' if appropriate. A GEP
-    // results in a vector of pointers when at least one operand of the GEP
-    // is vector-typed. Thus, to keep the representation compact, we only use
-    // vector-typed operands for loop-varying values.
-    auto *GEP = cast<GetElementPtrInst>(&I);
-
-    if (VF > 1 && OrigLoop->hasLoopInvariantOperands(GEP)) {
-      // If we are vectorizing, but the GEP has only loop-invariant operands,
-      // the GEP we build (by only using vector-typed operands for
-      // loop-varying values) would be a scalar pointer. Thus, to ensure we
-      // produce a vector of pointers, we need to either arbitrarily pick an
-      // operand to broadcast, or broadcast a clone of the original GEP.
-      // Here, we broadcast a clone of the original.
-      //
-      // TODO: If at some point we decide to scalarize instructions having
-      //       loop-invariant operands, this special case will no longer be
-      //       required. We would add the scalarization decision to
-      //       collectLoopScalars() and teach getVectorValue() to broadcast
-      //       the lane-zero scalar value.
-      auto *Clone = Builder.Insert(GEP->clone());
-      for (unsigned Part = 0; Part < UF; ++Part) {
-        Value *EntryPart = Builder.CreateVectorSplat(VF, Clone);
-        VectorLoopValueMap.setVectorValue(&I, Part, EntryPart);
-        addMetadata(EntryPart, GEP);
-      }
-    } else {
-      // If the GEP has at least one loop-varying operand, we are sure to
-      // produce a vector of pointers. But if we are only unrolling, we want
-      // to produce a scalar GEP for each unroll part. Thus, the GEP we
-      // produce with the code below will be scalar (if VF == 1) or vector
-      // (otherwise). Note that for the unroll-only case, we still maintain
-      // values in the vector mapping with initVector, as we do for other
-      // instructions.
-      for (unsigned Part = 0; Part < UF; ++Part) {
-        // The pointer operand of the new GEP. If it's loop-invariant, we
-        // won't broadcast it.
-        auto *Ptr =
-            OrigLoop->isLoopInvariant(GEP->getPointerOperand())
-                ? GEP->getPointerOperand()
-                : getOrCreateVectorValue(GEP->getPointerOperand(), Part);
-
-        // Collect all the indices for the new GEP. If any index is
-        // loop-invariant, we won't broadcast it.
-        SmallVector<Value *, 4> Indices;
-        for (auto &U : make_range(GEP->idx_begin(), GEP->idx_end())) {
-          if (OrigLoop->isLoopInvariant(U.get()))
-            Indices.push_back(U.get());
-          else
-            Indices.push_back(getOrCreateVectorValue(U.get(), Part));
-        }
-
-        // Create the new GEP. Note that this GEP may be a scalar if VF == 1,
-        // but it should be a vector, otherwise.
-        auto *NewGEP =
-            GEP->isInBounds()
-                ? Builder.CreateInBoundsGEP(GEP->getSourceElementType(), Ptr,
-                                            Indices)
-                : Builder.CreateGEP(GEP->getSourceElementType(), Ptr, Indices);
-        assert((VF == 1 || NewGEP->getType()->isVectorTy()) &&
-               "NewGEP is not a pointer vector");
-        VectorLoopValueMap.setVectorValue(&I, Part, NewGEP);
-        addMetadata(NewGEP, GEP);
-      }
-    }
-
-    break;
-  }
   case Instruction::UDiv:
   case Instruction::SDiv:
   case Instruction::SRem:
@@ -4563,9 +4619,10 @@ bool LoopVectorizationCostModel::isScalarWithPredication(Instruction *I, unsigne
       return WideningDecision == CM_Scalarize;
     }
     const MaybeAlign Alignment = getLoadStoreAlignment(I);
-    return isa<LoadInst>(I) ?
-        !(isLegalMaskedLoad(Ty, Ptr, Alignment) || isLegalMaskedGather(Ty))
-      : !(isLegalMaskedStore(Ty, Ptr, Alignment) || isLegalMaskedScatter(Ty));
+    return isa<LoadInst>(I) ? !(isLegalMaskedLoad(Ty, Ptr, Alignment) ||
+                                isLegalMaskedGather(Ty, Alignment))
+                            : !(isLegalMaskedStore(Ty, Ptr, Alignment) ||
+                                isLegalMaskedScatter(Ty, Alignment));
   }
   case Instruction::UDiv:
   case Instruction::SDiv:
@@ -4668,14 +4725,26 @@ void LoopVectorizationCostModel::collectLoopUniforms(unsigned VF) {
   SetVector<Instruction *> Worklist;
   BasicBlock *Latch = TheLoop->getLoopLatch();
 
+  // Instructions that are scalar with predication must not be considered
+  // uniform after vectorization, because that would create an erroneous
+  // replicating region where only a single instance out of VF should be formed.
+  // TODO: optimize such seldom cases if found important, see PR40816.
+  auto addToWorklistIfAllowed = [&](Instruction *I) -> void {
+    if (isScalarWithPredication(I, VF)) {
+      LLVM_DEBUG(dbgs() << "LV: Found not uniform being ScalarWithPredication: "
+                        << *I << "\n");
+      return;
+    }
+    LLVM_DEBUG(dbgs() << "LV: Found uniform instruction: " << *I << "\n");
+    Worklist.insert(I);
+  };
+
   // Start with the conditional branch. If the branch condition is an
   // instruction contained in the loop that is only used by the branch, it is
   // uniform.
   auto *Cmp = dyn_cast<Instruction>(Latch->getTerminator()->getOperand(0));
-  if (Cmp && TheLoop->contains(Cmp) && Cmp->hasOneUse()) {
-    Worklist.insert(Cmp);
-    LLVM_DEBUG(dbgs() << "LV: Found uniform instruction: " << *Cmp << "\n");
-  }
+  if (Cmp && TheLoop->contains(Cmp) && Cmp->hasOneUse())
+    addToWorklistIfAllowed(Cmp);
 
   // Holds consecutive and consecutive-like pointers. Consecutive-like pointers
   // are pointers that are treated like consecutive pointers during
@@ -4734,10 +4803,8 @@ void LoopVectorizationCostModel::collectLoopUniforms(unsigned VF) {
   // Add to the Worklist all consecutive and consecutive-like pointers that
   // aren't also identified as possibly non-uniform.
   for (auto *V : ConsecutiveLikePtrs)
-    if (PossibleNonUniformPtrs.find(V) == PossibleNonUniformPtrs.end()) {
-      LLVM_DEBUG(dbgs() << "LV: Found uniform instruction: " << *V << "\n");
-      Worklist.insert(V);
-    }
+    if (PossibleNonUniformPtrs.find(V) == PossibleNonUniformPtrs.end())
+      addToWorklistIfAllowed(V);
 
   // Expand Worklist in topological order: whenever a new instruction
   // is added , its users should be already inside Worklist.  It ensures
@@ -4763,10 +4830,8 @@ void LoopVectorizationCostModel::collectLoopUniforms(unsigned VF) {
             return Worklist.count(J) ||
                    (OI == getLoadStorePointerOperand(J) &&
                     isUniformDecision(J, VF));
-          })) {
-        Worklist.insert(OI);
-        LLVM_DEBUG(dbgs() << "LV: Found uniform instruction: " << *OI << "\n");
-      }
+          }))
+        addToWorklistIfAllowed(OI);
     }
   }
 
@@ -4808,11 +4873,8 @@ void LoopVectorizationCostModel::collectLoopUniforms(unsigned VF) {
       continue;
 
     // The induction variable and its update instruction will remain uniform.
-    Worklist.insert(Ind);
-    Worklist.insert(IndUpdate);
-    LLVM_DEBUG(dbgs() << "LV: Found uniform instruction: " << *Ind << "\n");
-    LLVM_DEBUG(dbgs() << "LV: Found uniform instruction: " << *IndUpdate
-                      << "\n");
+    addToWorklistIfAllowed(Ind);
+    addToWorklistIfAllowed(IndUpdate);
   }
 
   Uniforms[VF].insert(Worklist.begin(), Worklist.end());
@@ -6213,7 +6275,7 @@ unsigned LoopVectorizationCostModel::getInstructionCost(Instruction *I,
     unsigned N = isScalarAfterVectorization(I, VF) ? VF : 1;
     return N * TTI.getArithmeticInstrCost(
                    I->getOpcode(), VectorTy, TargetTransformInfo::OK_AnyValue,
-                   Op2VK, TargetTransformInfo::OP_None, Op2VP, Operands);
+                   Op2VK, TargetTransformInfo::OP_None, Op2VP, Operands, I);
   }
   case Instruction::FNeg: {
     unsigned N = isScalarAfterVectorization(I, VF) ? VF : 1;
@@ -6221,7 +6283,7 @@ unsigned LoopVectorizationCostModel::getInstructionCost(Instruction *I,
                    I->getOpcode(), VectorTy, TargetTransformInfo::OK_AnyValue,
                    TargetTransformInfo::OK_AnyValue,
                    TargetTransformInfo::OP_None, TargetTransformInfo::OP_None,
-                   I->getOperand(0));
+                   I->getOperand(0), I);
   }
   case Instruction::Select: {
     SelectInst *SI = cast<SelectInst>(I);
@@ -6826,7 +6888,6 @@ bool VPRecipeBuilder::tryToWiden(Instruction *I, VPBasicBlock *VPBB,
     case Instruction::FPTrunc:
     case Instruction::FRem:
     case Instruction::FSub:
-    case Instruction::GetElementPtr:
     case Instruction::ICmp:
     case Instruction::IntToPtr:
     case Instruction::Load:
@@ -6891,12 +6952,13 @@ bool VPRecipeBuilder::tryToWiden(Instruction *I, VPBasicBlock *VPBB,
 
   if (!LoopVectorizationPlanner::getDecisionAndClampRange(willWiden, Range))
     return false;
-
   // If this ingredient's recipe is to be recorded, keep its recipe a singleton
   // to avoid having to split recipes later.
   bool IsSingleton = Ingredient2Recipe.count(I);
 
-  // Success: widen this instruction. We optimize the common case where
+  // Success: widen this instruction.
+
+  // Use the default widening recipe. We optimize the common case where
   // consecutive instructions can be represented by a single recipe.
   if (!IsSingleton && !VPBB->empty() && LastExtensibleRecipe == &VPBB->back() &&
       LastExtensibleRecipe->appendInstruction(I))
@@ -6994,7 +7056,23 @@ bool VPRecipeBuilder::tryToCreateRecipe(Instruction *Instr, VFRange &Range,
     return true;
   }
 
-  // Check if Instr is to be widened by a general VPWidenRecipe.
+  // Handle GEP widening.
+  if (GetElementPtrInst *GEP = dyn_cast<GetElementPtrInst>(Instr)) {
+    auto Scalarize = [&](unsigned VF) {
+      return CM.isScalarWithPredication(Instr, VF) ||
+             CM.isScalarAfterVectorization(Instr, VF) ||
+             CM.isProfitableToScalarize(Instr, VF);
+    };
+    if (LoopVectorizationPlanner::getDecisionAndClampRange(Scalarize, Range))
+      return false;
+    VPWidenGEPRecipe *Recipe = new VPWidenGEPRecipe(GEP, OrigLoop);
+    setRecipe(Instr, Recipe);
+    VPBB->appendRecipe(Recipe);
+    return true;
+  }
+
+  // Check if Instr is to be widened by a general VPWidenRecipe, after
+  // having first checked for specific widening recipes.
   if (tryToWiden(Instr, VPBB, Range))
     return true;
 
@@ -7235,9 +7313,8 @@ VPlanPtr LoopVectorizationPlanner::buildVPlan(VFRange &Range) {
   }
 
   SmallPtrSet<Instruction *, 1> DeadInstructions;
-  VPlanHCFGTransforms::VPInstructionsToVPRecipes(
-      Plan, Legal->getInductionVars(), DeadInstructions);
-
+  VPlanTransforms::VPInstructionsToVPRecipes(
+      OrigLoop, Plan, Legal->getInductionVars(), DeadInstructions);
   return Plan;
 }
 
@@ -7264,6 +7341,11 @@ void VPInterleaveRecipe::print(raw_ostream &O, const Twine &Indent) const {
 void VPWidenRecipe::execute(VPTransformState &State) {
   for (auto &Instr : make_range(Begin, End))
     State.ILV->widenInstruction(Instr);
+}
+
+void VPWidenGEPRecipe::execute(VPTransformState &State) {
+  State.ILV->widenGEP(GEP, State.UF, State.VF, IsPtrLoopInvariant,
+                      IsIndexLoopInvariant);
 }
 
 void VPWidenIntOrFpInductionRecipe::execute(VPTransformState &State) {
@@ -7434,7 +7516,8 @@ getScalarEpilogueLowering(Function *F, Loop *L, LoopVectorizeHints &Hints,
 
   if (Hints.getForce() != LoopVectorizeHints::FK_Enabled &&
       (F->hasOptSize() ||
-       llvm::shouldOptimizeForSize(L->getHeader(), PSI, BFI)))
+       llvm::shouldOptimizeForSize(L->getHeader(), PSI, BFI,
+                                   PGSOQueryType::IRPass)))
     SEL = CM_ScalarEpilogueNotAllowedOptSize;
   else if (PreferPredicateOverEpilog ||
            Hints.getPredicate() == LoopVectorizeHints::FK_Enabled ||

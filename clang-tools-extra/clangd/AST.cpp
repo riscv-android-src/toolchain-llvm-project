@@ -11,6 +11,8 @@
 #include "SourceCode.h"
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/Decl.h"
+#include "clang/AST/DeclBase.h"
+#include "clang/AST/DeclCXX.h"
 #include "clang/AST/DeclTemplate.h"
 #include "clang/AST/DeclarationName.h"
 #include "clang/AST/NestedNameSpecifier.h"
@@ -22,10 +24,15 @@
 #include "clang/Basic/Specifiers.h"
 #include "clang/Index/USRGeneration.h"
 #include "clang/Lex/Lexer.h"
+#include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/Optional.h"
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/ScopedPrinter.h"
 #include "llvm/Support/raw_ostream.h"
+#include <string>
+#include <vector>
 
 namespace clang {
 namespace clangd {
@@ -67,6 +74,74 @@ bool isTemplateSpecializationKind(const NamedDecl *D,
          isTemplateSpecializationKind<VarDecl>(D, Kind);
 }
 
+// Store all UsingDirectiveDecls in parent contexts of DestContext, that were
+// introduced before InsertionPoint.
+llvm::DenseSet<const NamespaceDecl *>
+getUsingNamespaceDirectives(const DeclContext *DestContext,
+                            SourceLocation Until) {
+  const auto &SM = DestContext->getParentASTContext().getSourceManager();
+  llvm::DenseSet<const NamespaceDecl *> VisibleNamespaceDecls;
+  for (const auto *DC = DestContext; DC; DC = DC->getLookupParent()) {
+    for (const auto *D : DC->decls()) {
+      if (!SM.isWrittenInSameFile(D->getLocation(), Until) ||
+          !SM.isBeforeInTranslationUnit(D->getLocation(), Until))
+        continue;
+      if (auto *UDD = llvm::dyn_cast<UsingDirectiveDecl>(D))
+        VisibleNamespaceDecls.insert(
+            UDD->getNominatedNamespace()->getCanonicalDecl());
+    }
+  }
+  return VisibleNamespaceDecls;
+}
+
+// Goes over all parents of SourceContext until we find a comman ancestor for
+// DestContext and SourceContext. Any qualifier including and above common
+// ancestor is redundant, therefore we stop at lowest common ancestor.
+// In addition to that stops early whenever IsVisible returns true. This can be
+// used to implement support for "using namespace" decls.
+std::string
+getQualification(ASTContext &Context, const DeclContext *DestContext,
+                 const DeclContext *SourceContext,
+                 llvm::function_ref<bool(NestedNameSpecifier *)> IsVisible) {
+  std::vector<const NestedNameSpecifier *> Parents;
+  bool ReachedNS = false;
+  for (const DeclContext *CurContext = SourceContext; CurContext;
+       CurContext = CurContext->getLookupParent()) {
+    // Stop once we reach a common ancestor.
+    if (CurContext->Encloses(DestContext))
+      break;
+
+    NestedNameSpecifier *NNS = nullptr;
+    if (auto *TD = llvm::dyn_cast<TagDecl>(CurContext)) {
+      // There can't be any more tag parents after hitting a namespace.
+      assert(!ReachedNS);
+      NNS = NestedNameSpecifier::Create(Context, nullptr, false,
+                                        TD->getTypeForDecl());
+    } else {
+      ReachedNS = true;
+      auto *NSD = llvm::cast<NamespaceDecl>(CurContext);
+      NNS = NestedNameSpecifier::Create(Context, nullptr, NSD);
+      // Anonymous and inline namespace names are not spelled while qualifying a
+      // name, so skip those.
+      if (NSD->isAnonymousNamespace() || NSD->isInlineNamespace())
+        continue;
+    }
+    // Stop if this namespace is already visible at DestContext.
+    if (IsVisible(NNS))
+      break;
+
+    Parents.push_back(NNS);
+  }
+
+  // Go over name-specifiers in reverse order to create necessary qualification,
+  // since we stored inner-most parent first.
+  std::string Result;
+  llvm::raw_string_ostream OS(Result);
+  for (const auto *Parent : llvm::reverse(Parents))
+    Parent->print(OS, Context.getPrintingPolicy());
+  return OS.str();
+}
+
 } // namespace
 
 bool isImplicitTemplateInstantiation(const NamedDecl *D) {
@@ -82,8 +157,11 @@ bool isImplementationDetail(const Decl *D) {
                             D->getASTContext().getSourceManager());
 }
 
-SourceLocation findName(const clang::Decl *D) {
-  return D->getLocation();
+SourceLocation nameLocation(const clang::Decl &D, const SourceManager &SM) {
+  auto L = D.getLocation();
+  if (isSpelledInSource(L, SM))
+    return SM.getSpellingLoc(L);
+  return SM.getExpansionLoc(L);
 }
 
 std::string printQualifiedName(const NamedDecl &ND) {
@@ -145,8 +223,11 @@ std::string printName(const ASTContext &Ctx, const NamedDecl &ND) {
     // Come up with a presentation for an anonymous entity.
     if (isa<NamespaceDecl>(ND))
       return "(anonymous namespace)";
-    if (auto *Cls = llvm::dyn_cast<RecordDecl>(&ND))
+    if (auto *Cls = llvm::dyn_cast<RecordDecl>(&ND)) {
+      if (Cls->isLambda())
+        return "(lambda)";
       return ("(anonymous " + Cls->getKindName() + ")").str();
+    }
     if (isa<EnumDecl>(ND))
       return "(anonymous enum)";
     return "(anonymous)";
@@ -229,7 +310,7 @@ std::string shortenNamespace(const llvm::StringRef OriginalName,
 
   unsigned DifferentAt = 0;
   while (DifferentAt < MinLength &&
-      CurrentParts[DifferentAt] == OriginalParts[DifferentAt]) {
+         CurrentParts[DifferentAt] == OriginalParts[DifferentAt]) {
     DifferentAt++;
   }
 
@@ -239,13 +320,11 @@ std::string shortenNamespace(const llvm::StringRef OriginalName,
   return join(Result, "::");
 }
 
-std::string printType(const QualType QT, const DeclContext & Context){
+std::string printType(const QualType QT, const DeclContext &Context) {
   PrintingPolicy PP(Context.getParentASTContext().getPrintingPolicy());
   PP.SuppressUnwrittenScope = 1;
   PP.SuppressTagKeyword = 1;
-  return shortenNamespace(
-      QT.getAsString(PP),
-      printNamespaceScope(Context) );
+  return shortenNamespace(QT.getAsString(PP), printNamespaceScope(Context));
 }
 
 QualType declaredType(const TypeDecl *D) {
@@ -302,7 +381,7 @@ public:
     // Loc of "auto" in operator auto()
     if (CurLoc.isInvalid() && dyn_cast<CXXConversionDecl>(D))
       CurLoc = D->getTypeSourceInfo()->getTypeLoc().getBeginLoc();
-    // Loc of "auto" in function with traling return type (c++11).
+    // Loc of "auto" in function with trailing return type (c++11).
     if (CurLoc.isInvalid())
       CurLoc = D->getSourceRange().getBegin();
     if (CurLoc != SearchedLocation)
@@ -362,6 +441,45 @@ llvm::Optional<QualType> getDeducedType(ASTContext &ASTCtx,
   if (V.DeducedType.isNull())
     return llvm::None;
   return V.DeducedType;
+}
+
+std::string getQualification(ASTContext &Context,
+                             const DeclContext *DestContext,
+                             SourceLocation InsertionPoint,
+                             const NamedDecl *ND) {
+  auto VisibleNamespaceDecls =
+      getUsingNamespaceDirectives(DestContext, InsertionPoint);
+  return getQualification(
+      Context, DestContext, ND->getDeclContext(),
+      [&](NestedNameSpecifier *NNS) {
+        if (NNS->getKind() != NestedNameSpecifier::Namespace)
+          return false;
+        const auto *CanonNSD = NNS->getAsNamespace()->getCanonicalDecl();
+        return llvm::any_of(VisibleNamespaceDecls,
+                            [CanonNSD](const NamespaceDecl *NSD) {
+                              return NSD->getCanonicalDecl() == CanonNSD;
+                            });
+      });
+}
+
+std::string getQualification(ASTContext &Context,
+                             const DeclContext *DestContext,
+                             SourceLocation InsertionPoint, const NamedDecl *ND,
+                             llvm::ArrayRef<std::string> VisibleNamespaces) {
+  for (llvm::StringRef NS : VisibleNamespaces) {
+    assert(NS.endswith("::"));
+    (void)NS;
+  }
+  return getQualification(
+      Context, DestContext, ND->getDeclContext(),
+      [&](NestedNameSpecifier *NNS) {
+        return llvm::any_of(VisibleNamespaces, [&](llvm::StringRef Namespace) {
+          std::string NS;
+          llvm::raw_string_ostream OS(NS);
+          NNS->print(OS, Context.getPrintingPolicy());
+          return OS.str() == Namespace;
+        });
+      });
 }
 
 } // namespace clangd

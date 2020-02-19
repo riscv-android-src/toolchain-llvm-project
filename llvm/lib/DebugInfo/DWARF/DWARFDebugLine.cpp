@@ -453,14 +453,18 @@ DWARFDebugLine::LineTable::LineTable() { clear(); }
 void DWARFDebugLine::LineTable::dump(raw_ostream &OS,
                                      DIDumpOptions DumpOptions) const {
   Prologue.dump(OS, DumpOptions);
-  OS << '\n';
 
   if (!Rows.empty()) {
+    OS << '\n';
     Row::dumpTableHeader(OS);
     for (const Row &R : Rows) {
       R.dump(OS);
     }
   }
+
+  // Terminate the table with a final blank line to clearly delineate it from
+  // later dumps.
+  OS << '\n';
 }
 
 void DWARFDebugLine::LineTable::clear() {
@@ -595,12 +599,12 @@ Error DWARFDebugLine::LineTable::parse(
         // address is that of the byte after the last target machine instruction
         // of the sequence.
         State.Row.EndSequence = true;
-        State.appendRowToMatrix();
         if (OS) {
           *OS << "\n";
           OS->indent(12);
           State.Row.dump(*OS);
         }
+        State.appendRowToMatrix();
         State.resetRowAndSequence();
         break;
 
@@ -813,7 +817,7 @@ Error DWARFDebugLine::LineTable::parse(
         // column register of the state machine.
         State.Row.Isa = DebugLineData.getULEB128(OffsetPtr);
         if (OS)
-          *OS << " (" << State.Row.Isa << ")";
+          *OS << " (" << (uint64_t)State.Row.Isa << ")";
         break;
 
       default:

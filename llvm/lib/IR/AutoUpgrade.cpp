@@ -22,6 +22,9 @@
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/IntrinsicInst.h"
+#include "llvm/IR/IntrinsicsAArch64.h"
+#include "llvm/IR/IntrinsicsARM.h"
+#include "llvm/IR/IntrinsicsX86.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Verifier.h"
@@ -557,6 +560,26 @@ static bool UpgradeIntrinsicFunction1(Function *F, Function *&NewFn) {
     }
     if (Name == "aarch64.thread.pointer" || Name == "arm.thread.pointer") {
       NewFn = Intrinsic::getDeclaration(F->getParent(), Intrinsic::thread_pointer);
+      return true;
+    }
+    if (Name.startswith("arm.neon.vqadds.")) {
+      NewFn = Intrinsic::getDeclaration(F->getParent(), Intrinsic::sadd_sat,
+                                        F->arg_begin()->getType());
+      return true;
+    }
+    if (Name.startswith("arm.neon.vqaddu.")) {
+      NewFn = Intrinsic::getDeclaration(F->getParent(), Intrinsic::uadd_sat,
+                                        F->arg_begin()->getType());
+      return true;
+    }
+    if (Name.startswith("arm.neon.vqsubs.")) {
+      NewFn = Intrinsic::getDeclaration(F->getParent(), Intrinsic::ssub_sat,
+                                        F->arg_begin()->getType());
+      return true;
+    }
+    if (Name.startswith("arm.neon.vqsubu.")) {
+      NewFn = Intrinsic::getDeclaration(F->getParent(), Intrinsic::usub_sat,
+                                        F->arg_begin()->getType());
       return true;
     }
     if (Name.startswith("aarch64.neon.addp")) {

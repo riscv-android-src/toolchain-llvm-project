@@ -231,6 +231,11 @@ public:
   TargetLoweringBase &operator=(const TargetLoweringBase &) = delete;
   virtual ~TargetLoweringBase() = default;
 
+  /// Return true if the target support strict float operation
+  bool isStrictFPEnabled() const {
+    return IsStrictFPEnabled;
+  }
+
 protected:
   /// Initialize all of the actions to default values.
   void initActions();
@@ -946,6 +951,8 @@ public:
       default: llvm_unreachable("Unexpected FP pseudo-opcode");
 #define INSTRUCTION(NAME, NARG, ROUND_MODE, INTRINSIC, DAGN)                   \
       case ISD::STRICT_##DAGN: EqOpc = ISD::DAGN; break;
+#define CMP_INSTRUCTION(NAME, NARG, ROUND_MODE, INTRINSIC, DAGN)               \
+      case ISD::STRICT_##DAGN: EqOpc = ISD::SETCC; break;
 #include "llvm/IR/ConstrainedOps.def"
     }
 
@@ -1105,12 +1112,8 @@ public:
   /// Return how the indexed load should be treated: either it is legal, needs
   /// to be promoted to a larger size, needs to be expanded to some other code
   /// sequence, or the target has a custom expander for it.
-  LegalizeAction
-  getIndexedLoadAction(unsigned IdxMode, MVT VT) const {
-    assert(IdxMode < ISD::LAST_INDEXED_MODE && VT.isValid() &&
-           "Table isn't big enough!");
-    unsigned Ty = (unsigned)VT.SimpleTy;
-    return (LegalizeAction)((IndexedModeActions[Ty][IdxMode] & 0xf0) >> 4);
+  LegalizeAction getIndexedLoadAction(unsigned IdxMode, MVT VT) const {
+    return getIndexedModeAction(IdxMode, VT, IMAB_Load);
   }
 
   /// Return true if the specified indexed load is legal on this target.
@@ -1123,12 +1126,8 @@ public:
   /// Return how the indexed store should be treated: either it is legal, needs
   /// to be promoted to a larger size, needs to be expanded to some other code
   /// sequence, or the target has a custom expander for it.
-  LegalizeAction
-  getIndexedStoreAction(unsigned IdxMode, MVT VT) const {
-    assert(IdxMode < ISD::LAST_INDEXED_MODE && VT.isValid() &&
-           "Table isn't big enough!");
-    unsigned Ty = (unsigned)VT.SimpleTy;
-    return (LegalizeAction)(IndexedModeActions[Ty][IdxMode] & 0x0f);
+  LegalizeAction getIndexedStoreAction(unsigned IdxMode, MVT VT) const {
+    return getIndexedModeAction(IdxMode, VT, IMAB_Store);
   }
 
   /// Return true if the specified indexed load is legal on this target.
@@ -1136,6 +1135,34 @@ public:
     return VT.isSimple() &&
       (getIndexedStoreAction(IdxMode, VT.getSimpleVT()) == Legal ||
        getIndexedStoreAction(IdxMode, VT.getSimpleVT()) == Custom);
+  }
+
+  /// Return how the indexed load should be treated: either it is legal, needs
+  /// to be promoted to a larger size, needs to be expanded to some other code
+  /// sequence, or the target has a custom expander for it.
+  LegalizeAction getIndexedMaskedLoadAction(unsigned IdxMode, MVT VT) const {
+    return getIndexedModeAction(IdxMode, VT, IMAB_MaskedLoad);
+  }
+
+  /// Return true if the specified indexed load is legal on this target.
+  bool isIndexedMaskedLoadLegal(unsigned IdxMode, EVT VT) const {
+    return VT.isSimple() &&
+           (getIndexedMaskedLoadAction(IdxMode, VT.getSimpleVT()) == Legal ||
+            getIndexedMaskedLoadAction(IdxMode, VT.getSimpleVT()) == Custom);
+  }
+
+  /// Return how the indexed store should be treated: either it is legal, needs
+  /// to be promoted to a larger size, needs to be expanded to some other code
+  /// sequence, or the target has a custom expander for it.
+  LegalizeAction getIndexedMaskedStoreAction(unsigned IdxMode, MVT VT) const {
+    return getIndexedModeAction(IdxMode, VT, IMAB_MaskedStore);
+  }
+
+  /// Return true if the specified indexed load is legal on this target.
+  bool isIndexedMaskedStoreLegal(unsigned IdxMode, EVT VT) const {
+    return VT.isSimple() &&
+           (getIndexedMaskedStoreAction(IdxMode, VT.getSimpleVT()) == Legal ||
+            getIndexedMaskedStoreAction(IdxMode, VT.getSimpleVT()) == Custom);
   }
 
   /// Return how the condition code should be treated: either it is legal, needs
@@ -1227,7 +1254,7 @@ public:
         Elm = PointerTy.getTypeForEVT(Ty->getContext());
       }
       return EVT::getVectorVT(Ty->getContext(), EVT::getEVT(Elm, false),
-                       VTy->getNumElements());
+                              VTy->getElementCount());
     }
 
     return getValueType(DL, Ty, AllowUnknown);
@@ -2025,13 +2052,8 @@ protected:
   ///
   /// NOTE: All indexed mode loads are initialized to Expand in
   /// TargetLowering.cpp
-  void setIndexedLoadAction(unsigned IdxMode, MVT VT,
-                            LegalizeAction Action) {
-    assert(VT.isValid() && IdxMode < ISD::LAST_INDEXED_MODE &&
-           (unsigned)Action < 0xf && "Table isn't big enough!");
-    // Load action are kept in the upper half.
-    IndexedModeActions[(unsigned)VT.SimpleTy][IdxMode] &= ~0xf0;
-    IndexedModeActions[(unsigned)VT.SimpleTy][IdxMode] |= ((uint8_t)Action) <<4;
+  void setIndexedLoadAction(unsigned IdxMode, MVT VT, LegalizeAction Action) {
+    setIndexedModeAction(IdxMode, VT, IMAB_Load, Action);
   }
 
   /// Indicate that the specified indexed store does or does not work with the
@@ -2039,13 +2061,28 @@ protected:
   ///
   /// NOTE: All indexed mode stores are initialized to Expand in
   /// TargetLowering.cpp
-  void setIndexedStoreAction(unsigned IdxMode, MVT VT,
-                             LegalizeAction Action) {
-    assert(VT.isValid() && IdxMode < ISD::LAST_INDEXED_MODE &&
-           (unsigned)Action < 0xf && "Table isn't big enough!");
-    // Store action are kept in the lower half.
-    IndexedModeActions[(unsigned)VT.SimpleTy][IdxMode] &= ~0x0f;
-    IndexedModeActions[(unsigned)VT.SimpleTy][IdxMode] |= ((uint8_t)Action);
+  void setIndexedStoreAction(unsigned IdxMode, MVT VT, LegalizeAction Action) {
+    setIndexedModeAction(IdxMode, VT, IMAB_Store, Action);
+  }
+
+  /// Indicate that the specified indexed masked load does or does not work with
+  /// the specified type and indicate what to do about it.
+  ///
+  /// NOTE: All indexed mode masked loads are initialized to Expand in
+  /// TargetLowering.cpp
+  void setIndexedMaskedLoadAction(unsigned IdxMode, MVT VT,
+                                  LegalizeAction Action) {
+    setIndexedModeAction(IdxMode, VT, IMAB_MaskedLoad, Action);
+  }
+
+  /// Indicate that the specified indexed masked store does or does not work
+  /// with the specified type and indicate what to do about it.
+  ///
+  /// NOTE: All indexed mode masked stores are initialized to Expand in
+  /// TargetLowering.cpp
+  void setIndexedMaskedStoreAction(unsigned IdxMode, MVT VT,
+                                   LegalizeAction Action) {
+    setIndexedModeAction(IdxMode, VT, IMAB_MaskedStore, Action);
   }
 
   /// Indicate that the specified condition code is or isn't supported on the
@@ -2758,13 +2795,13 @@ private:
   /// truncating store of a specific value type and truncating type is legal.
   LegalizeAction TruncStoreActions[MVT::LAST_VALUETYPE][MVT::LAST_VALUETYPE];
 
-  /// For each indexed mode and each value type, keep a pair of LegalizeAction
+  /// For each indexed mode and each value type, keep a quad of LegalizeAction
   /// that indicates how instruction selection should deal with the load /
-  /// store.
+  /// store / maskedload / maskedstore.
   ///
   /// The first dimension is the value_type for the reference. The second
   /// dimension represents the various modes for load store.
-  uint8_t IndexedModeActions[MVT::LAST_VALUETYPE][ISD::LAST_INDEXED_MODE];
+  uint16_t IndexedModeActions[MVT::LAST_VALUETYPE][ISD::LAST_INDEXED_MODE];
 
   /// For each condition code (ISD::CondCode) keep a LegalizeAction that
   /// indicates how instruction selection should deal with the condition code.
@@ -2806,6 +2843,32 @@ private:
 
   /// Set default libcall names and calling conventions.
   void InitLibcalls(const Triple &TT);
+
+  /// The bits of IndexedModeActions used to store the legalisation actions
+  /// We store the data as   | ML | MS |  L |  S | each taking 4 bits.
+  enum IndexedModeActionsBits {
+    IMAB_Store = 0,
+    IMAB_Load = 4,
+    IMAB_MaskedStore = 8,
+    IMAB_MaskedLoad = 12
+  };
+
+  void setIndexedModeAction(unsigned IdxMode, MVT VT, unsigned Shift,
+                            LegalizeAction Action) {
+    assert(VT.isValid() && IdxMode < ISD::LAST_INDEXED_MODE &&
+           (unsigned)Action < 0xf && "Table isn't big enough!");
+    unsigned Ty = (unsigned)VT.SimpleTy;
+    IndexedModeActions[Ty][IdxMode] &= ~(0xf << Shift);
+    IndexedModeActions[Ty][IdxMode] |= ((uint16_t)Action) << Shift;
+  }
+
+  LegalizeAction getIndexedModeAction(unsigned IdxMode, MVT VT,
+                                      unsigned Shift) const {
+    assert(IdxMode < ISD::LAST_INDEXED_MODE && VT.isValid() &&
+           "Table isn't big enough!");
+    unsigned Ty = (unsigned)VT.SimpleTy;
+    return (LegalizeAction)((IndexedModeActions[Ty][IdxMode] >> Shift) & 0xf);
+  }
 
 protected:
   /// Return true if the extension represented by \p I is free.
@@ -2909,6 +2972,8 @@ protected:
   /// details.
   MachineBasicBlock *emitXRayTypedEvent(MachineInstr &MI,
                                         MachineBasicBlock *MBB) const;
+
+  bool IsStrictFPEnabled;
 };
 
 /// This class defines information used to lower LLVM code to legal SelectionDAG
@@ -3006,12 +3071,8 @@ public:
   std::pair<SDValue, SDValue> makeLibCall(SelectionDAG &DAG, RTLIB::Libcall LC,
                                           EVT RetVT, ArrayRef<SDValue> Ops,
                                           MakeLibCallOptions CallOptions,
-                                          const SDLoc &dl) const;
-
-  std::pair<SDValue, SDValue> ExpandChainLibCall(SelectionDAG &DAG,
-                                                 RTLIB::Libcall LC,
-                                                 SDNode *Node,
-                                                 bool isSigned) const;
+                                          const SDLoc &dl,
+                                          SDValue Chain = SDValue()) const;
 
   /// Check whether parameters to a call that are passed in callee saved
   /// registers are the same as from the calling function.  This needs to be
@@ -3244,9 +3305,7 @@ public:
 
     bool isBeforeLegalize() const { return Level == BeforeLegalizeTypes; }
     bool isBeforeLegalizeOps() const { return Level < AfterLegalizeVectorOps; }
-    bool isAfterLegalizeDAG() const {
-      return Level == AfterLegalizeDAG;
-    }
+    bool isAfterLegalizeDAG() const { return Level >= AfterLegalizeDAG; }
     CombineLevel getDAGCombineLevel() { return Level; }
     bool isCalledByLegalizer() const { return CalledByLegalizer; }
 
@@ -4064,14 +4123,18 @@ public:
   /// Expand float to UINT conversion
   /// \param N Node to expand
   /// \param Result output after conversion
+  /// \param Chain output chain after conversion
   /// \returns True, if the expansion was successful, false otherwise
-  bool expandFP_TO_UINT(SDNode *N, SDValue &Result, SDValue &Chain, SelectionDAG &DAG) const;
+  bool expandFP_TO_UINT(SDNode *N, SDValue &Result, SDValue &Chain,
+                        SelectionDAG &DAG) const;
 
   /// Expand UINT(i64) to double(f64) conversion
   /// \param N Node to expand
   /// \param Result output after conversion
+  /// \param Chain output chain after conversion
   /// \returns True, if the expansion was successful, false otherwise
-  bool expandUINT_TO_FP(SDNode *N, SDValue &Result, SelectionDAG &DAG) const;
+  bool expandUINT_TO_FP(SDNode *N, SDValue &Result, SDValue &Chain,
+                        SelectionDAG &DAG) const;
 
   /// Expand fminnum/fmaxnum into fminnum_ieee/fmaxnum_ieee with quieted inputs.
   SDValue expandFMINNUM_FMAXNUM(SDNode *N, SelectionDAG &DAG) const;

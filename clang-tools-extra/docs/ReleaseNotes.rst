@@ -105,6 +105,12 @@ Improvements to clang-tidy
   :doc:`bugprone-bad-signal-to-kill-thread
   <clang-tidy/checks/bugprone-bad-signal-to-kill-thread>` was added.
 
+- New :doc:`cert-oop58-cpp
+  <clang-tidy/checks/cert-oop58-cpp>` check.
+
+  Finds assignments to the copied object and its direct or indirect members
+  in copy constructors and copy assignment operators.
+
 - New :doc:`cppcoreguidelines-init-variables
   <clang-tidy/checks/cppcoreguidelines-init-variables>` check.
 
@@ -143,6 +149,11 @@ Improvements to clang-tidy
   Finds Objective-C implementations that implement ``-isEqual:`` without also
   appropriately implementing ``-hash``.
 
+- New :doc:`performance-no-automatic-move
+  <clang-tidy/checks/performance-no-automatic-move>` check.
+
+  Finds local variables that cannot be automatically moved due to constness.
+
 - New :doc:`performance-trivially-destructible
   <clang-tidy/checks/performance-trivially-destructible>` check.
 
@@ -168,6 +179,16 @@ Improvements to clang-tidy
   Finds classes, structs, and unions that contain redundant member
   access specifiers.
 
+- Improved :doc:`readability-magic-numbers
+  <clang-tidy/checks/readability-magic-numbers>` check.
+
+  The check now supports the ``IgnoreBitFieldsWidths`` option to suppress
+  the warning for numbers used to specify bit field widths.
+
+  The check was updated to eliminate some false positives (such as using
+  class enumeration as non-type template parameters, or the synthetically
+  computed lengh of a static user string literal.)
+
 - New :doc:`readability-make-member-function-const
   <clang-tidy/checks/readability-make-member-function-const>` check.
 
@@ -190,6 +211,14 @@ Improvements to clang-tidy
 - The :doc:`readability-redundant-string-init
   <clang-tidy/checks/readability-redundant-string-init>` check now supports a
   `StringNames` option enabling its application to custom string classes.
+
+- Improved :doc:`modernize-avoid-bind
+  <clang-tidy/checks/modernize-avoid-bind>` check.
+
+  The check now supports supports diagnosing and fixing arbitrary callables instead of
+  only simple free functions. The `PermissiveParameterList` option has also been
+  added to address situations where the existing fix-it logic would sometimes generate
+  code that no longer compiles.
 
 Improvements to include-fixer
 -----------------------------

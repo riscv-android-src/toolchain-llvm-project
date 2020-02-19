@@ -1105,6 +1105,20 @@ def getDefaultSubstitutions(test, tmpDir, tmpBase, normalize_slashes=False):
             ('%/T', tmpDir.replace('\\', '/')),
             ])
 
+    # "%{/[STpst]:regex_replacement}" should be normalized like "%/[STpst]" but we're
+    # also in a regex replacement context of a s@@@ regex.
+    def regex_escape(s):
+        s = s.replace('@', '\@')
+        s = s.replace('&', '\&')
+        return s
+    substitutions.extend([
+            ('%{/s:regex_replacement}', regex_escape(sourcepath.replace('\\', '/'))),
+            ('%{/S:regex_replacement}', regex_escape(sourcedir.replace('\\', '/'))),
+            ('%{/p:regex_replacement}', regex_escape(sourcedir.replace('\\', '/'))),
+            ('%{/t:regex_replacement}', regex_escape(tmpBase.replace('\\', '/')) + '.tmp'),
+            ('%{/T:regex_replacement}', regex_escape(tmpDir.replace('\\', '/'))),
+            ])
+
     # "%:[STpst]" are normalized paths without colons and without a leading
     # slash.
     substitutions.extend([
@@ -1290,20 +1304,6 @@ class IntegratedTestKeywordParser(object):
                 BooleanExpression.evaluate(s, [])
         return output
 
-    @staticmethod
-    def _handleRequiresAny(line_number, line, output):
-        """A custom parser to transform REQUIRES-ANY: into REQUIRES:"""
-
-        # Extract the conditions specified in REQUIRES-ANY: as written.
-        conditions = []
-        IntegratedTestKeywordParser._handleList(line_number, line, conditions)
-
-        # Output a `REQUIRES: a || b || c` expression in its place.
-        expression = ' || '.join(conditions)
-        IntegratedTestKeywordParser._handleBooleanExpr(line_number,
-                                                       expression, output)
-        return output
-
 def parseIntegratedTestScript(test, additional_parsers=[],
                               require_script=True):
     """parseIntegratedTestScript - Scan an LLVM/Clang style integrated test
@@ -1327,9 +1327,6 @@ def parseIntegratedTestScript(test, additional_parsers=[],
                                     initial_value=test.xfails),
         IntegratedTestKeywordParser('REQUIRES:', ParserKind.BOOLEAN_EXPR,
                                     initial_value=test.requires),
-        IntegratedTestKeywordParser('REQUIRES-ANY:', ParserKind.CUSTOM,
-                                    IntegratedTestKeywordParser._handleRequiresAny, 
-                                    initial_value=test.requires), 
         IntegratedTestKeywordParser('UNSUPPORTED:', ParserKind.BOOLEAN_EXPR,
                                     initial_value=test.unsupported),
         IntegratedTestKeywordParser('END.', ParserKind.TAG)

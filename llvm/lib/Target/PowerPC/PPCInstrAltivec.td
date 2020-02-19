@@ -261,6 +261,11 @@ def vecspltisw : PatLeaf<(build_vector), [{
   return PPC::get_VSPLTI_elt(N, 4, *CurDAG).getNode() != nullptr;
 }], VSPLTISW_get_imm>;
 
+def immEQOneV : PatLeaf<(build_vector), [{
+  if (ConstantSDNode *C = cast<BuildVectorSDNode>(N)->getConstantSplatNode())
+    return C->isOne();
+  return false;
+}]>;
 //===----------------------------------------------------------------------===//
 // Helpers for defining instructions that directly correspond to intrinsics.
 
@@ -518,19 +523,19 @@ def VANDC : VXForm_1<1092, (outs vrrc:$vD), (ins vrrc:$vA, vrrc:$vB),
 def VCFSX  : VXForm_1<842, (outs vrrc:$vD), (ins u5imm:$UIMM, vrrc:$vB),
                       "vcfsx $vD, $vB, $UIMM", IIC_VecFP,
                       [(set v4f32:$vD,
-                             (int_ppc_altivec_vcfsx v4i32:$vB, imm:$UIMM))]>;
+                             (int_ppc_altivec_vcfsx v4i32:$vB, timm:$UIMM))]>;
 def VCFUX  : VXForm_1<778, (outs vrrc:$vD), (ins u5imm:$UIMM, vrrc:$vB),
                       "vcfux $vD, $vB, $UIMM", IIC_VecFP,
                       [(set v4f32:$vD,
-                             (int_ppc_altivec_vcfux v4i32:$vB, imm:$UIMM))]>;
+                             (int_ppc_altivec_vcfux v4i32:$vB, timm:$UIMM))]>;
 def VCTSXS : VXForm_1<970, (outs vrrc:$vD), (ins u5imm:$UIMM, vrrc:$vB),
                       "vctsxs $vD, $vB, $UIMM", IIC_VecFP,
                       [(set v4i32:$vD,
-                             (int_ppc_altivec_vctsxs v4f32:$vB, imm:$UIMM))]>;
+                             (int_ppc_altivec_vctsxs v4f32:$vB, timm:$UIMM))]>;
 def VCTUXS : VXForm_1<906, (outs vrrc:$vD), (ins u5imm:$UIMM, vrrc:$vB),
                       "vctuxs $vD, $vB, $UIMM", IIC_VecFP,
                       [(set v4i32:$vD,
-                             (int_ppc_altivec_vctuxs v4f32:$vB, imm:$UIMM))]>;
+                             (int_ppc_altivec_vctuxs v4f32:$vB, timm:$UIMM))]>;
 
 // Defines with the UIM field set to 0 for floating-point
 // to integer (fp_to_sint/fp_to_uint) conversions and integer
@@ -856,6 +861,14 @@ def V_SETALLONES  : VXForm_3<908, (outs vrrc:$vD), (ins),
 def : InstAlias<"vmr $vD, $vA", (VOR vrrc:$vD, vrrc:$vA, vrrc:$vA)>;
 def : InstAlias<"vnot $vD, $vA", (VNOR vrrc:$vD, vrrc:$vA, vrrc:$vA)>;
 
+// Rotates.
+def : Pat<(v16i8 (rotl v16i8:$vA, v16i8:$vB)),
+          (v16i8 (VRLB v16i8:$vA, v16i8:$vB))>;
+def : Pat<(v8i16 (rotl v8i16:$vA, v8i16:$vB)),
+          (v8i16 (VRLH v8i16:$vA, v8i16:$vB))>;
+def : Pat<(v4i32 (rotl v4i32:$vA, v4i32:$vB)),
+          (v4i32 (VRLW v4i32:$vA, v4i32:$vB))>;
+
 // Loads.
 def : Pat<(v4i32 (load xoaddr:$src)), (LVX xoaddr:$src)>;
 
@@ -1092,6 +1105,20 @@ def : Pat<(v4f32 (vselect v4i32:$vA, v4f32:$vB, v4f32:$vC)),
 def : Pat<(v2f64 (vselect v2i64:$vA, v2f64:$vB, v2f64:$vC)),
           (VSEL $vC, $vB, $vA)>;
 
+// Vector Integer Average Instructions
+def : Pat<(v4i32 (sra (sub v4i32:$vA, (vnot_ppc v4i32:$vB)),
+          (v4i32 (immEQOneV)))), (v4i32 (VAVGSW $vA, $vB))>;
+def : Pat<(v8i16 (sra (sub v8i16:$vA, (v8i16 (bitconvert(vnot_ppc v4i32:$vB)))),
+          (v8i16 (immEQOneV)))), (v8i16 (VAVGSH $vA, $vB))>;
+def : Pat<(v16i8 (sra (sub v16i8:$vA, (v16i8 (bitconvert(vnot_ppc v4i32:$vB)))),
+          (v16i8 (immEQOneV)))), (v16i8 (VAVGSB $vA, $vB))>;
+def : Pat<(v4i32 (srl (sub v4i32:$vA, (vnot_ppc v4i32:$vB)),
+          (v4i32 (immEQOneV)))), (v4i32 (VAVGUW $vA, $vB))>;
+def : Pat<(v8i16 (srl (sub v8i16:$vA, (v8i16 (bitconvert(vnot_ppc v4i32:$vB)))),
+          (v8i16 (immEQOneV)))), (v8i16 (VAVGUH $vA, $vB))>;
+def : Pat<(v16i8 (srl (sub v16i8:$vA, (v16i8 (bitconvert(vnot_ppc v4i32:$vB)))),
+          (v16i8 (immEQOneV)))), (v16i8 (VAVGUB $vA, $vB))>;
+
 } // end HasAltivec
 
 def HasP8Altivec : Predicate<"PPCSubTarget->hasP8Altivec()">;
@@ -1140,9 +1167,13 @@ def:Pat<(vmrgew_swapped_shuffle v16i8:$vA, v16i8:$vB),
 def:Pat<(vmrgow_swapped_shuffle v16i8:$vA, v16i8:$vB),
         (VMRGOW $vB, $vA)>;
 
+// Vector rotates.
+def VRLD : VX1_Int_Ty<196, "vrld", int_ppc_altivec_vrld, v2i64>;
+
+def : Pat<(v2i64 (rotl v2i64:$vA, v2i64:$vB)),
+          (v2i64 (VRLD v2i64:$vA, v2i64:$vB))>;
 
 // Vector shifts
-def VRLD : VX1_Int_Ty<196, "vrld", int_ppc_altivec_vrld, v2i64>;
 def VSLD : VXForm_1<1476, (outs vrrc:$vD), (ins vrrc:$vA, vrrc:$vB),
                     "vsld $vD, $vA, $vB", IIC_VecGeneral, []>;
 def VSRD : VXForm_1<1732, (outs vrrc:$vD), (ins vrrc:$vA, vrrc:$vB),
@@ -1409,6 +1440,12 @@ let isCodeGenOnly = 1 in {
   def VEXTSH2Ds : VX_VT5_EO5_VB5s<1538, 25, "vextsh2d", []>;
   def VEXTSW2Ds : VX_VT5_EO5_VB5s<1538, 26, "vextsw2d", []>;
 }
+
+def : Pat<(v4i32 (sext_inreg v4i32:$VRB, v4i8)), (v4i32 (VEXTSB2W $VRB))>;
+def : Pat<(v4i32 (sext_inreg v4i32:$VRB, v4i16)), (v4i32 (VEXTSH2W $VRB))>;
+def : Pat<(v2i64 (sext_inreg v2i64:$VRB, v2i8)), (v2i64 (VEXTSB2D $VRB))>;
+def : Pat<(v2i64 (sext_inreg v2i64:$VRB, v2i16)), (v2i64 (VEXTSH2D $VRB))>;
+def : Pat<(v2i64 (sext_inreg v2i64:$VRB, v2i32)), (v2i64 (VEXTSW2D $VRB))>;
 
 // Vector Integer Negate
 def VNEGW : VX_VT5_EO5_VB5<1538, 6, "vnegw",

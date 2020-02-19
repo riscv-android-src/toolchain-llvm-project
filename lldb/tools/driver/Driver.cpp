@@ -732,16 +732,24 @@ void sigcont_handler(int signo) {
   signal(signo, sigcont_handler);
 }
 
-void reproducer_handler(void *) {
+void reproducer_handler(void *argv0) {
   if (SBReproducer::Generate()) {
+    auto exe = static_cast<const char *>(argv0);
     llvm::outs() << "********************\n";
     llvm::outs() << "Crash reproducer for ";
     llvm::outs() << lldb::SBDebugger::GetVersionString() << '\n';
+    llvm::outs() << '\n';
     llvm::outs() << "Reproducer written to '" << SBReproducer::GetPath()
                  << "'\n";
+    llvm::outs() << '\n';
+    llvm::outs() << "Before attaching the reproducer to a bug report:\n";
+    llvm::outs() << " - Look at the directory to ensure you're willing to "
+                    "share its content.\n";
     llvm::outs()
-        << "Please have a look at the directory to assess if you're willing to "
-           "share the contained information.\n";
+        << " - Make sure the reproducer works by replaying the reproducer.\n";
+    llvm::outs() << '\n';
+    llvm::outs() << "Replay the reproducer with the following command:\n";
+    llvm::outs() << exe << " -replay " << SBReproducer::GetPath() << "\n";
     llvm::outs() << "********************\n";
   }
 }
@@ -783,14 +791,15 @@ EXAMPLES:
     lldb -K /source/before/crash -k /source/after/crash
 
   Note: In REPL mode no file is loaded, so commands specified to run after
-  loading the file (via -o or -s) will be ignored.
-  )___";
-  llvm::outs() << examples;
+  loading the file (via -o or -s) will be ignored.)___";
+  llvm::outs() << examples << '\n';
 }
 
 llvm::Optional<int> InitializeReproducer(opt::InputArgList &input_args) {
   if (auto *replay_path = input_args.getLastArg(OPT_replay)) {
-    if (const char *error = SBReproducer::Replay(replay_path->getValue())) {
+    const bool skip_version_check = input_args.hasArg(OPT_skip_version_check);
+    if (const char *error =
+            SBReproducer::Replay(replay_path->getValue(), skip_version_check)) {
       WithColor::error() << "reproducer replay failed: " << error << '\n';
       return 1;
     }
@@ -847,7 +856,7 @@ int main(int argc, char const *argv[]) {
   }
 
   // Register the reproducer signal handler.
-  llvm::sys::AddSignalHandler(reproducer_handler, nullptr);
+  llvm::sys::AddSignalHandler(reproducer_handler, const_cast<char *>(argv[0]));
 
   SBError error = SBDebugger::InitializeWithErrorHandling();
   if (error.Fail()) {

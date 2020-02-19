@@ -260,6 +260,9 @@ bool SIInstrInfo::getMemOperandWithOffset(const MachineInstr &LdSt,
                                           const MachineOperand *&BaseOp,
                                           int64_t &Offset,
                                           const TargetRegisterInfo *TRI) const {
+  if (!LdSt.mayLoadOrStore())
+    return false;
+
   unsigned Opc = LdSt.getOpcode();
 
   if (isDS(LdSt)) {
@@ -270,12 +273,11 @@ bool SIInstrInfo::getMemOperandWithOffset(const MachineInstr &LdSt,
       BaseOp = getNamedOperand(LdSt, AMDGPU::OpName::addr);
       // TODO: ds_consume/ds_append use M0 for the base address. Is it safe to
       // report that here?
-      if (!BaseOp)
+      if (!BaseOp || !BaseOp->isReg())
         return false;
 
       Offset = OffsetImm->getImm();
-      assert(BaseOp->isReg() && "getMemOperandWithOffset only supports base "
-                                "operands of type register.");
+
       return true;
     }
 
@@ -307,9 +309,11 @@ bool SIInstrInfo::getMemOperandWithOffset(const MachineInstr &LdSt,
         EltSize *= 64;
 
       BaseOp = getNamedOperand(LdSt, AMDGPU::OpName::addr);
+      if (!BaseOp->isReg())
+        return false;
+
       Offset = EltSize * Offset0;
-      assert(BaseOp->isReg() && "getMemOperandWithOffset only supports base "
-                                "operands of type register.");
+
       return true;
     }
 
@@ -346,12 +350,12 @@ bool SIInstrInfo::getMemOperandWithOffset(const MachineInstr &LdSt,
         getNamedOperand(LdSt, AMDGPU::OpName::offset);
     BaseOp = AddrReg;
     Offset = OffsetImm->getImm();
-
     if (SOffset) // soffset can be an inline immediate.
       Offset += SOffset->getImm();
 
-    assert(BaseOp->isReg() && "getMemOperandWithOffset only supports base "
-                              "operands of type register.");
+    if (!BaseOp->isReg())
+      return false;
+
     return true;
   }
 
@@ -364,8 +368,9 @@ bool SIInstrInfo::getMemOperandWithOffset(const MachineInstr &LdSt,
     const MachineOperand *SBaseReg = getNamedOperand(LdSt, AMDGPU::OpName::sbase);
     BaseOp = SBaseReg;
     Offset = OffsetImm->getImm();
-    assert(BaseOp->isReg() && "getMemOperandWithOffset only supports base "
-                              "operands of type register.");
+    if (!BaseOp->isReg())
+      return false;
+
     return true;
   }
 
@@ -383,8 +388,8 @@ bool SIInstrInfo::getMemOperandWithOffset(const MachineInstr &LdSt,
     }
 
     Offset = getNamedOperand(LdSt, AMDGPU::OpName::offset)->getImm();
-    assert(BaseOp->isReg() && "getMemOperandWithOffset only supports base "
-                              "operands of type register.");
+    if (!BaseOp->isReg())
+      return false;
     return true;
   }
 
@@ -418,7 +423,7 @@ static bool memOpsHaveSameBasePtr(const MachineInstr &MI1,
   const MachineFunction &MF = *MI1.getParent()->getParent();
   const DataLayout &DL = MF.getFunction().getParent()->getDataLayout();
   Base1 = GetUnderlyingObject(Base1, DL);
-  Base2 = GetUnderlyingObject(Base1, DL);
+  Base2 = GetUnderlyingObject(Base2, DL);
 
   if (isa<UndefValue>(Base1) || isa<UndefValue>(Base2))
     return false;
@@ -2544,9 +2549,9 @@ bool SIInstrInfo::checkInstOffsetsDoNotOverlap(const MachineInstr &MIa,
 
 bool SIInstrInfo::areMemAccessesTriviallyDisjoint(const MachineInstr &MIa,
                                                   const MachineInstr &MIb) const {
-  assert((MIa.mayLoad() || MIa.mayStore()) &&
+  assert(MIa.mayLoadOrStore() &&
          "MIa must load from or modify a memory location");
-  assert((MIb.mayLoad() || MIb.mayStore()) &&
+  assert(MIb.mayLoadOrStore() &&
          "MIb must load from or modify a memory location");
 
   if (MIa.hasUnmodeledSideEffects() || MIb.hasUnmodeledSideEffects())
@@ -6211,7 +6216,11 @@ MachineInstrBuilder SIInstrInfo::getAddNoCarry(MachineBasicBlock &MBB,
   if (ST.hasAddNoCarry())
     return BuildMI(MBB, I, DL, get(AMDGPU::V_ADD_U32_e32), DestReg);
 
-  Register UnusedCarry = RS.scavengeRegister(RI.getBoolRC(), I, 0, false);
+  // If available, prefer to use vcc.
+  Register UnusedCarry = !RS.isRegUsed(AMDGPU::VCC)
+                             ? Register(RI.getVCC())
+                             : RS.scavengeRegister(RI.getBoolRC(), I, 0, false);
+
   // TODO: Users need to deal with this.
   if (!UnusedCarry.isValid())
     return MachineInstrBuilder();

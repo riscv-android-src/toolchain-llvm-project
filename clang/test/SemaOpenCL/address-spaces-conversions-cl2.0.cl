@@ -42,7 +42,7 @@ void f_glob(__global int *arg_glob) {}
 #if !__OPENCL_CPP_VERSION__
 // expected-note@-3{{passing argument to parameter 'arg_glob' here}}
 #else
-// expected-note-re@-5{{candidate function not viable: address space mismatch in 1st argument ('__{{generic|constant}} int *'), parameter type must be '__global int *'}}
+// expected-note-re@-5{{candidate function not viable: cannot pass pointer to address space '__{{generic|constant}}' as a pointer to address space '__global' in 1st argument}}
 #endif
 #endif
 
@@ -50,7 +50,7 @@ void f_loc(__local int *arg_loc) {}
 #if !__OPENCL_CPP_VERSION__
 // expected-note@-2{{passing argument to parameter 'arg_loc' here}}
 #else
-// expected-note-re@-4{{candidate function not viable: address space mismatch in 1st argument ('__{{global|generic|constant}} int *'), parameter type must be '__local int *'}}
+// expected-note-re@-4{{candidate function not viable: cannot pass pointer to address space '__{{global|generic|constant}}' as a pointer to address space '__local' in 1st argument}}
 #endif
 
 void f_const(__constant int *arg_const) {}
@@ -58,7 +58,7 @@ void f_const(__constant int *arg_const) {}
 #if !__OPENCL_CPP_VERSION__
 // expected-note@-3{{passing argument to parameter 'arg_const' here}}
 #else
-// expected-note-re@-5{{candidate function not viable: address space mismatch in 1st argument ('__{{global|generic}} int *'), parameter type must be '__constant int *'}}
+// expected-note-re@-5{{candidate function not viable: cannot pass pointer to address space '__{{global|generic}}' as a pointer to address space '__constant' in 1st argument}}
 #endif
 #endif
 
@@ -66,7 +66,7 @@ void f_priv(__private int *arg_priv) {}
 #if !__OPENCL_CPP_VERSION__
 // expected-note@-2{{passing argument to parameter 'arg_priv' here}}
 #else
-// expected-note-re@-4{{candidate function not viable: address space mismatch in 1st argument ('__{{global|generic|constant}} int *'), parameter type must be 'int *'}}
+// expected-note-re@-4{{candidate function not viable: cannot pass pointer to address space '__{{global|generic|constant}}' as a pointer to default address space in 1st argument}}
 #endif
 
 void f_gen(__generic int *arg_gen) {}
@@ -74,7 +74,7 @@ void f_gen(__generic int *arg_gen) {}
 #if !__OPENCL_CPP_VERSION__
 // expected-note@-3{{passing argument to parameter 'arg_gen' here}}
 #else
-// expected-note@-5{{candidate function not viable: address space mismatch in 1st argument ('__constant int *'), parameter type must be '__generic int *'}}
+// expected-note@-5{{candidate function not viable: cannot pass pointer to address space '__constant' as a pointer to address space '__generic' in 1st argument}}
 #endif
 #endif
 
@@ -501,12 +501,9 @@ void test_pointer_chains() {
   // Case 1:
   //  * address spaces of corresponded most outer pointees overlaps, their canonical types are equal
   //  * CVR, address spaces and canonical types of the rest of pointees are equivalent.
+  var_as_as_int = var_asc_as_int;
   var_as_as_int = 0 ? var_as_as_int : var_asc_as_int;
-#if __OPENCL_CPP_VERSION__
-#ifdef GENERIC
-// expected-error@-3{{incompatible operand types ('__generic int *__generic *' and '__generic int *__local *')}}
-#endif
-#endif
+
   // Case 2: Corresponded inner pointees has non-overlapping address spaces.
   var_as_as_int = 0 ? var_as_as_int : var_asc_asn_int;
 #if !__OPENCL_CPP_VERSION__
@@ -516,12 +513,17 @@ void test_pointer_chains() {
 #endif
 
   // Case 3: Corresponded inner pointees has overlapping but not equivalent address spaces.
+  // FIXME: Should this really be allowed in C++ mode?
+  var_as_as_int = var_asc_asc_int;
+#if !__OPENCL_CPP_VERSION__
 #ifdef GENERIC
+// expected-error@-3 {{assigning '__local int *__local *' to '__generic int *__generic *' changes address space of nested pointer}}
+#endif
+#endif
   var_as_as_int = 0 ? var_as_as_int : var_asc_asc_int;
 #if !__OPENCL_CPP_VERSION__
-// expected-warning-re@-2{{pointer type mismatch ('__{{(generic|global|constant)}} int *__{{(generic|global|constant)}} *' and '__{{(local|global|constant)}} int *__{{(local|global|constant)}} *')}}
-#else
-// expected-error-re@-4{{incompatible operand types ('__{{generic|global|constant}} int *__{{generic|global|constant}} *' and '__{{local|global|constant}} int *__{{local|global|constant}} *')}}
+#ifdef GENERIC
+// expected-warning@-3{{pointer type mismatch ('__generic int *__generic *' and '__local int *__local *')}}
 #endif
 #endif
 }

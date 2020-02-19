@@ -466,7 +466,12 @@ AMDGPULegalizerInfo::AMDGPULegalizerInfo(const GCNSubtarget &ST_,
     .legalFor({S32, S64})
     .scalarize(0);
 
-  if (ST.getGeneration() >= AMDGPUSubtarget::SEA_ISLANDS) {
+  if (ST.has16BitInsts()) {
+    getActionDefinitionsBuilder({G_INTRINSIC_TRUNC, G_FCEIL, G_FRINT})
+      .legalFor({S16, S32, S64})
+      .clampScalar(0, S16, S64)
+      .scalarize(0);
+  } else if (ST.getGeneration() >= AMDGPUSubtarget::SEA_ISLANDS) {
     getActionDefinitionsBuilder({G_INTRINSIC_TRUNC, G_FCEIL, G_FRINT})
       .legalFor({S32, S64})
       .clampScalar(0, S32, S64)
@@ -1186,12 +1191,8 @@ Register AMDGPULegalizerInfo::getSegmentAperture(
   // private_segment_aperture_base_hi.
   uint32_t StructOffset = (AS == AMDGPUAS::LOCAL_ADDRESS) ? 0x40 : 0x44;
 
-  // FIXME: Don't use undef
-  Value *V = UndefValue::get(PointerType::get(
-                               Type::getInt8Ty(MF.getFunction().getContext()),
-                               AMDGPUAS::CONSTANT_ADDRESS));
-
-  MachinePointerInfo PtrInfo(V, StructOffset);
+  // TODO: can we be smarter about machine pointer info?
+  MachinePointerInfo PtrInfo(AMDGPUAS::CONSTANT_ADDRESS);
   MachineMemOperand *MMO = MF.getMachineMemOperand(
     PtrInfo,
     MachineMemOperand::MOLoad |
@@ -2028,14 +2029,14 @@ bool AMDGPULegalizerInfo::legalizeFDIV32(MachineInstr &MI,
   auto DenominatorScaled =
     B.buildIntrinsic(Intrinsic::amdgcn_div_scale, {S32, S1}, false)
       .addUse(RHS)
-      .addUse(RHS)
       .addUse(LHS)
+      .addImm(1)
       .setMIFlags(Flags);
   auto NumeratorScaled =
     B.buildIntrinsic(Intrinsic::amdgcn_div_scale, {S32, S1}, false)
       .addUse(LHS)
       .addUse(RHS)
-      .addUse(LHS)
+      .addImm(0)
       .setMIFlags(Flags);
 
   auto ApproxRcp = B.buildIntrinsic(Intrinsic::amdgcn_rcp, {S32}, false)
@@ -2091,9 +2092,9 @@ bool AMDGPULegalizerInfo::legalizeFDIV64(MachineInstr &MI,
   auto One = B.buildFConstant(S64, 1.0);
 
   auto DivScale0 = B.buildIntrinsic(Intrinsic::amdgcn_div_scale, {S64, S1}, false)
-    .addUse(RHS)
-    .addUse(RHS)
     .addUse(LHS)
+    .addUse(RHS)
+    .addImm(1)
     .setMIFlags(Flags);
 
   auto NegDivScale0 = B.buildFNeg(S64, DivScale0.getReg(0), Flags);
@@ -2109,7 +2110,7 @@ bool AMDGPULegalizerInfo::legalizeFDIV64(MachineInstr &MI,
   auto DivScale1 = B.buildIntrinsic(Intrinsic::amdgcn_div_scale, {S64, S1}, false)
     .addUse(LHS)
     .addUse(RHS)
-    .addUse(LHS)
+    .addImm(0)
     .setMIFlags(Flags);
 
   auto Fma3 = B.buildFMA(S64, Fma1, Fma2, Fma1, Flags);
@@ -2299,8 +2300,10 @@ bool AMDGPULegalizerInfo::legalizeIntrinsic(MachineInstr &MI,
                                             MachineRegisterInfo &MRI,
                                             MachineIRBuilder &B) const {
   // Replace the use G_BRCOND with the exec manipulate and branch pseudos.
-  switch (MI.getIntrinsicID()) {
-  case Intrinsic::amdgcn_if: {
+  auto IntrID = MI.getIntrinsicID();
+  switch (IntrID) {
+  case Intrinsic::amdgcn_if:
+  case Intrinsic::amdgcn_else: {
     if (MachineInstr *BrCond = verifyCFIntrinsic(MI, MRI)) {
       const SIRegisterInfo *TRI
         = static_cast<const SIRegisterInfo *>(MRI.getTargetRegisterInfo());
@@ -2308,10 +2311,19 @@ bool AMDGPULegalizerInfo::legalizeIntrinsic(MachineInstr &MI,
       B.setInstr(*BrCond);
       Register Def = MI.getOperand(1).getReg();
       Register Use = MI.getOperand(3).getReg();
-      B.buildInstr(AMDGPU::SI_IF)
-        .addDef(Def)
-        .addUse(Use)
-        .addMBB(BrCond->getOperand(1).getMBB());
+
+      if (IntrID == Intrinsic::amdgcn_if) {
+        B.buildInstr(AMDGPU::SI_IF)
+          .addDef(Def)
+          .addUse(Use)
+          .addMBB(BrCond->getOperand(1).getMBB());
+      } else {
+        B.buildInstr(AMDGPU::SI_ELSE)
+          .addDef(Def)
+          .addUse(Use)
+          .addMBB(BrCond->getOperand(1).getMBB())
+          .addImm(0);
+      }
 
       MRI.setRegClass(Def, TRI->getWaveMaskRegClass());
       MRI.setRegClass(Use, TRI->getWaveMaskRegClass());

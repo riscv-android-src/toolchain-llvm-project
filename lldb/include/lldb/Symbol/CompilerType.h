@@ -218,6 +218,11 @@ public:
   // an invalid type.
   CompilerType AddVolatileModifier() const;
 
+  // Return a new CompilerType that is the atomic type of this type. If this
+  // type is not valid or the type system doesn't support atomic types, this
+  // returns an invalid type.
+  CompilerType GetAtomicType() const;
+
   // Return a new CompilerType adds a restrict modifier to this type if this
   // type is valid and the type system supports restrict modifiers, else return
   // an invalid type.
@@ -356,14 +361,6 @@ public:
 
   bool GetValueAsScalar(const DataExtractor &data, lldb::offset_t data_offset,
                         size_t data_byte_size, Scalar &value) const;
-
-  bool SetValueFromScalar(const Scalar &value, Stream &strm);
-
-  bool ReadFromMemory(ExecutionContext *exe_ctx, lldb::addr_t addr,
-                      AddressType address_type, DataExtractor &data);
-
-  bool WriteToMemory(ExecutionContext *exe_ctx, lldb::addr_t addr,
-                     AddressType address_type, StreamString &new_value);
 
   void Clear() {
     m_type = nullptr;

@@ -31,13 +31,14 @@ public:
   void writePltHeader(uint8_t *buf) const override {
     llvm_unreachable("should call writePPC32GlinkSection() instead");
   }
-  void writePlt(uint8_t *buf, uint64_t gotPltEntryAddr, uint64_t pltEntryAddr,
-    int32_t index, unsigned relOff) const override {
+  void writePlt(uint8_t *buf, const Symbol &sym,
+                uint64_t pltEntryAddr) const override {
     llvm_unreachable("should call writePPC32GlinkSection() instead");
   }
   void writeGotPlt(uint8_t *buf, const Symbol &s) const override;
   bool needsThunk(RelExpr expr, RelType relocType, const InputFile *file,
-                  uint64_t branchAddr, const Symbol &s) const override;
+                  uint64_t branchAddr, const Symbol &s,
+                  int64_t a) const override;
   uint32_t getThunkSectionSpacing() const override;
   bool inBranchRange(RelType type, uint64_t src, uint64_t dst) const override;
   void relocateOne(uint8_t *loc, RelType type, uint64_t val) const override;
@@ -143,6 +144,7 @@ PPC::PPC() {
   gotPltHeaderEntriesNum = 0;
   pltHeaderSize = 64; // size of PLTresolve in .glink
   pltEntrySize = 4;
+  ipltEntrySize = 4;
 
   needsThunks = true;
 
@@ -169,7 +171,7 @@ void PPC::writeGotPlt(uint8_t *buf, const Symbol &s) const {
 }
 
 bool PPC::needsThunk(RelExpr expr, RelType type, const InputFile *file,
-                     uint64_t branchAddr, const Symbol &s) const {
+                     uint64_t branchAddr, const Symbol &s, int64_t /*a*/) const {
   if (type != R_PPC_REL24 && type != R_PPC_PLTREL24)
     return false;
   if (s.isInPlt())
