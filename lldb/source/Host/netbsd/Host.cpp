@@ -1,4 +1,4 @@
-//===-- source/Host/netbsd/Host.cpp -----------------------------*- C++ -*-===//
+//===-- source/Host/netbsd/Host.cpp ---------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -15,11 +15,11 @@
 
 #include <limits.h>
 
-#include <elf.h>
 #include <kvm.h>
 #include <sys/exec.h>
 #include <sys/ptrace.h>
 
+#include "lldb/Host/FileSystem.h"
 #include "lldb/Host/Host.h"
 #include "lldb/Host/HostInfo.h"
 #include "lldb/Utility/DataBufferHeap.h"
@@ -31,6 +31,7 @@
 #include "lldb/Utility/Status.h"
 #include "lldb/Utility/StreamString.h"
 
+#include "llvm/Object/ELF.h"
 #include "llvm/Support/Host.h"
 
 extern "C" {
@@ -100,10 +101,31 @@ static bool GetNetBSDProcessArgs(const ProcessInstanceInfoMatch *match_info_ptr,
 }
 
 static bool GetNetBSDProcessCPUType(ProcessInstanceInfo &process_info) {
+  Log *log = GetLogIfAllCategoriesSet(LIBLLDB_LOG_HOST);
+
   if (process_info.ProcessIDIsValid()) {
-    process_info.GetArchitecture() =
-        HostInfo::GetArchitecture(HostInfo::eArchKindDefault);
-    return true;
+    auto buffer_sp = FileSystem::Instance().CreateDataBuffer(
+        process_info.GetExecutableFile(), 0x20, 0);
+    if (buffer_sp) {
+      uint8_t exe_class =
+          llvm::object::getElfArchType(
+              {buffer_sp->GetChars(), size_t(buffer_sp->GetByteSize())})
+              .first;
+
+      switch (exe_class) {
+      case llvm::ELF::ELFCLASS32:
+        process_info.GetArchitecture() =
+            HostInfo::GetArchitecture(HostInfo::eArchKind32);
+        return true;
+      case llvm::ELF::ELFCLASS64:
+        process_info.GetArchitecture() =
+            HostInfo::GetArchitecture(HostInfo::eArchKind64);
+        return true;
+      default:
+        LLDB_LOG(log, "Unknown elf class ({0}) in file {1}", exe_class,
+                 process_info.GetExecutableFile());
+      }
+    }
   }
   process_info.GetArchitecture().Clear();
   return false;
@@ -154,8 +176,8 @@ error:
   return false;
 }
 
-uint32_t Host::FindProcesses(const ProcessInstanceInfoMatch &match_info,
-                             ProcessInstanceInfoList &process_infos) {
+uint32_t Host::FindProcessesImpl(const ProcessInstanceInfoMatch &match_info,
+                                 ProcessInstanceInfoList &process_infos) {
   const ::pid_t our_pid = ::getpid();
   const ::uid_t our_uid = ::getuid();
 
@@ -197,8 +219,8 @@ uint32_t Host::FindProcesses(const ProcessInstanceInfoMatch &match_info,
     // list if a process with given identifier is already registered there.
     if (proc_kinfo[i].p_nlwps > 1) {
       bool already_registered = false;
-      for (size_t pi = 0; pi < process_infos.GetSize(); pi++) {
-        if (process_infos.GetProcessIDAtIndex(pi) == proc_kinfo[i].p_pid) {
+      for (size_t pi = 0; pi < process_infos.size(); pi++) {
+        if (process_infos[pi].GetProcessID() == proc_kinfo[i].p_pid) {
           already_registered = true;
           break;
         }
@@ -219,13 +241,13 @@ uint32_t Host::FindProcesses(const ProcessInstanceInfoMatch &match_info,
         GetNetBSDProcessArgs(&match_info, process_info)) {
       GetNetBSDProcessCPUType(process_info);
       if (match_info.Matches(process_info))
-        process_infos.Append(process_info);
+        process_infos.push_back(process_info);
     }
   }
 
   kvm_close(kdp); /* XXX: we don't check for error here */
 
-  return process_infos.GetSize();
+  return process_infos.size();
 }
 
 bool Host::GetProcessInfo(lldb::pid_t pid, ProcessInstanceInfo &process_info) {

@@ -2460,6 +2460,7 @@ Decl *Parser::ParseDeclarationAfterDeclaratorAndAttributes(
 
     InitializerScopeRAII InitScope(*this, D, ThisDecl);
 
+    PreferredType.enterVariableInit(Tok.getLocation(), ThisDecl);
     ExprResult Init(ParseBraceInitializer());
 
     InitScope.pop();
@@ -5060,6 +5061,8 @@ bool Parser::isDeclarationSpecifier(bool DisambiguatingWithExpression) {
     // recurse to handle whatever we get.
     if (TryAnnotateTypeOrScopeToken())
       return true;
+    if (TryAnnotateTypeConstraint())
+      return true;
     if (Tok.is(tok::identifier))
       return false;
 
@@ -5192,11 +5195,14 @@ bool Parser::isDeclarationSpecifier(bool DisambiguatingWithExpression) {
 
     // placeholder-type-specifier
   case tok::annot_template_id: {
-    TemplateIdAnnotation *TemplateId = takeTemplateIdAnnotation(Tok);
-    return TemplateId->Kind == TNK_Concept_template &&
+    return isTypeConstraintAnnotation() &&
         (NextToken().is(tok::kw_auto) || NextToken().is(tok::kw_decltype));
   }
-
+  case tok::annot_cxxscope:
+    if (NextToken().is(tok::identifier) && TryAnnotateTypeConstraint())
+      return true;
+    return isTypeConstraintAnnotation() &&
+        GetLookAheadToken(2).isOneOf(tok::kw_auto, tok::kw_decltype);
   case tok::kw___declspec:
   case tok::kw___cdecl:
   case tok::kw___stdcall:
@@ -5637,8 +5643,8 @@ void Parser::ParseDeclaratorInternal(Declarator &D,
         return;
       }
 
-      SourceLocation Loc = ConsumeToken();
-      D.SetRangeEnd(Loc);
+      SourceLocation StarLoc = ConsumeToken();
+      D.SetRangeEnd(StarLoc);
       DeclSpec DS(AttrFactory);
       ParseTypeQualifierListOpt(DS);
       D.ExtendWithDeclSpec(DS);
@@ -5649,7 +5655,7 @@ void Parser::ParseDeclaratorInternal(Declarator &D,
       // Sema will have to catch (syntactically invalid) pointers into global
       // scope. It has to catch pointers into namespace scope anyway.
       D.AddTypeInfo(DeclaratorChunk::getMemberPointer(
-                        SS, DS.getTypeQualifiers(), DS.getEndLoc()),
+                        SS, DS.getTypeQualifiers(), StarLoc, DS.getEndLoc()),
                     std::move(DS.getAttributes()),
                     /* Don't replace range end. */ SourceLocation());
       return;

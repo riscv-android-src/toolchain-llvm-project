@@ -207,6 +207,8 @@ public:
 
   bool hasBranchDivergence() { return false; }
 
+  bool useGPUDivergenceAnalysis() { return false; }
+
   bool isSourceOfDivergence(const Value *V) { return false; }
 
   bool isAlwaysUniform(const Value *V) { return false; }
@@ -1070,7 +1072,8 @@ public:
   /// Get intrinsic cost based on arguments.
   unsigned getIntrinsicInstrCost(Intrinsic::ID IID, Type *RetTy,
                                  ArrayRef<Value *> Args, FastMathFlags FMF,
-                                 unsigned VF = 1) {
+                                 unsigned VF = 1,
+                                 const Instruction *I = nullptr) {
     unsigned RetVF = (RetTy->isVectorTy() ? RetTy->getVectorNumElements() : 1);
     assert((RetVF == 1 || VF == 1) && "VF > 1 and RetVF is a vector type");
     auto *ConcreteTTI = static_cast<T *>(this);
@@ -1107,16 +1110,17 @@ public:
       Value *Mask = Args[3];
       bool VarMask = !isa<Constant>(Mask);
       unsigned Alignment = cast<ConstantInt>(Args[2])->getZExtValue();
-      return ConcreteTTI->getGatherScatterOpCost(
-          Instruction::Store, Args[0]->getType(), Args[1], VarMask, Alignment);
+      return ConcreteTTI->getGatherScatterOpCost(Instruction::Store,
+                                                 Args[0]->getType(), Args[1],
+                                                 VarMask, Alignment, I);
     }
     case Intrinsic::masked_gather: {
       assert(VF == 1 && "Can't vectorize types here.");
       Value *Mask = Args[2];
       bool VarMask = !isa<Constant>(Mask);
       unsigned Alignment = cast<ConstantInt>(Args[1])->getZExtValue();
-      return ConcreteTTI->getGatherScatterOpCost(Instruction::Load, RetTy,
-                                                 Args[0], VarMask, Alignment);
+      return ConcreteTTI->getGatherScatterOpCost(
+          Instruction::Load, RetTy, Args[0], VarMask, Alignment, I);
     }
     case Intrinsic::experimental_vector_reduce_add:
     case Intrinsic::experimental_vector_reduce_mul:
@@ -1178,7 +1182,8 @@ public:
   /// based on types.
   unsigned getIntrinsicInstrCost(
       Intrinsic::ID IID, Type *RetTy, ArrayRef<Type *> Tys, FastMathFlags FMF,
-      unsigned ScalarizationCostPassed = std::numeric_limits<unsigned>::max()) {
+      unsigned ScalarizationCostPassed = std::numeric_limits<unsigned>::max(),
+      const Instruction *I = nullptr) {
     auto *ConcreteTTI = static_cast<T *>(this);
 
     SmallVector<unsigned, 2> ISDs;
@@ -1285,6 +1290,9 @@ public:
       break;
     case Intrinsic::fmuladd:
       ISDs.push_back(ISD::FMA);
+      break;
+    case Intrinsic::experimental_constrained_fmuladd:
+      ISDs.push_back(ISD::STRICT_FMA);
       break;
     // FIXME: We should return 0 whenever getIntrinsicCost == TCC_Free.
     case Intrinsic::lifetime_start:
@@ -1466,6 +1474,12 @@ public:
       SingleCallCost = TargetTransformInfo::TCC_Expensive;
       break;
     // FIXME: ctlz, cttz, ...
+    case Intrinsic::bswap:
+      ISDs.push_back(ISD::BSWAP);
+      break;
+    case Intrinsic::bitreverse:
+      ISDs.push_back(ISD::BITREVERSE);
+      break;
     }
 
     const TargetLoweringBase *TLI = getTLI();
@@ -1509,6 +1523,12 @@ public:
     if (IID == Intrinsic::fmuladd)
       return ConcreteTTI->getArithmeticInstrCost(BinaryOperator::FMul, RetTy) +
              ConcreteTTI->getArithmeticInstrCost(BinaryOperator::FAdd, RetTy);
+    if (IID == Intrinsic::experimental_constrained_fmuladd)
+      return ConcreteTTI->getIntrinsicCost(
+                 Intrinsic::experimental_constrained_fmul, RetTy, Tys,
+                 nullptr) +
+             ConcreteTTI->getIntrinsicCost(
+                 Intrinsic::experimental_constrained_fadd, RetTy, Tys, nullptr);
 
     // Else, assume that we need to scalarize this intrinsic. For math builtins
     // this will emit a costly libcall, adding call overhead and spills. Make it

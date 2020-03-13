@@ -223,6 +223,10 @@ static cl::opt<bool> CheckHasObjC(
     "check-for-objc", cl::init(false),
     cl::desc("Only check if the module has objective-C defined in it"));
 
+static cl::opt<bool> PrintMachOCPUOnly(
+    "print-macho-cpu-only", cl::init(false),
+    cl::desc("Instead of running LTO, print the mach-o cpu in each IR file"));
+
 namespace {
 
 struct ModuleInfo {
@@ -404,6 +408,30 @@ static void listDependentLibraries() {
   }
 }
 
+static void printMachOCPUOnly() {
+  LLVMContext Context;
+  Context.setDiagnosticHandler(std::make_unique<LLVMLTODiagnosticHandler>(),
+                               true);
+  TargetOptions Options = InitTargetOptionsFromCodeGenFlags();
+  for (auto &Filename : InputFilenames) {
+    ErrorOr<std::unique_ptr<LTOModule>> ModuleOrErr =
+        LTOModule::createFromFile(Context, Filename, Options);
+    if (!ModuleOrErr)
+      error(ModuleOrErr, "llvm-lto: ");
+
+    Expected<uint32_t> CPUType = (*ModuleOrErr)->getMachOCPUType();
+    Expected<uint32_t> CPUSubType = (*ModuleOrErr)->getMachOCPUSubType();
+    if (!CPUType)
+      error("Error while printing mach-o cputype: " +
+            toString(CPUType.takeError()));
+    if (!CPUSubType)
+      error("Error while printing mach-o cpusubtype: " +
+            toString(CPUSubType.takeError()));
+    outs() << llvm::format("%s:\ncputype: %u\ncpusubtype: %u\n",
+                           Filename.c_str(), *CPUType, *CPUSubType);
+  }
+}
+
 /// Create a combined index file from the input IR files and write it.
 ///
 /// This is meant to enable testing of ThinLTO combined index generation,
@@ -454,7 +482,7 @@ static std::string getThinLTOOutputFile(const std::string &Path,
     if (std::error_code EC = llvm::sys::fs::create_directories(ParentPath))
       error(EC, "error creating the directory '" + ParentPath + "'");
   }
-  return NewPath.str();
+  return std::string(NewPath.str());
 }
 
 namespace thinlto {
@@ -905,6 +933,11 @@ int main(int argc, char **argv) {
     return 0;
   }
 
+  if (PrintMachOCPUOnly) {
+    printMachOCPUOnly();
+    return 0;
+  }
+
   if (ThinLTOMode.getNumOccurrences()) {
     if (ThinLTOMode.getNumOccurrences() > 1)
       report_fatal_error("You can't specify more than one -thinlto-action");
@@ -957,7 +990,7 @@ int main(int argc, char **argv) {
       lto_symbol_attributes Attrs = Module->getSymbolAttributes(I);
       unsigned Scope = Attrs & LTO_SYMBOL_SCOPE_MASK;
       if (Scope != LTO_SYMBOL_SCOPE_DEFAULT_CAN_BE_HIDDEN)
-        KeptDSOSyms.push_back(Name);
+        KeptDSOSyms.push_back(std::string(Name));
     }
 
     // We use the first input module as the destination module when

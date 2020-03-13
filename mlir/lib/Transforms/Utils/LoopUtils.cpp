@@ -1,6 +1,6 @@
 //===- LoopUtils.cpp ---- Misc utilities for loop transformation ----------===//
 //
-// Part of the MLIR Project, under the Apache License v2.0 with LLVM Exceptions.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
@@ -868,7 +868,7 @@ static LogicalResult hoistOpsBetween(loop::ForOp outer, loop::ForOp inner) {
   });
   LogicalResult status = success();
   SmallVector<Operation *, 8> toHoist;
-  for (auto &op : outer.getBody()->getOperations()) {
+  for (auto &op : outer.getBody()->without_terminator()) {
     // Stop when encountering the inner loop.
     if (&op == inner.getOperation())
       break;
@@ -887,7 +887,7 @@ static LogicalResult hoistOpsBetween(loop::ForOp outer, loop::ForOp inner) {
     }
     // Skip if op has side effects.
     // TODO(ntv): loads to immutable memory regions are ok.
-    if (!op.hasNoSideEffect()) {
+    if (!MemoryEffectOpInterface::hasNoEffect(&op)) {
       status = failure();
       continue;
     }
@@ -1411,22 +1411,24 @@ static LogicalResult generateCopy(
   auto numElementsSSA =
       top.create<ConstantIndexOp>(loc, numElements.getValue());
 
-  SmallVector<StrideInfo, 4> strideInfos;
-  getMultiLevelStrides(region, fastBufferShape, &strideInfos);
+  Value dmaStride = nullptr;
+  Value numEltPerDmaStride = nullptr;
+  if (copyOptions.generateDma) {
+    SmallVector<StrideInfo, 4> dmaStrideInfos;
+    getMultiLevelStrides(region, fastBufferShape, &dmaStrideInfos);
 
-  // TODO(bondhugula): use all stride levels once DmaStartOp is extended for
-  // multi-level strides.
-  if (strideInfos.size() > 1) {
-    LLVM_DEBUG(llvm::dbgs() << "Only up to one level of stride supported\n");
-    return failure();
-  }
+    // TODO(bondhugula): use all stride levels once DmaStartOp is extended for
+    // multi-level strides.
+    if (dmaStrideInfos.size() > 1) {
+      LLVM_DEBUG(llvm::dbgs() << "Only up to one level of stride supported\n");
+      return failure();
+    }
 
-  Value stride = nullptr;
-  Value numEltPerStride = nullptr;
-  if (!strideInfos.empty()) {
-    stride = top.create<ConstantIndexOp>(loc, strideInfos[0].stride);
-    numEltPerStride =
-        top.create<ConstantIndexOp>(loc, strideInfos[0].numEltPerStride);
+    if (!dmaStrideInfos.empty()) {
+      dmaStride = top.create<ConstantIndexOp>(loc, dmaStrideInfos[0].stride);
+      numEltPerDmaStride =
+          top.create<ConstantIndexOp>(loc, dmaStrideInfos[0].numEltPerStride);
+    }
   }
 
   // Record the last operation where we want the memref replacement to end. We
@@ -1469,13 +1471,13 @@ static LogicalResult generateCopy(
       b.create<AffineDmaStartOp>(loc, memref, memAffineMap, memIndices,
                                  fastMemRef, bufAffineMap, bufIndices,
                                  tagMemRef, tagAffineMap, tagIndices,
-                                 numElementsSSA, stride, numEltPerStride);
+                                 numElementsSSA, dmaStride, numEltPerDmaStride);
     } else {
       // DMA non-blocking write from fast buffer to the original memref.
       auto op = b.create<AffineDmaStartOp>(
           loc, fastMemRef, bufAffineMap, bufIndices, memref, memAffineMap,
           memIndices, tagMemRef, tagAffineMap, tagIndices, numElementsSSA,
-          stride, numEltPerStride);
+          dmaStride, numEltPerDmaStride);
       // Since new ops may be appended at 'end' (for outgoing DMAs), adjust the
       // end to mark end of block range being processed.
       if (isCopyOutAtEndOfBlock)
@@ -1585,16 +1587,21 @@ static bool getFullMemRefAsRegion(Operation *opInst, unsigned numParamLoopIVs,
   return true;
 }
 
-/// Generates copies for a contiguous sequence of operations in `block` in the
-/// iterator range [`begin', `end'), where `end' can't be past the terminator of
-/// the block (since additional operations are potentially inserted right before
-/// `end'. Returns the total size of the fast buffers used.
-//  Since we generate alloc's and dealloc's for all fast buffers (before and
-//  after the range of operations resp.), all of the fast memory capacity is
-//  assumed to be available for processing this block range.
+/// Performs explicit copying for the contiguous sequence of operations in the
+/// block iterator range [`begin', `end'), where `end' can't be past the
+/// terminator of the block (since additional operations are potentially
+/// inserted right before `end`. Returns the total size of fast memory space
+/// buffers used. `copyOptions` provides various parameters, and the output
+/// argument `copyNests` is the set of all copy nests inserted, each represented
+/// by its root affine.for. Since we generate alloc's and dealloc's for all fast
+/// buffers (before and after the range of operations resp. or at a hoisted
+/// position), all of the fast memory capacity is assumed to be available for
+/// processing this block range. When 'filterMemRef' is specified, copies are
+/// only generated for the provided MemRef.
 uint64_t mlir::affineDataCopyGenerate(Block::iterator begin,
                                       Block::iterator end,
                                       const AffineCopyOptions &copyOptions,
+                                      Optional<Value> filterMemRef,
                                       DenseSet<Operation *> &copyNests) {
   if (begin == end)
     return 0;
@@ -1631,12 +1638,14 @@ uint64_t mlir::affineDataCopyGenerate(Block::iterator begin,
   block->walk(begin, end, [&](Operation *opInst) {
     // Gather regions to allocate to buffers in faster memory space.
     if (auto loadOp = dyn_cast<AffineLoadOp>(opInst)) {
-      if ((loadOp.getMemRefType().getMemorySpace() !=
+      if ((filterMemRef.hasValue() && filterMemRef != loadOp.getMemRef()) ||
+          (loadOp.getMemRefType().getMemorySpace() !=
            copyOptions.slowMemorySpace))
         return;
     } else if (auto storeOp = dyn_cast<AffineStoreOp>(opInst)) {
-      if (storeOp.getMemRefType().getMemorySpace() !=
-          copyOptions.slowMemorySpace)
+      if ((filterMemRef.hasValue() && filterMemRef != storeOp.getMemRef()) ||
+          storeOp.getMemRefType().getMemorySpace() !=
+              copyOptions.slowMemorySpace)
         return;
     } else {
       // Neither load nor a store op.
@@ -1775,4 +1784,67 @@ uint64_t mlir::affineDataCopyGenerate(Block::iterator begin,
   }
 
   return totalCopyBuffersSizeInBytes;
+}
+
+// A convenience version of affineDataCopyGenerate for all ops in the body of
+// an AffineForOp.
+uint64_t mlir::affineDataCopyGenerate(AffineForOp forOp,
+                                      const AffineCopyOptions &copyOptions,
+                                      Optional<Value> filterMemRef,
+                                      DenseSet<Operation *> &copyNests) {
+  return affineDataCopyGenerate(forOp.getBody()->begin(),
+                                std::prev(forOp.getBody()->end()), copyOptions,
+                                filterMemRef, copyNests);
+}
+
+LogicalResult mlir::generateCopyForMemRegion(
+    const MemRefRegion &memrefRegion, Operation *analyzedOp,
+    const AffineCopyOptions &copyOptions, CopyGenerateResult &result) {
+  Block *block = analyzedOp->getBlock();
+  auto begin = analyzedOp->getIterator();
+  auto end = std::next(begin);
+  DenseMap<Value, Value> fastBufferMap;
+  DenseSet<Operation *> copyNests;
+
+  auto err = generateCopy(memrefRegion, block, begin, end, block, begin, end,
+                          copyOptions, fastBufferMap, copyNests,
+                          &result.sizeInBytes, &begin, &end);
+  if (failed(err))
+    return err;
+
+  result.alloc =
+      fastBufferMap.find(memrefRegion.memref)->second.getDefiningOp();
+  assert(copyNests.size() <= 1 && "At most one copy nest is expected.");
+  result.copyNest = copyNests.empty() ? nullptr : *copyNests.begin();
+  return success();
+}
+
+/// Gathers all AffineForOps in 'block' at 'currLoopDepth' in 'depthToLoops'.
+static void
+gatherLoopsInBlock(Block *block, unsigned currLoopDepth,
+                   std::vector<SmallVector<AffineForOp, 2>> &depthToLoops) {
+  // Add a new empty level to output if it doesn't exist level already.
+  assert(currLoopDepth <= depthToLoops.size() && "Unexpected currLoopDepth");
+  if (currLoopDepth == depthToLoops.size())
+    depthToLoops.push_back(SmallVector<AffineForOp, 2>());
+
+  for (auto &op : *block) {
+    if (auto forOp = dyn_cast<AffineForOp>(op)) {
+      depthToLoops[currLoopDepth].push_back(forOp);
+      gatherLoopsInBlock(forOp.getBody(), currLoopDepth + 1, depthToLoops);
+    }
+  }
+}
+
+/// Gathers all AffineForOps in 'func' grouped by loop depth.
+void mlir::gatherLoops(FuncOp func,
+                       std::vector<SmallVector<AffineForOp, 2>> &depthToLoops) {
+  for (auto &block : func)
+    gatherLoopsInBlock(&block, /*currLoopDepth=*/0, depthToLoops);
+
+  // Remove last loop level from output since it's empty.
+  if (!depthToLoops.empty()) {
+    assert(depthToLoops.back().empty() && "Last loop level is not empty?");
+    depthToLoops.pop_back();
+  }
 }

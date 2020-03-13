@@ -3998,8 +3998,6 @@ def PatchableFunctionEntryDocs : Documentation {
 before the function entry and N-M NOPs after the function entry. This attribute
 takes precedence over the command line option ``-fpatchable-function-entry=N,M``.
 ``M`` defaults to 0 if omitted.
-
-Currently, only M=0 is supported.
 }];
 }
 
@@ -4120,7 +4118,7 @@ documentation for more information.
 def ObjCDirectMembersDocs : Documentation {
   let Category = DocCatDecl;
   let Content = [{
-The ``objc_direct_members`` attribute can be placed on an  Objective-C
+The ``objc_direct_members`` attribute can be placed on an Objective-C
 ``@interface`` or ``@implementation`` to mark that methods declared
 therein should be considered direct by default.  See the documentation
 for ``objc_direct`` for more information about direct methods.
@@ -4129,9 +4127,7 @@ When ``objc_direct_members`` is placed on an ``@interface`` block, every
 method in the block is considered to be declared as direct.  This includes any
 implicit method declarations introduced by property declarations.  If the method
 redeclares a non-direct method, the declaration is ill-formed, exactly as if the
-method was annotated with the ``objc_direct`` attribute.  ``objc_direct_members``
-cannot be placed on the primary interface of a class, only on category or class
-extension interfaces.
+method was annotated with the ``objc_direct`` attribute.
 
 When ``objc_direct_members`` is placed on an ``@implementation`` block,
 methods defined in the block are considered to be declared as direct unless
@@ -4673,11 +4669,11 @@ When the Owner's lifetime ends, it will consider the Pointer to be dangling.
 }];
 }
 
-def ArmMveAliasDocs : Documentation {
+def ArmBuiltinAliasDocs : Documentation {
   let Category = DocCatFunction;
   let Content = [{
-This attribute is used in the implementation of the ACLE intrinsics
-for the Arm MVE instruction set. It allows the intrinsic functions to
+This attribute is used in the implementation of the ACLE intrinsics.
+It allows the intrinsic functions to
 be declared using the names defined in ACLE, and still be recognized
 as clang builtins equivalent to the underlying name. For example,
 ``arm_mve.h`` declares the function ``vaddq_u32`` with
@@ -4688,8 +4684,8 @@ recognized as that clang builtin, and in the latter case, the choice
 of which builtin to identify the function as can be deferred until
 after overload resolution.
 
-This attribute can only be used to set up the aliases for the MVE
-intrinsic functions; it is intended for use only inside ``arm_mve.h``,
+This attribute can only be used to set up the aliases for certain Arm
+intrinsic functions; it is intended for use only inside ``arm_*.h``
 and is not a general mechanism for declaring arbitrary aliases for
 clang builtin functions.
   }];

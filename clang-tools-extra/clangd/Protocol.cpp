@@ -14,6 +14,7 @@
 #include "Logger.h"
 #include "URI.h"
 #include "clang/Basic/LLVM.h"
+#include "clang/Index/IndexSymbol.h"
 #include "llvm/ADT/Hashing.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringSwitch.h"
@@ -37,7 +38,7 @@ URIForFile URIForFile::canonicalize(llvm::StringRef AbsPath,
     elog("URIForFile: failed to resolve path {0} with TU path {1}: "
          "{2}.\nUsing unresolved path.",
          AbsPath, TUPath, Resolved.takeError());
-    return URIForFile(AbsPath);
+    return URIForFile(std::string(AbsPath));
   }
   return URIForFile(std::move(*Resolved));
 }
@@ -87,6 +88,19 @@ llvm::json::Value toJSON(const TextDocumentIdentifier &R) {
 bool fromJSON(const llvm::json::Value &Params, TextDocumentIdentifier &R) {
   llvm::json::ObjectMapper O(Params);
   return O && O.map("uri", R.uri);
+}
+
+llvm::json::Value toJSON(const VersionedTextDocumentIdentifier &R) {
+  auto Result = toJSON(static_cast<const TextDocumentIdentifier &>(R));
+  Result.getAsObject()->try_emplace("version", R.version);
+  return Result;
+}
+
+bool fromJSON(const llvm::json::Value &Params,
+              VersionedTextDocumentIdentifier &R) {
+  llvm::json::ObjectMapper O(Params);
+  return fromJSON(Params, static_cast<TextDocumentIdentifier &>(R)) && O &&
+         O.map("version", R.version);
 }
 
 bool fromJSON(const llvm::json::Value &Params, Position &R) {
@@ -261,9 +275,13 @@ SymbolKind indexSymbolKindToSymbolKind(index::SymbolKind Kind) {
   case index::SymbolKind::ConversionFunction:
     return SymbolKind::Function;
   case index::SymbolKind::Parameter:
+  case index::SymbolKind::NonTypeTemplateParm:
     return SymbolKind::Variable;
   case index::SymbolKind::Using:
     return SymbolKind::Namespace;
+  case index::SymbolKind::TemplateTemplateParm:
+  case index::SymbolKind::TemplateTypeParm:
+    return SymbolKind::TypeParameter;
   }
   llvm_unreachable("invalid symbol kind");
 }
@@ -347,6 +365,12 @@ bool fromJSON(const llvm::json::Value &Params, ClientCapabilities &R) {
       }
     }
   }
+  if (auto *Window = O->getObject("window")) {
+    if (auto WorkDoneProgress = Window->getBoolean("workDoneProgress"))
+      R.WorkDoneProgress = *WorkDoneProgress;
+    if (auto Implicit = Window->getBoolean("implicitWorkDoneProgressCreate"))
+      R.ImplicitProgressCreation = *Implicit;
+  }
   if (auto *OffsetEncoding = O->get("offsetEncoding")) {
     R.offsetEncoding.emplace();
     if (!fromJSON(*OffsetEncoding, *R.offsetEncoding))
@@ -370,6 +394,40 @@ bool fromJSON(const llvm::json::Value &Params, InitializeParams &R) {
   return true;
 }
 
+llvm::json::Value toJSON(const WorkDoneProgressCreateParams &P) {
+  return llvm::json::Object{{"token", P.token}};
+}
+
+llvm::json::Value toJSON(const WorkDoneProgressBegin &P) {
+  llvm::json::Object Result{
+      {"kind", "begin"},
+      {"title", P.title},
+  };
+  if (P.cancellable)
+    Result["cancellable"] = true;
+  if (P.percentage)
+    Result["percentage"] = 0;
+  return Result;
+}
+
+llvm::json::Value toJSON(const WorkDoneProgressReport &P) {
+  llvm::json::Object Result{{"kind", "report"}};
+  if (P.cancellable)
+    Result["cancellable"] = *P.cancellable;
+  if (P.message)
+    Result["message"] = *P.message;
+  if (P.percentage)
+    Result["percentage"] = *P.percentage;
+  return Result;
+}
+
+llvm::json::Value toJSON(const WorkDoneProgressEnd &P) {
+  llvm::json::Object Result{{"kind", "end"}};
+  if (P.message)
+    Result["message"] = *P.message;
+  return Result;
+}
+
 llvm::json::Value toJSON(const MessageType &R) {
   return static_cast<int64_t>(R);
 }
@@ -390,7 +448,10 @@ bool fromJSON(const llvm::json::Value &Params, DidCloseTextDocumentParams &R) {
 
 bool fromJSON(const llvm::json::Value &Params, DidChangeTextDocumentParams &R) {
   llvm::json::ObjectMapper O(Params);
-  return O && O.map("textDocument", R.textDocument) &&
+  if (!O)
+    return false;
+  O.map("forceRebuild", R.forceRebuild);  // Optional clangd extension.
+  return O.map("textDocument", R.textDocument) &&
          O.map("contentChanges", R.contentChanges) &&
          O.map("wantDiagnostics", R.wantDiagnostics);
 }
@@ -481,6 +542,14 @@ bool fromJSON(const llvm::json::Value &Params, Diagnostic &R) {
   O.map("code", R.code);
   O.map("source", R.source);
   return true;
+}
+
+llvm::json::Value toJSON(const PublishDiagnosticsParams &PDP) {
+  return llvm::json::Object{
+      {"uri", PDP.uri},
+      {"diagnostics", PDP.diagnostics},
+      {"version", PDP.version},
+  };
 }
 
 bool fromJSON(const llvm::json::Value &Params, CodeActionContext &R) {
@@ -826,6 +895,7 @@ llvm::json::Value toJSON(const CompletionItem &CI) {
     Result["additionalTextEdits"] = llvm::json::Array(CI.additionalTextEdits);
   if (CI.deprecated)
     Result["deprecated"] = CI.deprecated;
+  Result["score"] = CI.score;
   return std::move(Result);
 }
 

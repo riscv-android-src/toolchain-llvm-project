@@ -1,4 +1,4 @@
-//===-- Target.cpp ----------------------------------------------*- C++ -*-===//
+//===-- Target.cpp --------------------------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -37,7 +37,6 @@
 #include "lldb/Interpreter/OptionGroupWatchpoint.h"
 #include "lldb/Interpreter/OptionValues.h"
 #include "lldb/Interpreter/Property.h"
-#include "lldb/Symbol/ClangASTImporter.h"
 #include "lldb/Symbol/Function.h"
 #include "lldb/Symbol/ObjectFile.h"
 #include "lldb/Symbol/Symbol.h"
@@ -91,7 +90,7 @@ Target::Target(Debugger &debugger, const ArchSpec &target_arch,
       m_mutex(), m_arch(target_arch), m_images(this), m_section_load_history(),
       m_breakpoint_list(false), m_internal_breakpoint_list(true),
       m_watchpoint_list(), m_process_sp(), m_search_filter_sp(),
-      m_image_search_paths(ImageSearchPathsChanged, this), m_ast_importer_sp(),
+      m_image_search_paths(ImageSearchPathsChanged, this),
       m_source_manager_up(), m_stop_hooks(), m_stop_hook_next_id(0),
       m_valid(true), m_suppress_stop_hooks(false),
       m_is_dummy_target(is_dummy_target),
@@ -128,12 +127,13 @@ void Target::PrimeFromDummyTarget(Target *target) {
 
   m_stop_hooks = target->m_stop_hooks;
 
-  for (BreakpointSP breakpoint_sp : target->m_breakpoint_list.Breakpoints()) {
+  for (const auto &breakpoint_sp : target->m_breakpoint_list.Breakpoints()) {
     if (breakpoint_sp->IsInternal())
       continue;
 
-    BreakpointSP new_bp(new Breakpoint(*this, *breakpoint_sp.get()));
-    AddBreakpoint(new_bp, false);
+    BreakpointSP new_bp(
+        Breakpoint::CopyFromBreakpoint(shared_from_this(), *breakpoint_sp));
+    AddBreakpoint(std::move(new_bp), false);
   }
 
   for (auto bp_name_entry : target->m_breakpoint_names) {
@@ -622,7 +622,7 @@ BreakpointSP Target::CreateBreakpoint(SearchFilterSP &filter_sp,
     const bool hardware = request_hardware || GetRequireHardwareBreakpoints();
     bp_sp.reset(new Breakpoint(*this, filter_sp, resolver_sp, hardware,
                                resolve_indirect_symbols));
-    resolver_sp->SetBreakpoint(bp_sp.get());
+    resolver_sp->SetBreakpoint(bp_sp);
     AddBreakpoint(bp_sp, internal);
   }
   return bp_sp;
@@ -1109,8 +1109,8 @@ Status Target::CreateBreakpointsFromFile(const FileSpec &file,
         !Breakpoint::SerializedBreakpointMatchesNames(bkpt_data_sp, names))
       continue;
 
-    BreakpointSP bkpt_sp =
-        Breakpoint::CreateFromStructuredData(*this, bkpt_data_sp, error);
+    BreakpointSP bkpt_sp = Breakpoint::CreateFromStructuredData(
+        shared_from_this(), bkpt_data_sp, error);
     if (!error.Success()) {
       error.SetErrorStringWithFormat(
           "Error restoring breakpoint %zu from %s: %s.", i,
@@ -1378,7 +1378,6 @@ void Target::ClearModules(bool delete_locations) {
   m_section_load_history.Clear();
   m_images.Clear();
   m_scratch_type_system_map.Clear();
-  m_ast_importer_sp.reset();
 }
 
 void Target::DidExec() {
@@ -2258,16 +2257,6 @@ Target::GetUtilityFunctionForLanguage(const char *text,
   return utility_fn;
 }
 
-ClangASTImporterSP Target::GetClangASTImporter() {
-  if (m_valid) {
-    if (!m_ast_importer_sp) {
-      m_ast_importer_sp = std::make_shared<ClangASTImporter>();
-    }
-    return m_ast_importer_sp;
-  }
-  return ClangASTImporterSP();
-}
-
 void Target::SettingsInitialize() { Process::SettingsInitialize(); }
 
 void Target::SettingsTerminate() { Process::SettingsTerminate(); }
@@ -2368,11 +2357,9 @@ ExpressionResults Target::EvaluateExpression(
   } else {
     llvm::StringRef prefix = GetExpressionPrefixContents();
     Status error;
-    execution_results =
-        UserExpression::Evaluate(exe_ctx, options, expr, prefix,
-                                 result_valobj_sp, error, fixed_expression,
-                                 nullptr, // Module
-                                 ctx_obj);
+    execution_results = UserExpression::Evaluate(exe_ctx, options, expr, prefix,
+                                                 result_valobj_sp, error,
+                                                 fixed_expression, ctx_obj);
   }
 
   return execution_results;
@@ -2971,11 +2958,6 @@ Status Target::Launch(ProcessLaunchInfo &launch_info, Stream *stream) {
       }
     }
     m_process_sp->RestoreProcessEvents();
-  } else {
-    Status error2;
-    error2.SetErrorStringWithFormat("process launch failed: %s",
-                                    error.AsCString());
-    error = error2;
   }
   return error;
 }

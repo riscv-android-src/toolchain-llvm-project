@@ -46,6 +46,48 @@ clang::getTemplateParamsRange(TemplateParameterList const * const *Ps,
   return SourceRange(Ps[0]->getTemplateLoc(), Ps[N-1]->getRAngleLoc());
 }
 
+unsigned Sema::getTemplateDepth(Scope *S) const {
+  unsigned Depth = 0;
+
+  // Each template parameter scope represents one level of template parameter
+  // depth.
+  for (Scope *TempParamScope = S->getTemplateParamParent();
+       TempParamScope && !Depth;
+       TempParamScope = TempParamScope->getParent()->getTemplateParamParent()) {
+    ++Depth;
+  }
+
+  // Note that there are template parameters with the given depth.
+  auto ParamsAtDepth = [&](unsigned D) { Depth = std::max(Depth, D + 1); };
+
+  // Look for parameters of an enclosing generic lambda. We don't create a
+  // template parameter scope for these.
+  for (FunctionScopeInfo *FSI : getFunctionScopes()) {
+    if (auto *LSI = dyn_cast<LambdaScopeInfo>(FSI)) {
+      if (!LSI->TemplateParams.empty()) {
+        ParamsAtDepth(LSI->AutoTemplateParameterDepth);
+        break;
+      }
+      if (LSI->GLTemplateParameterList) {
+        ParamsAtDepth(LSI->GLTemplateParameterList->getDepth());
+        break;
+      }
+    }
+  }
+
+  // Look for parameters of an enclosing terse function template. We don't
+  // create a template parameter scope for these either.
+  for (const InventedTemplateParameterInfo &Info :
+       getInventedParameterInfos()) {
+    if (!Info.TemplateParams.empty()) {
+      ParamsAtDepth(Info.AutoTemplateParameterDepth);
+      break;
+    }
+  }
+
+  return Depth;
+}
+
 /// \brief Determine whether the declaration found is acceptable as the name
 /// of a template and, if so, return that template declaration. Otherwise,
 /// returns null.
@@ -1288,11 +1330,11 @@ NamedDecl *Sema::ActOnNonTypeTemplateParameter(Scope *S, Declarator &D,
   // Check that we have valid decl-specifiers specified.
   auto CheckValidDeclSpecifiers = [this, &D] {
     // C++ [temp.param]
-    // p1 
+    // p1
     //   template-parameter:
     //     ...
     //     parameter-declaration
-    // p2 
+    // p2
     //   ... A storage class shall not be specified in a template-parameter
     //   declaration.
     // [dcl.typedef]p1:
@@ -2047,12 +2089,14 @@ private:
       if (const auto *TC = TTP->getTypeConstraint()) {
         TemplateArgumentListInfo TransformedArgs;
         const auto *ArgsAsWritten = TC->getTemplateArgsAsWritten();
-        if (SemaRef.Subst(ArgsAsWritten->getTemplateArgs(),
+        if (!ArgsAsWritten ||
+            SemaRef.Subst(ArgsAsWritten->getTemplateArgs(),
                           ArgsAsWritten->NumTemplateArgs, TransformedArgs,
                           Args))
           SemaRef.AttachTypeConstraint(
               TC->getNestedNameSpecifierLoc(), TC->getConceptNameInfo(),
-              TC->getNamedConcept(), &TransformedArgs, NewTTP,
+              TC->getNamedConcept(), ArgsAsWritten ? &TransformedArgs : nullptr,
+              NewTTP,
               NewTTP->isParameterPack()
                  ? cast<CXXFoldExpr>(TC->getImmediatelyDeclaredConstraint())
                      ->getEllipsisLoc()
@@ -2171,9 +2215,15 @@ private:
     // constructor.
     ExprResult NewDefArg;
     if (OldParam->hasDefaultArg()) {
-      NewDefArg = SemaRef.SubstExpr(OldParam->getDefaultArg(), Args);
-      if (NewDefArg.isInvalid())
-        return nullptr;
+      // We don't care what the value is (we won't use it); just create a
+      // placeholder to indicate there is a default argument.
+      QualType ParamTy = NewDI->getType();
+      NewDefArg = new (SemaRef.Context)
+          OpaqueValueExpr(OldParam->getDefaultArg()->getBeginLoc(),
+                          ParamTy.getNonLValueExprType(SemaRef.Context),
+                          ParamTy->isLValueReferenceType() ? VK_LValue :
+                          ParamTy->isRValueReferenceType() ? VK_XValue :
+                          VK_RValue);
     }
 
     ParmVarDecl *NewParam = ParmVarDecl::Create(SemaRef.Context, DC,
@@ -4101,7 +4151,7 @@ DeclResult Sema::ActOnVarTemplateSpecialization(
 
     if (isSameAsPrimaryTemplate(VarTemplate->getTemplateParameters(),
                                 Converted) &&
-        (!Context.getLangOpts().ConceptsTS ||
+        (!Context.getLangOpts().CPlusPlus2a ||
          !TemplateParams->hasAssociatedConstraints())) {
       // C++ [temp.class.spec]p9b3:
       //
@@ -7164,6 +7214,11 @@ bool Sema::CheckTemplateTemplateArgument(TemplateTemplateParmDecl *Param,
       //   [temp.constr.order].
       SmallVector<const Expr *, 3> ParamsAC, TemplateAC;
       Params->getAssociatedConstraints(ParamsAC);
+      // C++2a[temp.arg.template]p3
+      //   [...] In this comparison, if P is unconstrained, the constraints on A
+      //   are not considered.
+      if (ParamsAC.empty())
+        return false;
       Template->getAssociatedConstraints(TemplateAC);
       bool IsParamAtLeastAsConstrained;
       if (IsAtLeastAsConstrained(Param, ParamsAC, Template, TemplateAC,
@@ -8108,7 +8163,7 @@ DeclResult Sema::ActOnClassTemplateSpecialization(
 
     if (Context.hasSameType(CanonType,
                         ClassTemplate->getInjectedClassNameSpecialization()) &&
-        (!Context.getLangOpts().ConceptsTS ||
+        (!Context.getLangOpts().CPlusPlus2a ||
          !TemplateParams->hasAssociatedConstraints())) {
       // C++ [temp.class.spec]p9b3:
       //
@@ -8334,7 +8389,7 @@ Decl *Sema::ActOnConceptDefinition(Scope *S,
   ConceptDecl *NewDecl = ConceptDecl::Create(Context, DC, NameLoc, Name,
                                              TemplateParameterLists.front(),
                                              ConstraintExpr);
-                                             
+
   if (NewDecl->hasAssociatedConstraints()) {
     // C++2a [temp.concept]p4:
     // A concept shall not have associated constraints.
@@ -10620,7 +10675,7 @@ Sema::getTemplateArgumentBindingsText(const TemplateParameterList *Params,
   }
 
   Out << ']';
-  return Out.str();
+  return std::string(Out.str());
 }
 
 void Sema::MarkAsLateParsedTemplate(FunctionDecl *FD, Decl *FnD,

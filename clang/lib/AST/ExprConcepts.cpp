@@ -11,11 +11,12 @@
 //===----------------------------------------------------------------------===//
 
 #include "clang/AST/ExprConcepts.h"
-#include "clang/AST/ASTContext.h"
 #include "clang/AST/ASTConcept.h"
+#include "clang/AST/ASTContext.h"
 #include "clang/AST/Decl.h"
-#include "clang/AST/DeclarationName.h"
 #include "clang/AST/DeclTemplate.h"
+#include "clang/AST/DeclarationName.h"
+#include "clang/AST/DependencyFlags.h"
 #include "clang/AST/Expr.h"
 #include "clang/AST/NestedNameSpecifier.h"
 #include "clang/AST/TemplateBase.h"
@@ -23,8 +24,8 @@
 #include "clang/Basic/SourceLocation.h"
 #include "llvm/Support/TrailingObjects.h"
 #include <algorithm>
-#include <utility>
 #include <string>
+#include <utility>
 
 using namespace clang;
 
@@ -46,6 +47,23 @@ ConceptSpecializationExpr::ConceptSpecializationExpr(const ASTContext &C,
                    ASTConstraintSatisfaction::Create(C, *Satisfaction) :
                    nullptr) {
   setTemplateArguments(ConvertedArgs);
+  auto Deps = TemplateArgumentDependence::None;
+  const auto InterestingDeps = TemplateArgumentDependence::Instantiation |
+                               TemplateArgumentDependence::UnexpandedPack;
+  for (const TemplateArgumentLoc& ArgLoc : ArgsAsWritten->arguments()) {
+    Deps |= ArgLoc.getArgument().getDependence() & InterestingDeps;
+    if (Deps == InterestingDeps)
+      break;
+  }
+
+  // Currently guaranteed by the fact concepts can only be at namespace-scope.
+  assert(!NestedNameSpec ||
+         (!NestedNameSpec.getNestedNameSpecifier()->isInstantiationDependent() &&
+          !NestedNameSpec.getNestedNameSpecifier()
+              ->containsUnexpandedParameterPack()));
+  addDependence(toExprDependence(Deps));
+  assert((!isValueDependent() || isInstantiationDependent()) &&
+         "should not be value-dependent");
 }
 
 ConceptSpecializationExpr::ConceptSpecializationExpr(EmptyShell Empty,
@@ -58,26 +76,6 @@ void ConceptSpecializationExpr::setTemplateArguments(
   assert(Converted.size() == NumTemplateArgs);
   std::uninitialized_copy(Converted.begin(), Converted.end(),
                           getTrailingObjects<TemplateArgument>());
-  bool IsInstantiationDependent = false;
-  bool ContainsUnexpandedParameterPack = false;
-  for (const TemplateArgument& Arg : Converted) {
-    if (Arg.isInstantiationDependent())
-      IsInstantiationDependent = true;
-    if (Arg.containsUnexpandedParameterPack())
-      ContainsUnexpandedParameterPack = true;
-    if (ContainsUnexpandedParameterPack && IsInstantiationDependent)
-      break;
-  }
-
-  // Currently guaranteed by the fact concepts can only be at namespace-scope.
-  assert(!NestedNameSpec ||
-         (!NestedNameSpec.getNestedNameSpecifier()->isInstantiationDependent() &&
-          !NestedNameSpec.getNestedNameSpecifier()
-              ->containsUnexpandedParameterPack()));
-  setInstantiationDependent(IsInstantiationDependent);
-  setContainsUnexpandedParameterPack(ContainsUnexpandedParameterPack);
-  assert((!isValueDependent() || isInstantiationDependent()) &&
-         "should not be value-dependent");
 }
 
 ConceptSpecializationExpr *
@@ -96,6 +94,39 @@ ConceptSpecializationExpr::Create(const ASTContext &C,
                                                 ConceptNameInfo, FoundDecl,
                                                 NamedConcept, ArgsAsWritten,
                                                 ConvertedArgs, Satisfaction);
+}
+
+ConceptSpecializationExpr::ConceptSpecializationExpr(
+    const ASTContext &C, ConceptDecl *NamedConcept,
+    ArrayRef<TemplateArgument> ConvertedArgs,
+    const ConstraintSatisfaction *Satisfaction, bool Dependent,
+    bool ContainsUnexpandedParameterPack)
+    : Expr(ConceptSpecializationExprClass, C.BoolTy, VK_RValue, OK_Ordinary,
+           /*TypeDependent=*/false,
+           /*ValueDependent=*/!Satisfaction, Dependent,
+           ContainsUnexpandedParameterPack),
+      ConceptReference(NestedNameSpecifierLoc(), SourceLocation(),
+                       DeclarationNameInfo(), NamedConcept,
+                       NamedConcept, nullptr),
+      NumTemplateArgs(ConvertedArgs.size()),
+      Satisfaction(Satisfaction ?
+                   ASTConstraintSatisfaction::Create(C, *Satisfaction) :
+                   nullptr) {
+  setTemplateArguments(ConvertedArgs);
+}
+
+ConceptSpecializationExpr *
+ConceptSpecializationExpr::Create(const ASTContext &C,
+                                  ConceptDecl *NamedConcept,
+                                  ArrayRef<TemplateArgument> ConvertedArgs,
+                                  const ConstraintSatisfaction *Satisfaction,
+                                  bool Dependent,
+                                  bool ContainsUnexpandedParameterPack) {
+  void *Buffer = C.Allocate(totalSizeToAlloc<TemplateArgument>(
+                                ConvertedArgs.size()));
+  return new (Buffer) ConceptSpecializationExpr(
+      C, NamedConcept, ConvertedArgs, Satisfaction, Dependent,
+      ContainsUnexpandedParameterPack);
 }
 
 ConceptSpecializationExpr *
@@ -149,9 +180,14 @@ RequiresExpr::RequiresExpr(ASTContext &C, SourceLocation RequiresKWLoc,
   std::copy(Requirements.begin(), Requirements.end(),
             getTrailingObjects<concepts::Requirement *>());
   RequiresExprBits.IsSatisfied |= Dependent;
-  setValueDependent(Dependent);
-  setInstantiationDependent(Dependent);
-  setContainsUnexpandedParameterPack(ContainsUnexpandedParameterPack);
+  if (ContainsUnexpandedParameterPack)
+    addDependence(ExprDependence::UnexpandedPack);
+  // FIXME: this is incorrect for cases where we have a non-dependent
+  // requirement, but its parameters are instantiation-dependent. RequiresExpr
+  // should be instantiation-dependent if it has instantiation-dependent
+  // parameters.
+  if (Dependent)
+    addDependence(ExprDependence::ValueInstantiation);
 }
 
 RequiresExpr::RequiresExpr(ASTContext &C, EmptyShell Empty,

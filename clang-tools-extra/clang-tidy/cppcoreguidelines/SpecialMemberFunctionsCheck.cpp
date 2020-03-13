@@ -34,8 +34,6 @@ void SpecialMemberFunctionsCheck::storeOptions(
 }
 
 void SpecialMemberFunctionsCheck::registerMatchers(MatchFinder *Finder) {
-  if (!getLangOpts().CPlusPlus)
-    return;
   Finder->addMatcher(
       cxxRecordDecl(
           eachOf(
@@ -103,7 +101,7 @@ void SpecialMemberFunctionsCheck::check(
   if (!MatchedDecl)
     return;
 
-  ClassDefId ID(MatchedDecl->getLocation(), MatchedDecl->getName());
+  ClassDefId ID(MatchedDecl->getLocation(), std::string(MatchedDecl->getName()));
 
   auto StoreMember = [this, &ID](SpecialMemberFunctionKind Kind) {
     llvm::SmallVectorImpl<SpecialMemberFunctionKind> &Members =

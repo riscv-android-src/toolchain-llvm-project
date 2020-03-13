@@ -51,6 +51,7 @@
 #include "AMDGPUSubtarget.h"
 #include "SIInstrInfo.h"
 #include "MCTargetDesc/AMDGPUMCTargetDesc.h"
+#include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/CodeGen/LiveIntervals.h"
@@ -81,6 +82,7 @@ private:
   const SIInstrInfo *TII = nullptr;
   LiveIntervals *LIS = nullptr;
   MachineRegisterInfo *MRI = nullptr;
+  DenseSet<const MachineInstr*> LoweredEndCf;
 
   const TargetRegisterClass *BoolRC = nullptr;
   unsigned AndOpc;
@@ -98,12 +100,17 @@ private:
   void emitLoop(MachineInstr &MI);
   void emitEndCf(MachineInstr &MI);
 
-  Register getSaveExec(MachineInstr* MI);
-
   void findMaskOperands(MachineInstr &MI, unsigned OpNo,
                         SmallVectorImpl<MachineOperand> &Src) const;
 
   void combineMasks(MachineInstr &MI);
+
+  // Skip to the next instruction, ignoring debug instructions, and trivial
+  // block boundaries (blocks that have one (typically fallthrough) successor,
+  // and the successor has one predecessor.
+  MachineBasicBlock::iterator
+  skipIgnoreExecInstsTrivialSucc(MachineBasicBlock &MBB,
+                                 MachineBasicBlock::iterator It) const;
 
 public:
   static char ID;
@@ -177,29 +184,11 @@ static bool isSimpleIf(const MachineInstr &MI, const MachineRegisterInfo *MRI,
   return true;
 }
 
-Register SILowerControlFlow::getSaveExec(MachineInstr *MI) {
-  MachineBasicBlock *MBB = MI->getParent();
-  MachineOperand &SaveExec = MI->getOperand(0);
-  assert(SaveExec.getSubReg() == AMDGPU::NoSubRegister);
-
-  Register SaveExecReg = SaveExec.getReg();
-  unsigned FalseTermOpc =
-      TII->isWave32() ? AMDGPU::S_MOV_B32_term : AMDGPU::S_MOV_B64_term;
-  MachineBasicBlock::iterator I = (MI);
-  MachineBasicBlock::iterator J = std::next(I);
-  if (J != MBB->end() && J->getOpcode() == FalseTermOpc &&
-      J->getOperand(1).isReg() && J->getOperand(1).getReg() == SaveExecReg) {
-    SaveExecReg = J->getOperand(0).getReg();
-    J->eraseFromParent();
-  }
-  return SaveExecReg;
-}
-
 void SILowerControlFlow::emitIf(MachineInstr &MI) {
   MachineBasicBlock &MBB = *MI.getParent();
   const DebugLoc &DL = MI.getDebugLoc();
   MachineBasicBlock::iterator I(&MI);
-  Register SaveExecReg = getSaveExec(&MI);
+  Register SaveExecReg = MI.getOperand(0).getReg();
   MachineOperand& Cond = MI.getOperand(1);
   assert(Cond.getSubReg() == AMDGPU::NoSubRegister);
 
@@ -282,7 +271,7 @@ void SILowerControlFlow::emitElse(MachineInstr &MI) {
   MachineBasicBlock &MBB = *MI.getParent();
   const DebugLoc &DL = MI.getDebugLoc();
 
-  Register DstReg = getSaveExec(&MI);
+  Register DstReg = MI.getOperand(0).getReg();
 
   bool ExecModified = MI.getOperand(3).getImm() != 0;
   MachineBasicBlock::iterator Start = MBB.begin();
@@ -354,7 +343,7 @@ void SILowerControlFlow::emitElse(MachineInstr &MI) {
 void SILowerControlFlow::emitIfBreak(MachineInstr &MI) {
   MachineBasicBlock &MBB = *MI.getParent();
   const DebugLoc &DL = MI.getDebugLoc();
-  auto Dst = getSaveExec(&MI);
+  auto Dst = MI.getOperand(0).getReg();
 
   // Skip ANDing with exec if the break condition is already masked by exec
   // because it is a V_CMP in the same basic block. (We know the break
@@ -416,6 +405,36 @@ void SILowerControlFlow::emitLoop(MachineInstr &MI) {
   MI.eraseFromParent();
 }
 
+MachineBasicBlock::iterator
+SILowerControlFlow::skipIgnoreExecInstsTrivialSucc(
+  MachineBasicBlock &MBB, MachineBasicBlock::iterator It) const {
+
+  SmallSet<const MachineBasicBlock *, 4> Visited;
+  MachineBasicBlock *B = &MBB;
+  do {
+    if (!Visited.insert(B).second)
+      return MBB.end();
+
+    auto E = B->end();
+    for ( ; It != E; ++It) {
+      if (TII->mayReadEXEC(*MRI, *It))
+        break;
+    }
+
+    if (It != E)
+      return It;
+
+    if (B->succ_size() != 1)
+      return MBB.end();
+
+    // If there is one trivial successor, advance to the next block.
+    MachineBasicBlock *Succ = *B->succ_begin();
+
+    It = Succ->begin();
+    B = Succ;
+  } while (true);
+}
+
 void SILowerControlFlow::emitEndCf(MachineInstr &MI) {
   MachineBasicBlock &MBB = *MI.getParent();
   MachineRegisterInfo &MRI = MBB.getParent()->getRegInfo();
@@ -423,12 +442,26 @@ void SILowerControlFlow::emitEndCf(MachineInstr &MI) {
   MachineInstr *Def = MRI.getUniqueVRegDef(CFMask);
   const DebugLoc &DL = MI.getDebugLoc();
 
+  // If the only instruction immediately following this END_CF is an another
+  // END_CF in the only successor we can avoid emitting exec mask restore here.
+  auto Next = skipIgnoreExecInstsTrivialSucc(MBB, std::next(MI.getIterator()));
+  if (Next != MBB.end() && (Next->getOpcode() == AMDGPU::SI_END_CF ||
+                            LoweredEndCf.count(&*Next))) {
+    LLVM_DEBUG(dbgs() << "Skip redundant "; MI.dump());
+    if (LIS)
+      LIS->RemoveMachineInstrFromMaps(MI);
+    MI.eraseFromParent();
+    return;
+  }
+
   MachineBasicBlock::iterator InsPt =
       Def && Def->getParent() == &MBB ? std::next(MachineBasicBlock::iterator(Def))
                                : MBB.begin();
   MachineInstr *NewMI = BuildMI(MBB, InsPt, DL, TII->get(OrOpc), Exec)
                             .addReg(Exec)
                             .add(MI.getOperand(0));
+
+  LoweredEndCf.insert(NewMI);
 
   if (LIS)
     LIS->ReplaceMachineInstrInMaps(MI, *NewMI);
@@ -575,6 +608,8 @@ bool SILowerControlFlow::runOnMachineFunction(MachineFunction &MF) {
       Next = (Last == MBB.end()) ? MBB.begin() : Last;
     }
   }
+
+  LoweredEndCf.clear();
 
   return true;
 }

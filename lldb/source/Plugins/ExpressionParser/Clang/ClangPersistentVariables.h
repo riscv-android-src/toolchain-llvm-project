@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef liblldb_ClangPersistentVariables_h_
-#define liblldb_ClangPersistentVariables_h_
+#ifndef LLDB_SOURCE_PLUGINS_EXPRESSIONPARSER_CLANG_CLANGPERSISTENTVARIABLES_H
+#define LLDB_SOURCE_PLUGINS_EXPRESSIONPARSER_CLANG_CLANGPERSISTENTVARIABLES_H
 
 #include "llvm/ADT/DenseMap.h"
 
@@ -17,6 +17,9 @@
 #include "lldb/Expression/ExpressionVariable.h"
 
 namespace lldb_private {
+
+class ClangASTImporter;
+class TypeSystemClang;
 
 /// \class ClangPersistentVariables ClangPersistentVariables.h
 /// "lldb/Expression/ClangPersistentVariables.h" Manages persistent values
@@ -35,6 +38,8 @@ public:
   static bool classof(const PersistentExpressionState *pv) {
     return pv->getKind() == PersistentExpressionState::eKindClang;
   }
+
+  std::shared_ptr<ClangASTImporter> GetClangASTImporter();
 
   lldb::ExpressionVariableSP
   CreatePersistentVariable(const lldb::ValueObjectSP &valobj_sp) override;
@@ -96,8 +101,9 @@ private:
       m_hand_loaded_clang_modules; ///< These are Clang modules we hand-loaded;
                                    ///these are the highest-
                                    ///< priority source for macros.
+  std::shared_ptr<ClangASTImporter> m_ast_importer_sp;
 };
 
 } // namespace lldb_private
 
-#endif // liblldb_ClangPersistentVariables_h_
+#endif // LLDB_SOURCE_PLUGINS_EXPRESSIONPARSER_CLANG_CLANGPERSISTENTVARIABLES_H

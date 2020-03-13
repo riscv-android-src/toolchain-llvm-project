@@ -22,6 +22,7 @@
 #include "clang/AST/StmtCXX.h"
 #include "clang/Basic/DiagnosticOptions.h"
 #include "clang/Basic/PartialDiagnostic.h"
+#include "clang/Basic/SourceManager.h"
 #include "clang/Basic/Stack.h"
 #include "clang/Basic/TargetInfo.h"
 #include "clang/Lex/HeaderSearch.h"
@@ -141,6 +142,9 @@ public:
 
 } // end namespace sema
 } // end namespace clang
+
+const unsigned Sema::MaxAlignmentExponent;
+const unsigned Sema::MaximumAlignment;
 
 Sema::Sema(Preprocessor &pp, ASTContext &ctxt, ASTConsumer &consumer,
            TranslationUnitKind TUKind, CodeCompleteConsumer *CodeCompleter)

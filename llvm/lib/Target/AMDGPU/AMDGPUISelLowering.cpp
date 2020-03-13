@@ -16,7 +16,6 @@
 #include "AMDGPU.h"
 #include "AMDGPUCallLowering.h"
 #include "AMDGPUFrameLowering.h"
-#include "AMDGPURegisterInfo.h"
 #include "AMDGPUSubtarget.h"
 #include "AMDGPUTargetMachine.h"
 #include "Utils/AMDGPUBaseInfo.h"
@@ -37,6 +36,11 @@
 using namespace llvm;
 
 #include "AMDGPUGenCallingConv.inc"
+
+static cl::opt<bool> AMDGPUBypassSlowDiv(
+  "amdgpu-bypass-slow-div",
+  cl::desc("Skip 64-bit divide for dynamic 32-bit values"),
+  cl::init(true));
 
 // Find a larger type to do a load / store of a vector with.
 EVT AMDGPUTargetLowering::getEquivalentMemType(LLVMContext &Ctx, EVT VT) {
@@ -329,6 +333,9 @@ AMDGPUTargetLowering::AMDGPUTargetLowering(const TargetMachine &TM,
     setOperationAction(ISD::SUBE, VT, Legal);
   }
 
+  // The hardware supports 32-bit FSHR, but not FSHL.
+  setOperationAction(ISD::FSHR, MVT::i32, Legal);
+
   // The hardware supports 32-bit ROTR, but not ROTL.
   setOperationAction(ISD::ROTL, MVT::i32, Expand);
   setOperationAction(ISD::ROTL, MVT::i64, Expand);
@@ -483,6 +490,10 @@ AMDGPUTargetLowering::AMDGPUTargetLowering(const TargetMachine &TM,
   MaxStoresPerMemmove = 0xffffffff;
   MaxStoresPerMemset  = 0xffffffff;
 
+  // The expansion for 64-bit division is enormous.
+  if (AMDGPUBypassSlowDiv)
+    addBypassSlowDiv(64, 32);
+
   setTargetDAGCombine(ISD::BITCAST);
   setTargetDAGCombine(ISD::SHL);
   setTargetDAGCombine(ISD::SRA);
@@ -609,6 +620,17 @@ bool AMDGPUTargetLowering::allUsesHaveSourceMods(const SDNode *N,
   return true;
 }
 
+EVT AMDGPUTargetLowering::getTypeForExtReturn(LLVMContext &Context, EVT VT,
+                                              ISD::NodeType ExtendKind) const {
+  assert(!VT.isVector() && "only scalar expected");
+
+  // Round to the next multiple of 32-bits.
+  unsigned Size = VT.getSizeInBits();
+  if (Size <= 32)
+    return MVT::i32;
+  return EVT::getIntegerVT(Context, 32 * ((Size + 31) / 32));
+}
+
 MVT AMDGPUTargetLowering::getVectorIdxTy(const DataLayout &) const {
   return MVT::i32;
 }
@@ -641,8 +663,9 @@ bool AMDGPUTargetLowering::shouldReduceLoadWidth(SDNode *N,
 
   unsigned NewSize = NewVT.getStoreSizeInBits();
 
-  // If we are reducing to a 32-bit load, this is always better.
-  if (NewSize == 32)
+  // If we are reducing to a 32-bit load or a smaller multi-dword load,
+  // this is always better.
+  if (NewSize >= 32)
     return true;
 
   EVT OldVT = N->getValueType(0);
@@ -731,6 +754,26 @@ bool AMDGPUTargetLowering::isSDNodeAlwaysUniform(const SDNode * N) const {
     }
     break;
   }
+}
+
+TargetLowering::NegatibleCost
+AMDGPUTargetLowering::getNegatibleCost(SDValue Op, SelectionDAG &DAG,
+                                       bool LegalOperations, bool ForCodeSize,
+                                       unsigned Depth) const {
+  switch (Op.getOpcode()) {
+  case ISD::FMA:
+  case ISD::FMAD: {
+    // Negating a fma is not free if it has users without source mods.
+    if (!allUsesHaveSourceMods(Op.getNode()))
+      return NegatibleCost::Expensive;
+    break;
+  }
+  default:
+    break;
+  }
+
+  return TargetLowering::getNegatibleCost(Op, DAG, LegalOperations, ForCodeSize,
+                                          Depth);
 }
 
 //===---------------------------------------------------------------------===//
@@ -999,6 +1042,8 @@ void AMDGPUTargetLowering::analyzeFormalArgumentsCompute(
         assert(MemVT.getVectorNumElements() == 3 ||
                MemVT.getVectorNumElements() == 5);
         MemVT = MemVT.getPow2VectorType(State.getContext());
+      } else if (!MemVT.isSimple() && !MemVT.isVector()) {
+        MemVT = MemVT.getRoundIntegerType(State.getContext());
       }
 
       unsigned PartOffset = 0;
@@ -1196,10 +1241,23 @@ SDValue AMDGPUTargetLowering::LowerGlobalAddress(AMDGPUMachineFunction* MFI,
   if (G->getAddressSpace() == AMDGPUAS::LOCAL_ADDRESS ||
       G->getAddressSpace() == AMDGPUAS::REGION_ADDRESS) {
     if (!MFI->isEntryFunction()) {
+      SDLoc DL(Op);
       const Function &Fn = DAG.getMachineFunction().getFunction();
       DiagnosticInfoUnsupported BadLDSDecl(
-        Fn, "local memory global used by non-kernel function", SDLoc(Op).getDebugLoc());
+        Fn, "local memory global used by non-kernel function",
+        DL.getDebugLoc(), DS_Warning);
       DAG.getContext()->diagnose(BadLDSDecl);
+
+      // We currently don't have a way to correctly allocate LDS objects that
+      // aren't directly associated with a kernel. We do force inlining of
+      // functions that use local objects. However, if these dead functions are
+      // not eliminated, we don't want a compile time error. Just emit a warning
+      // and a trap, since there should be no callable path here.
+      SDValue Trap = DAG.getNode(ISD::TRAP, DL, MVT::Other, DAG.getEntryNode());
+      SDValue OutputChain = DAG.getNode(ISD::TokenFactor, DL, MVT::Other,
+                                        Trap, DAG.getRoot());
+      DAG.setRoot(OutputChain);
+      return DAG.getUNDEF(Op.getValueType());
     }
 
     // XXX: What does the value of G->getOffset() mean?
@@ -1586,7 +1644,7 @@ SDValue AMDGPUTargetLowering::LowerDIVREM24(SDValue Op, SelectionDAG &DAG,
   const AMDGPUMachineFunction *MFI = MF.getInfo<AMDGPUMachineFunction>();
 
   // float fr = mad(fqneg, fb, fa);
-  unsigned OpCode = MFI->getMode().FP32Denormals ?
+  unsigned OpCode = MFI->getMode().allFP32Denormals() ?
                     (unsigned)AMDGPUISD::FMAD_FTZ :
                     (unsigned)ISD::FMAD;
   SDValue fr = DAG.getNode(OpCode, DL, FltVT, fqneg, fb, fa);
@@ -1671,7 +1729,7 @@ void AMDGPUTargetLowering::LowerUDIVREM64(SDValue Op,
     const SIMachineFunctionInfo *MFI = MF.getInfo<SIMachineFunctionInfo>();
 
     // Compute denominator reciprocal.
-    unsigned FMAD = MFI->getMode().FP32Denormals ?
+    unsigned FMAD = MFI->getMode().allFP32Denormals() ?
                     (unsigned)AMDGPUISD::FMAD_FTZ :
                     (unsigned)ISD::FMAD;
 
@@ -2791,6 +2849,7 @@ static bool isI24(SDValue Op, SelectionDAG &DAG) {
 static SDValue simplifyI24(SDNode *Node24,
                            TargetLowering::DAGCombinerInfo &DCI) {
   SelectionDAG &DAG = DCI.DAG;
+  const TargetLowering &TLI = DAG.getTargetLoweringInfo();
   bool IsIntrin = Node24->getOpcode() == ISD::INTRINSIC_WO_CHAIN;
 
   SDValue LHS = IsIntrin ? Node24->getOperand(1) : Node24->getOperand(0);
@@ -2804,11 +2863,11 @@ static SDValue simplifyI24(SDNode *Node24,
 
   APInt Demanded = APInt::getLowBitsSet(LHS.getValueSizeInBits(), 24);
 
-  // First try to simplify using GetDemandedBits which allows the operands to
-  // have other uses, but will only perform simplifications that involve
-  // bypassing some nodes for this user.
-  SDValue DemandedLHS = DAG.GetDemandedBits(LHS, Demanded);
-  SDValue DemandedRHS = DAG.GetDemandedBits(RHS, Demanded);
+  // First try to simplify using SimplifyMultipleUseDemandedBits which allows
+  // the operands to have other uses, but will only perform simplifications that
+  // involve bypassing some nodes for this user.
+  SDValue DemandedLHS = TLI.SimplifyMultipleUseDemandedBits(LHS, Demanded, DAG);
+  SDValue DemandedRHS = TLI.SimplifyMultipleUseDemandedBits(RHS, Demanded, DAG);
   if (DemandedLHS || DemandedRHS)
     return DAG.getNode(NewOpcode, SDLoc(Node24), Node24->getVTList(),
                        DemandedLHS ? DemandedLHS : LHS,
@@ -2816,7 +2875,6 @@ static SDValue simplifyI24(SDNode *Node24,
 
   // Now try SimplifyDemandedBits which can simplify the nodes used by our
   // operands if this node is the only user.
-  const TargetLowering &TLI = DAG.getTargetLoweringInfo();
   if (TLI.SimplifyDemandedBits(LHS, Demanded, DCI))
     return SDValue(Node24, 0);
   if (TLI.SimplifyDemandedBits(RHS, Demanded, DCI))
@@ -4319,12 +4377,8 @@ const char* AMDGPUTargetLowering::getTargetNodeName(unsigned Opcode) const {
   NODE_NAME_CASE(CONST_DATA_PTR)
   NODE_NAME_CASE(PC_ADD_REL_OFFSET)
   NODE_NAME_CASE(LDS)
-  NODE_NAME_CASE(KILL)
   NODE_NAME_CASE(DUMMY_CHAIN)
   case AMDGPUISD::FIRST_MEM_OPCODE_NUMBER: break;
-  NODE_NAME_CASE(INTERP_P1LL_F16)
-  NODE_NAME_CASE(INTERP_P1LV_F16)
-  NODE_NAME_CASE(INTERP_P2_F16)
   NODE_NAME_CASE(LOAD_D16_HI)
   NODE_NAME_CASE(LOAD_D16_LO)
   NODE_NAME_CASE(LOAD_D16_HI_I8)

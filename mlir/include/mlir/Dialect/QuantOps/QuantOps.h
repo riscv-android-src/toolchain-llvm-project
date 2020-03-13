@@ -1,6 +1,6 @@
 //===- QuantOps.h - Quantization Ops and Types ------------------*- C++ -*-===//
 //
-// Part of the MLIR Project, under the Apache License v2.0 with LLVM Exceptions.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
@@ -15,6 +15,7 @@
 #include "mlir/IR/OpDefinition.h"
 #include "mlir/IR/StandardTypes.h"
 #include "mlir/IR/Types.h"
+#include "mlir/Interfaces/SideEffects.h"
 #include "llvm/Support/MathExtras.h"
 
 namespace mlir {

@@ -1,6 +1,6 @@
 //===- TestDialect.h - MLIR Dialect for testing -----------------*- C++ -*-===//
 //
-// Part of the MLIR Project, under the Apache License v2.0 with LLVM Exceptions.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
@@ -14,14 +14,16 @@
 #ifndef MLIR_TESTDIALECT_H
 #define MLIR_TESTDIALECT_H
 
-#include "mlir/Analysis/CallInterfaces.h"
-#include "mlir/Analysis/InferTypeOpInterface.h"
 #include "mlir/Dialect/Traits.h"
 #include "mlir/IR/Dialect.h"
 #include "mlir/IR/OpDefinition.h"
 #include "mlir/IR/OpImplementation.h"
 #include "mlir/IR/StandardTypes.h"
 #include "mlir/IR/SymbolTable.h"
+#include "mlir/Interfaces/CallInterfaces.h"
+#include "mlir/Interfaces/ControlFlowInterfaces.h"
+#include "mlir/Interfaces/InferTypeOpInterface.h"
+#include "mlir/Interfaces/SideEffects.h"
 
 #include "TestOpEnums.h.inc"
 

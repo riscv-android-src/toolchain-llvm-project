@@ -253,9 +253,9 @@ Decl *Parser::ParseSingleDeclarationAfterTemplate(
   }
 
   llvm::TimeTraceScope TimeScope("ParseTemplate", [&]() {
-    return DeclaratorInfo.getIdentifier() != nullptr
-               ? DeclaratorInfo.getIdentifier()->getName()
-               : "<unknown>";
+    return std::string(DeclaratorInfo.getIdentifier() != nullptr
+                           ? DeclaratorInfo.getIdentifier()->getName()
+                           : "<unknown>");
   });
 
   LateParsedAttrList LateParsedAttrs(true);
@@ -678,7 +678,7 @@ bool Parser::isTypeConstraintAnnotation() {
 ///
 /// \returns true if an error occurred, and false otherwise.
 bool Parser::TryAnnotateTypeConstraint() {
-  if (!getLangOpts().ConceptsTS)
+  if (!getLangOpts().CPlusPlus2a)
     return false;
   CXXScopeSpec SS;
   bool WasScopeAnnotation = Tok.is(tok::annot_cxxscope);
@@ -711,9 +711,8 @@ bool Parser::TryAnnotateTypeConstraint() {
                                       /*EnteringContext=*/false,
                                       PossibleConcept,
                                       MemberOfUnknownSpecialization);
-    assert(!MemberOfUnknownSpecialization
-           && "Member when we only allowed namespace scope qualifiers??");
-    if (!PossibleConcept || TNK != TNK_Concept_template) {
+    if (MemberOfUnknownSpecialization || !PossibleConcept ||
+        TNK != TNK_Concept_template) {
       if (SS.isNotEmpty())
         AnnotateScopeToken(SS, !WasScopeAnnotation);
       return false;
@@ -987,7 +986,7 @@ Parser::ParseNonTypeTemplateParameter(unsigned Depth, unsigned Position) {
 
   // Create the parameter.
   return Actions.ActOnNonTypeTemplateParameter(getCurScope(), ParamDecl,
-                                               Depth, Position, EqualLoc, 
+                                               Depth, Position, EqualLoc,
                                                DefaultArg.get());
 }
 

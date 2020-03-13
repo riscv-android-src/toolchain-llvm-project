@@ -234,7 +234,7 @@ ExprResult Parser::ParseCaseExpression(SourceLocation CaseLoc) {
 /// \endverbatim
 ExprResult Parser::ParseConstraintExpression() {
   EnterExpressionEvaluationContext ConstantEvaluated(
-      Actions, Sema::ExpressionEvaluationContext::ConstantEvaluated);
+      Actions, Sema::ExpressionEvaluationContext::Unevaluated);
   ExprResult LHS(ParseCastExpression(AnyCastExpr));
   ExprResult Res(ParseRHSOfBinaryExpression(LHS, prec::LogicalOr));
   if (Res.isUsable() && !Actions.CheckConstraintExpression(Res.get())) {
@@ -256,7 +256,7 @@ ExprResult Parser::ParseConstraintExpression() {
 ExprResult
 Parser::ParseConstraintLogicalAndExpression(bool IsTrailingRequiresClause) {
   EnterExpressionEvaluationContext ConstantEvaluated(
-      Actions, Sema::ExpressionEvaluationContext::ConstantEvaluated);
+      Actions, Sema::ExpressionEvaluationContext::Unevaluated);
   bool NotPrimaryExpression = false;
   auto ParsePrimary = [&] () {
     ExprResult E = ParseCastExpression(PrimaryExprOnly,
@@ -1006,7 +1006,7 @@ ExprResult Parser::ParseCastExpression(CastParseKind ParseKind,
     assert(Tok.isNot(tok::kw_decltype) && Tok.isNot(tok::kw___super));
     return ParseCastExpression(ParseKind, isAddressOfOperand, isTypeCast,
                                isVectorLiteral, NotPrimaryExpression);
-      
+
   case tok::identifier: {      // primary-expression: identifier
                                // unqualified-id: identifier
                                // constant: enumeration-constant
@@ -2655,7 +2655,8 @@ Parser::ParseParenExpression(ParenParseOption &ExprType, bool stopIfCastExpr,
 
       // If the substmt parsed correctly, build the AST node.
       if (!Stmt.isInvalid()) {
-        Result = Actions.ActOnStmtExpr(OpenLoc, Stmt.get(), Tok.getLocation());
+        Result = Actions.ActOnStmtExpr(getCurScope(), OpenLoc, Stmt.get(),
+                                       Tok.getLocation());
       } else {
         Actions.ActOnStmtExprError();
       }
@@ -2690,7 +2691,7 @@ Parser::ParseParenExpression(ParenParseOption &ExprType, bool stopIfCastExpr,
 
     PreferredType.enterTypeCast(Tok.getLocation(), Ty.get().get());
     ExprResult SubExpr = ParseCastExpression(AnyCastExpr);
-    
+
     if (Ty.isInvalid() || SubExpr.isInvalid())
       return ExprError();
 

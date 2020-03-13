@@ -750,10 +750,10 @@ bool MIParser::parseBasicBlockLiveins(MachineBasicBlock &MBB) {
       if (Token.isNot(MIToken::IntegerLiteral) &&
           Token.isNot(MIToken::HexLiteral))
         return error("expected a lane mask");
-      static_assert(sizeof(LaneBitmask::Type) == sizeof(unsigned),
+      static_assert(sizeof(LaneBitmask::Type) == sizeof(uint64_t),
                     "Use correct get-function for lane mask");
       LaneBitmask::Type V;
-      if (getUnsigned(V))
+      if (getUint64(V))
         return error("invalid lane mask value");
       Mask = LaneBitmask(V);
       lex();
@@ -2334,7 +2334,7 @@ bool MIParser::parseIntrinsicOperand(MachineOperand &Dest) {
   if (Token.isNot(MIToken::NamedGlobalValue))
     return error("expected syntax intrinsic(@llvm.whatever)");
 
-  std::string Name = Token.stringValue();
+  std::string Name = std::string(Token.stringValue());
   lex();
 
   if (expectAndConsume(MIToken::rparen))
@@ -3149,7 +3149,7 @@ MCSymbol *MIParser::getOrCreateMCSymbol(StringRef Name) {
 bool MIParser::parseStringConstant(std::string &Result) {
   if (Token.isNot(MIToken::StringConstant))
     return error("expected string constant");
-  Result = Token.stringValue();
+  Result = std::string(Token.stringValue());
   lex();
   return false;
 }

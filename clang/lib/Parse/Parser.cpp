@@ -14,6 +14,7 @@
 #include "clang/AST/ASTConsumer.h"
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/DeclTemplate.h"
+#include "clang/Basic/FileManager.h"
 #include "clang/Parse/ParseDiagnostic.h"
 #include "clang/Parse/RAIIObjectsForParser.h"
 #include "clang/Sema/DeclSpec.h"
@@ -650,6 +651,16 @@ bool Parser::ParseTopLevelDecl(DeclGroupPtrTy &Result, bool IsFirstDecl) {
     return false;
 
   case tok::eof:
+    // Check whether -fmax-tokens= was reached.
+    if (PP.getMaxTokens() != 0 && PP.getTokenCount() > PP.getMaxTokens()) {
+      PP.Diag(Tok.getLocation(), diag::warn_max_tokens_total)
+          << PP.getTokenCount() << PP.getMaxTokens();
+      SourceLocation OverrideLoc = PP.getMaxTokensOverrideLoc();
+      if (OverrideLoc.isValid()) {
+        PP.Diag(OverrideLoc, diag::note_max_tokens_total_override);
+      }
+    }
+
     // Late template parsing can begin.
     if (getLangOpts().DelayedTemplateParsing)
       Actions.SetLateTemplateParser(LateTemplateParserCallback,
@@ -1518,13 +1529,13 @@ ExprResult Parser::ParseSimpleAsm(bool ForAsmLabel, SourceLocation *EndLoc) {
   assert(Tok.is(tok::kw_asm) && "Not an asm!");
   SourceLocation Loc = ConsumeToken();
 
-  if (Tok.is(tok::kw_volatile)) {
-    // Remove from the end of 'asm' to the end of 'volatile'.
+  if (isGNUAsmQualifier(Tok)) {
+    // Remove from the end of 'asm' to the end of the asm qualifier.
     SourceRange RemovalRange(PP.getLocForEndOfToken(Loc),
                              PP.getLocForEndOfToken(Tok.getLocation()));
-
-    Diag(Tok, diag::warn_file_asm_volatile)
-      << FixItHint::CreateRemoval(RemovalRange);
+    Diag(Tok, diag::err_global_asm_qualifier_ignored)
+        << GNUAsmQualifiers::getQualifierName(getGNUAsmQualifier(Tok))
+        << FixItHint::CreateRemoval(RemovalRange);
     ConsumeToken();
   }
 

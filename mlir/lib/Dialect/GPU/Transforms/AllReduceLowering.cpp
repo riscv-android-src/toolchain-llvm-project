@@ -13,7 +13,7 @@
 
 #include "mlir/Dialect/GPU/GPUDialect.h"
 #include "mlir/Dialect/GPU/Passes.h"
-#include "mlir/Dialect/StandardOps/Ops.h"
+#include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "mlir/IR/BlockAndValueMapping.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/PatternMatch.h"
@@ -212,6 +212,25 @@ private:
       return isFloatingPoint ? getFactory<AddFOp>() : getFactory<AddIOp>();
     if (opName == "mul")
       return isFloatingPoint ? getFactory<MulFOp>() : getFactory<MulIOp>();
+    if (opName == "and") {
+      return getFactory<AndOp>();
+    }
+    if (opName == "or") {
+      return getFactory<OrOp>();
+    }
+    if (opName == "xor") {
+      return getFactory<XOrOp>();
+    }
+    if (opName == "max") {
+      return isFloatingPoint
+                 ? getCmpFactory<CmpFOp, CmpFPredicate, CmpFPredicate::UGT>()
+                 : getCmpFactory<CmpIOp, CmpIPredicate, CmpIPredicate::ugt>();
+    }
+    if (opName == "min") {
+      return isFloatingPoint
+                 ? getCmpFactory<CmpFOp, CmpFPredicate, CmpFPredicate::ULT>()
+                 : getCmpFactory<CmpIOp, CmpIPredicate, CmpIPredicate::ult>();
+    }
     return AccumulatorFactory();
   }
 
@@ -219,6 +238,16 @@ private:
   template <typename T> AccumulatorFactory getFactory() {
     return [&](Value lhs, Value rhs) {
       return create<T>(lhs.getType(), lhs, rhs);
+    };
+  }
+
+  /// Returns an accumulator for comparaison such as min, max. T is the type
+  /// of the compare op.
+  template <typename T, typename PredicateEnum, PredicateEnum predicate>
+  AccumulatorFactory getCmpFactory() const {
+    return [&](Value lhs, Value rhs) {
+      Value cmp = rewriter.create<T>(loc, predicate, lhs, rhs);
+      return rewriter.create<SelectOp>(loc, cmp, lhs, rhs);
     };
   }
 
@@ -285,7 +314,7 @@ private:
     Value subgroupSize = create<ConstantIntOp>(kSubgroupSize, int32Type);
     Value isPartialSubgroup =
         create<CmpIOp>(CmpIPredicate::slt, activeWidth, subgroupSize);
-    SmallVector<Type, 2> shuffleType = {valueType, rewriter.getI1Type()};
+    std::array<Type, 2> shuffleType = {valueType, rewriter.getI1Type()};
     auto xorAttr = rewriter.getStringAttr("xor");
 
     createIf(

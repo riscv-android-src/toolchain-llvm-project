@@ -17,6 +17,7 @@
 #include "clang/AST/LocInfoType.h"
 #include "clang/AST/TypeLoc.h"
 #include "clang/Basic/LangOptions.h"
+#include "clang/Basic/SourceManager.h"
 #include "clang/Basic/TargetInfo.h"
 #include "clang/Sema/ParsedTemplate.h"
 #include "clang/Sema/Sema.h"
@@ -130,6 +131,8 @@ void CXXScopeSpec::Adopt(NestedNameSpecifierLoc Other) {
 
   Range = Other.getSourceRange();
   Builder.Adopt(Other);
+  assert(Range == Builder.getSourceRange() &&
+         "NestedNameSpecifierLoc range computation incorrect");
 }
 
 SourceLocation CXXScopeSpec::getLastQualifierNameLoc() const {

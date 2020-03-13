@@ -1,6 +1,6 @@
 //===- ToyCombine.cpp - Toy High Level Optimizer --------------------------===//
 //
-// Part of the MLIR Project, under the Apache License v2.0 with LLVM Exceptions.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
@@ -48,12 +48,12 @@ struct SimplifyRedundantTranspose : public mlir::OpRewritePattern<TransposeOp> {
     TransposeOp transposeInputOp =
         llvm::dyn_cast_or_null<TransposeOp>(transposeInput.getDefiningOp());
 
-    // If the input is defined by another Transpose, bingo!
+    // Input defined by another transpose? If not, no match.
     if (!transposeInputOp)
       return matchFailure();
 
-    // Use the rewriter to perform the replacement.
-    rewriter.replaceOp(op, {transposeInputOp.getOperand()}, {transposeInputOp});
+    // Otherwise, we have a redundant transpose. Use the rewriter.
+    rewriter.replaceOp(op, {transposeInputOp.getOperand()});
     return matchSuccess();
   }
 };

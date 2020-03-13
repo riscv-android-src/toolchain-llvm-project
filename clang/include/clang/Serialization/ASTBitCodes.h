@@ -41,7 +41,7 @@ namespace serialization {
     /// Version 4 of AST files also requires that the version control branch and
     /// revision match exactly, since there is no backward compatibility of
     /// AST files at this time.
-    const unsigned VERSION_MAJOR = 8;
+    const unsigned VERSION_MAJOR = 9;
 
     /// AST file minor version number supported by this version of
     /// Clang.
@@ -1825,6 +1825,7 @@ namespace serialization {
       STMT_OMP_BARRIER_DIRECTIVE,
       STMT_OMP_TASKWAIT_DIRECTIVE,
       STMT_OMP_FLUSH_DIRECTIVE,
+      STMT_OMP_DEPOBJ_DIRECTIVE,
       STMT_OMP_ORDERED_DIRECTIVE,
       STMT_OMP_ATOMIC_DIRECTIVE,
       STMT_OMP_TARGET_DIRECTIVE,
@@ -1898,6 +1899,9 @@ namespace serialization {
       CTOR_INITIALIZER_MEMBER,
       CTOR_INITIALIZER_INDIRECT_MEMBER
     };
+
+    /// Kinds of cleanup objects owned by ExprWithCleanups.
+    enum CleanupObjectKind { COK_Block, COK_CompoundLiteral };
 
     /// Describes the redeclarations of a declaration.
     struct LocalRedeclarationsInfo {

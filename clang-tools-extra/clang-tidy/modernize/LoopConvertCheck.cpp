@@ -480,12 +480,6 @@ void LoopConvertCheck::storeOptions(ClangTidyOptions::OptionMap &Opts) {
 }
 
 void LoopConvertCheck::registerMatchers(MatchFinder *Finder) {
-  // Only register the matchers for C++. Because this checker is used for
-  // modernization, it is reasonable to run it on any C++ standard with the
-  // assumption the user is trying to modernize their codebase.
-  if (!getLangOpts().CPlusPlus)
-    return;
-
   Finder->addMatcher(makeArrayLoopMatcher(), this);
   Finder->addMatcher(makeIteratorLoopMatcher(), this);
   Finder->addMatcher(makePseudoArrayLoopMatcher(), this);
@@ -748,7 +742,8 @@ void LoopConvertCheck::determineRangeDescriptor(
     ASTContext *Context, const BoundNodes &Nodes, const ForStmt *Loop,
     LoopFixerKind FixerKind, const Expr *ContainerExpr,
     const UsageResult &Usages, RangeDescriptor &Descriptor) {
-  Descriptor.ContainerString = getContainerString(Context, Loop, ContainerExpr);
+  Descriptor.ContainerString =
+      std::string(getContainerString(Context, Loop, ContainerExpr));
 
   if (FixerKind == LFK_Iterator)
     getIteratorLoopQualifiers(Context, Nodes, Descriptor);
