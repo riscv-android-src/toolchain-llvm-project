@@ -17,6 +17,7 @@
 
 #define _KMEMUSER
 #define RAY_DO_SIGLEV
+#define __LEGACY_PT_LWPINFO
 
 // clang-format off
 #include <sys/param.h>
@@ -71,6 +72,15 @@
 #include <sys/msg.h>
 #include <sys/mtio.h>
 #include <sys/ptrace.h>
+
+// Compat for NetBSD < 9.99.30.
+#ifndef PT_LWPSTATUS
+#define PT_LWPSTATUS 24
+#endif
+#ifndef PT_LWPNEXT
+#define PT_LWPNEXT 25
+#endif
+
 #include <sys/resource.h>
 #include <sys/sem.h>
 #include <sys/sha1.h>
@@ -180,7 +190,21 @@
 #include <dev/sun/vuid_event.h>
 #include <dev/tc/sticio.h>
 #include <dev/usb/ukyopon.h>
+#if !__NetBSD_Prereq__(9, 99, 44)
 #include <dev/usb/urio.h>
+#else
+struct urio_command {
+  unsigned short length;
+  int request;
+  int requesttype;
+  int value;
+  int index;
+  void *buffer;
+  int timeout;
+};
+#define URIO_SEND_COMMAND      _IOWR('U', 200, struct urio_command)
+#define URIO_RECV_COMMAND      _IOWR('U', 201, struct urio_command)
+#endif
 #include <dev/usb/usb.h>
 #include <dev/usb/utoppy.h>
 #include <dev/vme/xio.h>
@@ -245,6 +269,7 @@ unsigned struct_passwd_sz = sizeof(struct passwd);
 unsigned struct_group_sz = sizeof(struct group);
 unsigned siginfo_t_sz = sizeof(siginfo_t);
 unsigned struct_sigaction_sz = sizeof(struct sigaction);
+unsigned struct_stack_t_sz = sizeof(stack_t);
 unsigned struct_itimerval_sz = sizeof(struct itimerval);
 unsigned pthread_t_sz = sizeof(pthread_t);
 unsigned pthread_mutex_t_sz = sizeof(pthread_mutex_t);
@@ -292,6 +317,8 @@ int ptrace_pt_get_event_mask = PT_GET_EVENT_MASK;
 int ptrace_pt_get_process_state = PT_GET_PROCESS_STATE;
 int ptrace_pt_set_siginfo = PT_SET_SIGINFO;
 int ptrace_pt_get_siginfo = PT_GET_SIGINFO;
+int ptrace_pt_lwpstatus = PT_LWPSTATUS;
+int ptrace_pt_lwpnext = PT_LWPNEXT;
 int ptrace_piod_read_d = PIOD_READ_D;
 int ptrace_piod_write_d = PIOD_WRITE_D;
 int ptrace_piod_read_i = PIOD_READ_I;
@@ -324,6 +351,8 @@ int ptrace_pt_getdbregs = -1;
 
 unsigned struct_ptrace_ptrace_io_desc_struct_sz = sizeof(struct ptrace_io_desc);
 unsigned struct_ptrace_ptrace_lwpinfo_struct_sz = sizeof(struct ptrace_lwpinfo);
+unsigned struct_ptrace_ptrace_lwpstatus_struct_sz =
+    sizeof(struct __sanitizer_ptrace_lwpstatus);
 unsigned struct_ptrace_ptrace_event_struct_sz = sizeof(ptrace_event_t);
 unsigned struct_ptrace_ptrace_siginfo_struct_sz = sizeof(ptrace_siginfo_t);
 
@@ -2399,5 +2428,43 @@ CHECK_SIZE_AND_OFFSET(modctl_load_t, ml_filename);
 CHECK_SIZE_AND_OFFSET(modctl_load_t, ml_flags);
 CHECK_SIZE_AND_OFFSET(modctl_load_t, ml_props);
 CHECK_SIZE_AND_OFFSET(modctl_load_t, ml_propslen);
+
+// Compat with 9.0
+struct statvfs90 {
+  unsigned long f_flag;
+  unsigned long f_bsize;
+  unsigned long f_frsize;
+  unsigned long f_iosize;
+
+  u64 f_blocks;
+  u64 f_bfree;
+  u64 f_bavail;
+  u64 f_bresvd;
+
+  u64 f_files;
+  u64 f_ffree;
+  u64 f_favail;
+  u64 f_fresvd;
+
+  u64 f_syncreads;
+  u64 f_syncwrites;
+
+  u64 f_asyncreads;
+  u64 f_asyncwrites;
+
+  struct {
+    s32 __fsid_val[2];
+  } f_fsidx;
+  unsigned long f_fsid;
+  unsigned long f_namemax;
+  u32 f_owner;
+
+  u32 f_spare[4];
+
+  char f_fstypename[32];
+  char f_mntonname[32];
+  char f_mntfromname[32];
+};
+unsigned struct_statvfs90_sz = sizeof(struct statvfs90);
 
 #endif  // SANITIZER_NETBSD

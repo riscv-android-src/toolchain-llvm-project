@@ -106,6 +106,85 @@ namespace Sched {
 
 } // end namespace Sched
 
+// MemOp models a memory operation, either memset or memcpy/memmove.
+struct MemOp {
+private:
+  // Shared
+  uint64_t Size;
+  bool DstAlignCanChange; // true if destination alignment can satisfy any
+                          // constraint.
+  Align DstAlign;         // Specified alignment of the memory operation.
+
+  bool AllowOverlap;
+  // memset only
+  bool IsMemset;   // If setthis memory operation is a memset.
+  bool ZeroMemset; // If set clears out memory with zeros.
+  // memcpy only
+  bool MemcpyStrSrc; // Indicates whether the memcpy source is an in-register
+                     // constant so it does not need to be loaded.
+  Align SrcAlign;    // Inferred alignment of the source or default value if the
+                     // memory operation does not need to load the value.
+public:
+  static MemOp Copy(uint64_t Size, bool DstAlignCanChange, Align DstAlign,
+                    Align SrcAlign, bool IsVolatile,
+                    bool MemcpyStrSrc = false) {
+    MemOp Op;
+    Op.Size = Size;
+    Op.DstAlignCanChange = DstAlignCanChange;
+    Op.DstAlign = DstAlign;
+    Op.AllowOverlap = !IsVolatile;
+    Op.IsMemset = false;
+    Op.ZeroMemset = false;
+    Op.MemcpyStrSrc = MemcpyStrSrc;
+    Op.SrcAlign = SrcAlign;
+    return Op;
+  }
+
+  static MemOp Set(uint64_t Size, bool DstAlignCanChange, Align DstAlign,
+                   bool IsZeroMemset, bool IsVolatile) {
+    MemOp Op;
+    Op.Size = Size;
+    Op.DstAlignCanChange = DstAlignCanChange;
+    Op.DstAlign = DstAlign;
+    Op.AllowOverlap = !IsVolatile;
+    Op.IsMemset = true;
+    Op.ZeroMemset = IsZeroMemset;
+    Op.MemcpyStrSrc = false;
+    return Op;
+  }
+
+  uint64_t size() const { return Size; }
+  Align getDstAlign() const {
+    assert(!DstAlignCanChange);
+    return DstAlign;
+  }
+  bool isFixedDstAlign() const { return !DstAlignCanChange; }
+  bool allowOverlap() const { return AllowOverlap; }
+  bool isMemset() const { return IsMemset; }
+  bool isMemcpy() const { return !IsMemset; }
+  bool isMemcpyWithFixedDstAlign() const {
+    return isMemcpy() && !DstAlignCanChange;
+  }
+  bool isZeroMemset() const { return isMemset() && ZeroMemset; }
+  bool isMemcpyStrSrc() const {
+    assert(isMemcpy() && "Must be a memcpy");
+    return MemcpyStrSrc;
+  }
+  Align getSrcAlign() const {
+    assert(isMemcpy() && "Must be a memcpy");
+    return SrcAlign;
+  }
+  bool isSrcAligned(Align AlignCheck) const {
+    return isMemset() || llvm::isAligned(AlignCheck, SrcAlign.value());
+  }
+  bool isDstAligned(Align AlignCheck) const {
+    return DstAlignCanChange || llvm::isAligned(AlignCheck, DstAlign.value());
+  }
+  bool isAligned(Align AlignCheck) const {
+    return isSrcAligned(AlignCheck) && isDstAligned(AlignCheck);
+  }
+};
+
 /// This base class for TargetLowering contains the SelectionDAG-independent
 /// parts that can be used from the rest of CodeGen.
 class TargetLoweringBase {
@@ -131,7 +210,8 @@ public:
     TypeScalarizeVector, // Replace this one-element vector with its element.
     TypeSplitVector,     // Split this vector into two of half the size.
     TypeWidenVector,     // This vector should be widened into a larger vector.
-    TypePromoteFloat     // Replace this float with a larger one.
+    TypePromoteFloat,    // Replace this float with a larger one.
+    TypeSoftPromoteHalf, // Soften half to i16 and use float to do arithmetic.
   };
 
   /// LegalizeKind holds the legalization kind that needs to happen to EVT
@@ -225,7 +305,6 @@ public:
     llvm_unreachable("Invalid content kind");
   }
 
-  /// NOTE: The TargetMachine owns TLOF.
   explicit TargetLoweringBase(const TargetMachine &TM);
   TargetLoweringBase(const TargetLoweringBase &) = delete;
   TargetLoweringBase &operator=(const TargetLoweringBase &) = delete;
@@ -285,6 +364,20 @@ public:
     return getPointerTy(DL);
   }
 
+  /// This callback is used to inspect load/store instructions and add
+  /// target-specific MachineMemOperand flags to them.  The default
+  /// implementation does nothing.
+  virtual MachineMemOperand::Flags getTargetMMOFlags(const Instruction &I) const {
+    return MachineMemOperand::MONone;
+  }
+
+  MachineMemOperand::Flags getLoadMemOperandFlags(const LoadInst &LI,
+                                                  const DataLayout &DL) const;
+  MachineMemOperand::Flags getStoreMemOperandFlags(const StoreInst &SI,
+                                                   const DataLayout &DL) const;
+  MachineMemOperand::Flags getAtomicMemOperandFlags(const Instruction &AI,
+                                                    const DataLayout &DL) const;
+
   virtual bool isSelectSupported(SelectSupportKind /*kind*/) const {
     return true;
   }
@@ -317,6 +410,12 @@ public:
     // The default action for other vectors is to promote
     return TypePromoteInteger;
   }
+
+  // Return true if the half type should be passed around as i16, but promoted
+  // to float around arithmetic. The default behavior is to pass around as
+  // float and convert around loads/stores/bitcasts and other places where
+  // the size matters.
+  virtual bool softPromoteHalfType() const { return false; }
 
   // There are two general methods for expanding a BUILD_VECTOR node:
   //  1. Use SCALAR_TO_VECTOR on the defined scalar values and then shuffle
@@ -851,7 +950,7 @@ public:
     int          offset = 0;       // offset off of ptrVal
     uint64_t     size = 0;         // the size of the memory location
                                    // (taken from memVT if zero)
-    MaybeAlign align = Align::None(); // alignment
+    MaybeAlign align = Align(1);   // alignment
 
     MachineMemOperand::Flags flags = MachineMemOperand::MONone;
     IntrinsicInfo() = default;
@@ -936,6 +1035,8 @@ public:
     case ISD::SMULFIXSAT:
     case ISD::UMULFIX:
     case ISD::UMULFIXSAT:
+    case ISD::SDIVFIX:
+    case ISD::UDIVFIX:
       Supported = isSupportedFixedPointOperation(Op, VT, Scale);
       break;
     }
@@ -949,7 +1050,7 @@ public:
     unsigned EqOpc;
     switch (Op) {
       default: llvm_unreachable("Unexpected FP pseudo-opcode");
-#define INSTRUCTION(NAME, NARG, ROUND_MODE, INTRINSIC, DAGN)                   \
+#define DAG_INSTRUCTION(NAME, NARG, ROUND_MODE, INTRINSIC, DAGN)               \
       case ISD::STRICT_##DAGN: EqOpc = ISD::DAGN; break;
 #define CMP_INSTRUCTION(NAME, NARG, ROUND_MODE, INTRINSIC, DAGN)               \
       case ISD::STRICT_##DAGN: EqOpc = ISD::SETCC; break;
@@ -1503,29 +1604,17 @@ public:
 
   /// Returns the target specific optimal type for load and store operations as
   /// a result of memset, memcpy, and memmove lowering.
-  ///
-  /// If DstAlign is zero that means it's safe to destination alignment can
-  /// satisfy any constraint. Similarly if SrcAlign is zero it means there isn't
-  /// a need to check it against alignment requirement, probably because the
-  /// source does not need to be loaded. If 'IsMemset' is true, that means it's
-  /// expanding a memset. If 'ZeroMemset' is true, that means it's a memset of
-  /// zero. 'MemcpyStrSrc' indicates whether the memcpy source is constant so it
-  /// does not need to be loaded.  It returns EVT::Other if the type should be
-  /// determined using generic target-independent logic.
+  /// It returns EVT::Other if the type should be determined using generic
+  /// target-independent logic.
   virtual EVT
-  getOptimalMemOpType(uint64_t /*Size*/, unsigned /*DstAlign*/,
-                      unsigned /*SrcAlign*/, bool /*IsMemset*/,
-                      bool /*ZeroMemset*/, bool /*MemcpyStrSrc*/,
+  getOptimalMemOpType(const MemOp &Op,
                       const AttributeList & /*FuncAttributes*/) const {
     return MVT::Other;
   }
 
-
   /// LLT returning variant.
   virtual LLT
-  getOptimalMemOpLLT(uint64_t /*Size*/, unsigned /*DstAlign*/,
-                     unsigned /*SrcAlign*/, bool /*IsMemset*/,
-                     bool /*ZeroMemset*/, bool /*MemcpyStrSrc*/,
+  getOptimalMemOpLLT(const MemOp &Op,
                      const AttributeList & /*FuncAttributes*/) const {
     return LLT();
   }
@@ -1538,16 +1627,6 @@ public:
   /// fstpl which also does type conversion. Note the specified type doesn't
   /// have to be legal as the hook is used before type legalization.
   virtual bool isSafeMemOpType(MVT /*VT*/) const { return true; }
-
-  /// Determine if we should use _setjmp or setjmp to implement llvm.setjmp.
-  bool usesUnderscoreSetJmp() const {
-    return UseUnderscoreSetJmp;
-  }
-
-  /// Determine if we should use _longjmp or longjmp to implement llvm.longjmp.
-  bool usesUnderscoreLongJmp() const {
-    return UseUnderscoreLongJmp;
-  }
 
   /// Return lower limit for number of blocks in a jump table.
   virtual unsigned getMinimumJumpTableEntries() const;
@@ -1947,18 +2026,6 @@ protected:
   /// Specify the target scheduling preference.
   void setSchedulingPreference(Sched::Preference Pref) {
     SchedPreferenceInfo = Pref;
-  }
-
-  /// Indicate whether this target prefers to use _setjmp to implement
-  /// llvm.setjmp or the version without _.  Defaults to false.
-  void setUseUnderscoreSetJmp(bool Val) {
-    UseUnderscoreSetJmp = Val;
-  }
-
-  /// Indicate whether this target prefers to use _longjmp to implement
-  /// llvm.longjmp or the version without _.  Defaults to false.
-  void setUseUnderscoreLongJmp(bool Val) {
-    UseUnderscoreLongJmp = Val;
   }
 
   /// Indicate the minimum number of blocks to generate jump tables.
@@ -2697,16 +2764,6 @@ private:
   /// predication.
   bool JumpIsExpensive;
 
-  /// This target prefers to use _setjmp to implement llvm.setjmp.
-  ///
-  /// Defaults to false.
-  bool UseUnderscoreSetJmp;
-
-  /// This target prefers to use _longjmp to implement llvm.longjmp.
-  ///
-  /// Defaults to false.
-  bool UseUnderscoreLongJmp;
-
   /// Information about the contents of the high-bits in boolean values held in
   /// a type wider than i1. See getBooleanContents.
   BooleanContent BooleanContents;
@@ -2989,7 +3046,6 @@ public:
   TargetLowering(const TargetLowering &) = delete;
   TargetLowering &operator=(const TargetLowering &) = delete;
 
-  /// NOTE: The TargetMachine owns TLOF.
   explicit TargetLowering(const TargetMachine &TM);
 
   bool isPositionIndependent() const;
@@ -3066,6 +3122,12 @@ public:
                            const SDLoc &DL, const SDValue OldLHS,
                            const SDValue OldRHS) const;
 
+  void softenSetCCOperands(SelectionDAG &DAG, EVT VT, SDValue &NewLHS,
+                           SDValue &NewRHS, ISD::CondCode &CCCode,
+                           const SDLoc &DL, const SDValue OldLHS,
+                           const SDValue OldRHS, SDValue &Chain,
+                           bool IsSignaling = false) const;
+
   /// Returns a pair of (return value, chain).
   /// It is an error to pass RTLIB::UNKNOWN_LIBCALL as \p LC.
   std::pair<SDValue, SDValue> makeLibCall(SelectionDAG &DAG, RTLIB::Libcall LC,
@@ -3114,14 +3176,8 @@ public:
   /// Return true if the number of memory ops is below the threshold (Limit).
   /// It returns the types of the sequence of memory ops to perform
   /// memset / memcpy by reference.
-  bool findOptimalMemOpLowering(std::vector<EVT> &MemOps,
-                                unsigned Limit, uint64_t Size,
-                                unsigned DstAlign, unsigned SrcAlign,
-                                bool IsMemset,
-                                bool ZeroMemset,
-                                bool MemcpyStrSrc,
-                                bool AllowOverlap,
-                                unsigned DstAS, unsigned SrcAS,
+  bool findOptimalMemOpLowering(std::vector<EVT> &MemOps, unsigned Limit,
+                                const MemOp &Op, unsigned DstAS, unsigned SrcAS,
                                 const AttributeList &FuncAttributes) const;
 
   /// Check to see if the specified operand of the specified instruction is a
@@ -3736,7 +3792,7 @@ public:
   /// Return the register ID of the name passed in. Used by named register
   /// global variables extension. There is no target-independent behaviour
   /// so the default action is to bail.
-  virtual Register getRegisterByName(const char* RegName, EVT VT,
+  virtual Register getRegisterByName(const char* RegName, LLT Ty,
                                      const MachineFunction &MF) const {
     report_fatal_error("Named registers not implemented for this target");
   }
@@ -3787,13 +3843,6 @@ public:
   virtual SDValue prepareVolatileOrAtomicLoad(SDValue Chain, const SDLoc &DL,
                                               SelectionDAG &DAG) const {
     return Chain;
-  }
-
-  /// This callback is used to inspect load/store instructions and add
-  /// target-specific MachineMemOperand flags to them.  The default
-  /// implementation does nothing.
-  virtual MachineMemOperand::Flags getMMOFlags(const Instruction &I) const {
-    return MachineMemOperand::MONone;
   }
 
   /// Should SelectionDAG lower an atomic store of the given kind as a normal
@@ -3981,9 +4030,7 @@ public:
                                StringRef Constraint, MVT VT) const;
 
   virtual unsigned getInlineAsmMemConstraint(StringRef ConstraintCode) const {
-    if (ConstraintCode == "i")
-      return InlineAsm::Constraint_i;
-    else if (ConstraintCode == "m")
+    if (ConstraintCode == "m")
       return InlineAsm::Constraint_m;
     return InlineAsm::Constraint_Unknown;
   }
@@ -4170,12 +4217,13 @@ public:
 
   /// Turn load of vector type into a load of the individual elements.
   /// \param LD load to expand
-  /// \returns MERGE_VALUEs of the scalar loads with their chains.
-  SDValue scalarizeVectorLoad(LoadSDNode *LD, SelectionDAG &DAG) const;
+  /// \returns BUILD_VECTOR and TokenFactor nodes.
+  std::pair<SDValue, SDValue> scalarizeVectorLoad(LoadSDNode *LD,
+                                                  SelectionDAG &DAG) const;
 
   // Turn a store of a vector type into stores of the individual elements.
   /// \param ST Store with a vector value type
-  /// \returns MERGE_VALUs of the individual store chains.
+  /// \returns TokenFactor of the individual store chains.
   SDValue scalarizeVectorStore(StoreSDNode *ST, SelectionDAG &DAG) const;
 
   /// Expands an unaligned load to 2 half-size loads for an integer, and
@@ -4212,6 +4260,14 @@ public:
   /// Method for building the DAG expansion of ISD::[U|S]MULFIX[SAT]. This
   /// method accepts integers as its arguments.
   SDValue expandFixedPointMul(SDNode *Node, SelectionDAG &DAG) const;
+
+  /// Method for building the DAG expansion of ISD::[US]DIVFIX. This
+  /// method accepts integers as its arguments.
+  /// Note: This method may fail if the division could not be performed
+  /// within the type. Clients must retry with a wider type if this happens.
+  SDValue expandFixedPointDiv(unsigned Opcode, const SDLoc &dl,
+                              SDValue LHS, SDValue RHS,
+                              unsigned Scale, SelectionDAG &DAG) const;
 
   /// Method for building the DAG expansion of ISD::U(ADD|SUB)O. Expansion
   /// always suceeds and populates the Result and Overflow arguments.

@@ -92,7 +92,9 @@ public:
     Pending.foldChildren(Arena, Tokens.drop_back(),
                          new (Arena.allocator()) syntax::TranslationUnit);
 
-    return cast<syntax::TranslationUnit>(std::move(Pending).finalize());
+    auto *TU = cast<syntax::TranslationUnit>(std::move(Pending).finalize());
+    TU->assertInvariantsRecursive();
+    return TU;
   }
 
   /// getRange() finds the syntax tokens corresponding to the passed source
@@ -241,9 +243,9 @@ private:
                 ? (std::next(It)->first - It->first)
                 : A.tokenBuffer().expandedTokens().end() - It->first;
 
-        R += llvm::formatv("- '{0}' covers '{1}'+{2} tokens\n",
-                           It->second.Node->kind(),
-                           It->first->text(A.sourceManager()), CoveredTokens);
+        R += std::string(llvm::formatv(
+            "- '{0}' covers '{1}'+{2} tokens\n", It->second.Node->kind(),
+            It->first->text(A.sourceManager()), CoveredTokens));
         R += It->second.Node->dump(A);
       }
       return R;
@@ -343,9 +345,13 @@ public:
   }
 
   bool WalkUpFromTagDecl(TagDecl *C) {
-    // Avoid building UnknownDeclaration here, syntatically 'struct X {}' and
-    // similar are part of declaration specifiers and do not introduce a new
-    // top-level declaration.
+    // FIXME: build the ClassSpecifier node.
+    if (C->isFreeStanding()) {
+      // Class is a declaration specifier and needs a spanning declaration node.
+      Builder.foldNode(Builder.getRange(C),
+                       new (allocator()) syntax::SimpleDeclaration);
+      return true;
+    }
     return true;
   }
 

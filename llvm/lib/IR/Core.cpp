@@ -127,11 +127,8 @@ unsigned LLVMGetMDKindID(const char *Name, unsigned SLen) {
   return LLVMGetMDKindIDInContext(LLVMGetGlobalContext(), Name, SLen);
 }
 
-#define GET_ATTR_KIND_FROM_NAME
-#include "AttributesCompatFunc.inc"
-
 unsigned LLVMGetEnumAttributeKindForName(const char *Name, size_t SLen) {
-  return getAttrKindFromName(StringRef(Name, SLen));
+  return Attribute::getAttrKindFromName(StringRef(Name, SLen));
 }
 
 unsigned LLVMGetLastEnumAttributeKind(void) {
@@ -147,9 +144,9 @@ LLVMAttributeRef LLVMCreateEnumAttribute(LLVMContextRef C, unsigned KindID,
     // After r362128, byval attributes need to have a type attribute. Provide a
     // NULL one until a proper API is added for this.
     return wrap(Attribute::getWithByValType(Ctx, NULL));
-  } else {
-    return wrap(Attribute::get(Ctx, AttrKind, Val));
   }
+
+  return wrap(Attribute::get(Ctx, AttrKind, Val));
 }
 
 unsigned LLVMGetEnumAttributeKind(LLVMAttributeRef A) {

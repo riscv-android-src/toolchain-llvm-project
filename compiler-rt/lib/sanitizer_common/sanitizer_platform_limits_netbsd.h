@@ -48,6 +48,7 @@ extern unsigned struct_timezone_sz;
 extern unsigned struct_tms_sz;
 extern unsigned struct_itimerspec_sz;
 extern unsigned struct_sigevent_sz;
+extern unsigned struct_stack_t_sz;
 extern unsigned struct_sched_param_sz;
 extern unsigned struct_statfs_sz;
 extern unsigned struct_sockaddr_sz;
@@ -412,6 +413,8 @@ extern int ptrace_pt_get_event_mask;
 extern int ptrace_pt_get_process_state;
 extern int ptrace_pt_set_siginfo;
 extern int ptrace_pt_get_siginfo;
+extern int ptrace_pt_lwpstatus;
+extern int ptrace_pt_lwpnext;
 extern int ptrace_piod_read_d;
 extern int ptrace_piod_write_d;
 extern int ptrace_piod_read_i;
@@ -436,8 +439,17 @@ struct __sanitizer_ptrace_lwpinfo {
   int pl_event;
 };
 
+struct __sanitizer_ptrace_lwpstatus {
+  __sanitizer_lwpid_t pl_lwpid;
+  __sanitizer_sigset_t pl_sigpend;
+  __sanitizer_sigset_t pl_sigmask;
+  char pl_name[20];
+  void *pl_private;
+};
+
 extern unsigned struct_ptrace_ptrace_io_desc_struct_sz;
 extern unsigned struct_ptrace_ptrace_lwpinfo_struct_sz;
+extern unsigned struct_ptrace_ptrace_lwpstatus_struct_sz;
 extern unsigned struct_ptrace_ptrace_event_struct_sz;
 extern unsigned struct_ptrace_ptrace_siginfo_struct_sz;
 
@@ -2408,6 +2420,9 @@ struct __sanitizer_cdbw {
                  offsetof(struct CLASS, MEMBER))
 
 #define SIGACTION_SYMNAME __sigaction14
+
+// Compat with 9.0
+extern unsigned struct_statvfs90_sz;
 
 #endif  // SANITIZER_NETBSD
 

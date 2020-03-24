@@ -1,6 +1,6 @@
 //===- StandardTypes.h - MLIR Standard Type Classes -------------*- C++ -*-===//
 //
-// Part of the MLIR Project, under the Apache License v2.0 with LLVM Exceptions.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
@@ -16,6 +16,7 @@ struct fltSemantics;
 } // namespace llvm
 
 namespace mlir {
+class AffineExpr;
 class AffineMap;
 class FloatType;
 class IndexType;
@@ -245,6 +246,9 @@ public:
 
   /// Whether the given dimension size indicates a dynamic dimension.
   static constexpr bool isDynamic(int64_t dSize) { return dSize < 0; }
+  static constexpr bool isDynamicStrideOrOffset(int64_t dStrideOrOffset) {
+    return dStrideOrOffset == kDynamicStrideOrOffset;
+  }
 };
 
 /// Vector types represent multi-dimensional SIMD vectors, and have a fixed
@@ -386,6 +390,52 @@ public:
 class MemRefType : public Type::TypeBase<MemRefType, BaseMemRefType,
                                          detail::MemRefTypeStorage> {
 public:
+  /// This is a builder type that keeps local references to arguments. Arguments
+  /// that are passed into the builder must out-live the builder.
+  class Builder {
+  public:
+    // Build from another MemRefType.
+    explicit Builder(MemRefType other)
+        : shape(other.getShape()), elementType(other.getElementType()),
+          affineMaps(other.getAffineMaps()),
+          memorySpace(other.getMemorySpace()) {}
+
+    // Build from scratch.
+    Builder(ArrayRef<int64_t> shape, Type elementType)
+        : shape(shape), elementType(elementType), affineMaps(), memorySpace(0) {
+    }
+
+    Builder &setShape(ArrayRef<int64_t> newShape) {
+      shape = newShape;
+      return *this;
+    }
+
+    Builder &setElementType(Type newElementType) {
+      elementType = newElementType;
+      return *this;
+    }
+
+    Builder &setAffineMaps(ArrayRef<AffineMap> newAffineMaps) {
+      affineMaps = newAffineMaps;
+      return *this;
+    }
+
+    Builder &setMemorySpace(unsigned newMemorySpace) {
+      memorySpace = newMemorySpace;
+      return *this;
+    }
+
+    operator MemRefType() {
+      return MemRefType::get(shape, elementType, affineMaps, memorySpace);
+    }
+
+  private:
+    ArrayRef<int64_t> shape;
+    Type elementType;
+    ArrayRef<AffineMap> affineMaps;
+    unsigned memorySpace;
+  };
+
   using Base::Base;
 
   /// Get or create a new MemRefType based on shape, element type, affine
@@ -548,6 +598,9 @@ public:
 LogicalResult getStridesAndOffset(MemRefType t,
                                   SmallVectorImpl<int64_t> &strides,
                                   int64_t &offset);
+LogicalResult getStridesAndOffset(MemRefType t,
+                                  SmallVectorImpl<AffineExpr> &strides,
+                                  AffineExpr &offset);
 
 /// Given a list of strides (in which MemRefType::getDynamicStrideOrOffset()
 /// represents a dynamic value), return the single result AffineMap which
@@ -569,6 +622,13 @@ LogicalResult getStridesAndOffset(MemRefType t,
 AffineMap makeStridedLinearLayoutMap(ArrayRef<int64_t> strides, int64_t offset,
                                      MLIRContext *context);
 
+/// Return a version of `t` with identity layout if it can be determined
+/// statically that the layout is the canonical contiguous strided layout.
+/// Otherwise pass `t`'s layout into `simplifyAffineMap` and return a copy of
+/// `t` with simplified layout.
+MemRefType canonicalizeStridedLayout(MemRefType t);
+
+/// Return true if the layout for `t` is compatible with strided semantics.
 bool isStrided(MemRefType t);
 
 } // end namespace mlir

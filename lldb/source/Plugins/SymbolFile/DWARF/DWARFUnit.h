@@ -79,6 +79,8 @@ public:
           DIERef::Section section, lldb::offset_t *offset_ptr);
   virtual ~DWARFUnit();
 
+  bool IsDWOUnit() { return m_is_dwo; }
+
   void ExtractUnitDIEIfNeeded();
   void ExtractDIEsIfNeeded();
 
@@ -152,8 +154,6 @@ public:
 
   lldb::ByteOrder GetByteOrder() const;
 
-  llvm::Expected<lldb_private::TypeSystem &> GetTypeSystem();
-
   const DWARFDebugAranges &GetFunctionAranges();
 
   void SetBaseAddress(dw_addr_t base_addr);
@@ -190,9 +190,7 @@ public:
 
   uint32_t GetProducerVersionUpdate();
 
-  static lldb::LanguageType LanguageTypeFromDWARF(uint64_t val);
-
-  lldb::LanguageType GetLanguageType();
+  uint64_t GetDWARFLanguageType();
 
   bool GetIsOptimized();
 
@@ -201,7 +199,7 @@ public:
   lldb_private::FileSpec GetFile(size_t file_idx);
   lldb_private::FileSpec::Style GetPathStyle();
 
-  SymbolFileDWARFDwo *GetDwoSymbolFile() const;
+  SymbolFileDWARFDwo *GetDwoSymbolFile();
 
   die_iterator_range dies() {
     ExtractDIEsIfNeeded();
@@ -243,11 +241,18 @@ public:
     return *Offset + m_loclists_base;
   }
 
+  /// Return the location table for parsing the given location list data. The
+  /// format is chosen according to the unit type. Never returns null.
+  std::unique_ptr<llvm::DWARFLocationTable>
+  GetLocationTable(const lldb_private::DataExtractor &data) const;
+
+  const lldb_private::DWARFDataExtractor &GetLocationData() const;
+
 protected:
   DWARFUnit(SymbolFileDWARF &dwarf, lldb::user_id_t uid,
             const DWARFUnitHeader &header,
             const DWARFAbbreviationDeclarationSet &abbrevs,
-            DIERef::Section section);
+            DIERef::Section section, bool is_dwo);
 
   llvm::Error ExtractHeader(SymbolFileDWARF &dwarf,
                             const lldb_private::DWARFDataExtractor &data,
@@ -297,7 +302,7 @@ protected:
   uint32_t m_producer_version_major = 0;
   uint32_t m_producer_version_minor = 0;
   uint32_t m_producer_version_update = 0;
-  lldb::LanguageType m_language_type = lldb::eLanguageTypeUnknown;
+  llvm::Optional<uint64_t> m_language_type;
   lldb_private::LazyBool m_is_optimized = lldb_private::eLazyBoolCalculate;
   llvm::Optional<lldb_private::FileSpec> m_comp_dir;
   llvm::Optional<lldb_private::FileSpec> m_file_spec;
@@ -314,6 +319,7 @@ protected:
   llvm::Optional<llvm::DWARFListTableHeader> m_loclist_table_header;
 
   const DIERef::Section m_section;
+  bool m_is_dwo;
 
 private:
   void ParseProducerInfo();

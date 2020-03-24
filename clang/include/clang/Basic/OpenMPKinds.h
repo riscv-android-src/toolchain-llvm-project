@@ -81,14 +81,6 @@ enum OpenMPDefaultClauseKind {
   OMPC_DEFAULT_unknown
 };
 
-/// OpenMP attributes for 'proc_bind' clause.
-enum OpenMPProcBindClauseKind {
-#define OPENMP_PROC_BIND_KIND(Name) \
-  OMPC_PROC_BIND_##Name,
-#include "clang/Basic/OpenMPKinds.def"
-  OMPC_PROC_BIND_unknown
-};
-
 /// OpenMP attributes for 'schedule' clause.
 enum OpenMPScheduleClauseKind {
 #define OPENMP_SCHEDULE_KIND(Name) \
@@ -200,6 +192,13 @@ enum OpenMPLastprivateModifier {
 #define OPENMP_LASTPRIVATE_KIND(Name) OMPC_LASTPRIVATE_##Name,
 #include "clang/Basic/OpenMPKinds.def"
   OMPC_LASTPRIVATE_unknown,
+};
+
+/// OpenMP attributes for 'order' clause.
+enum OpenMPOrderClauseKind {
+#define OPENMP_ORDER_KIND(Name) OMPC_ORDER_##Name,
+#include "clang/Basic/OpenMPKinds.def"
+  OMPC_ORDER_unknown,
 };
 
 /// Scheduling data for loop-based OpenMP directives.

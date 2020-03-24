@@ -1,6 +1,6 @@
 //===- PassOptions.h - Pass Option Utilities --------------------*- C++ -*-===//
 //
-// Part of the MLIR Project, under the Apache License v2.0 with LLVM Exceptions.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
@@ -176,7 +176,8 @@ public:
 
     /// Copy the value from the given option into this one.
     void copyValueFrom(const OptionBase &other) final {
-      (*this) = ArrayRef<DataType>((ListOption<DataType> &)other);
+      (*this) = ArrayRef<DataType>(
+          (ListOption<DataType> &)(const_cast<OptionBase &>(other)));
     }
   };
 
