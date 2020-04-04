@@ -109,7 +109,8 @@ def OP_OR       : Op<(op "|", $p0, $p1)>;
 def OP_XOR      : Op<(op "^", $p0, $p1)>;
 def OP_ANDN     : Op<(op "&", $p0, (op "~", $p1))>;
 def OP_ORN      : Op<(op "|", $p0, (op "~", $p1))>;
-def OP_CAST     : Op<(cast "R", $p0)>;
+def OP_CAST     : LOp<[(save_temp $promote, $p0),
+                       (cast "R", $promote)]>;
 def OP_HI       : Op<(shuffle $p0, $p0, (highhalf mask0))>;
 def OP_LO       : Op<(shuffle $p0, $p0, (lowhalf mask0))>;
 def OP_CONC     : Op<(shuffle $p0, $p1, (add mask0, mask1))>;
@@ -527,9 +528,16 @@ def VMULL_LANE    : SOpInst<"vmull_lane", "(>Q)..I", "siUsUi", OP_MULL_LN>;
 def VQDMULL_N     : SOpInst<"vqdmull_n", "(>Q).1", "si", OP_QDMULL_N>;
 def VQDMULL_LANE  : SOpInst<"vqdmull_lane", "(>Q)..I", "si", OP_QDMULL_LN>;
 def VQDMULH_N     : SOpInst<"vqdmulh_n", "..1", "siQsQi", OP_QDMULH_N>;
-def VQDMULH_LANE  : SOpInst<"vqdmulh_lane", "..qI", "siQsQi", OP_QDMULH_LN>;
 def VQRDMULH_N    : SOpInst<"vqrdmulh_n", "..1", "siQsQi", OP_QRDMULH_N>;
+
+let ArchGuard = "!defined(__aarch64__)" in {
+def VQDMULH_LANE  : SOpInst<"vqdmulh_lane", "..qI", "siQsQi", OP_QDMULH_LN>;
 def VQRDMULH_LANE : SOpInst<"vqrdmulh_lane", "..qI", "siQsQi", OP_QRDMULH_LN>;
+}
+let ArchGuard = "defined(__aarch64__)" in {
+def A64_VQDMULH_LANE  : SInst<"vqdmulh_lane", "..qI", "siQsQi">;
+def A64_VQRDMULH_LANE : SInst<"vqrdmulh_lane", "..qI", "siQsQi">;
+}
 
 let ArchGuard = "defined(__ARM_FEATURE_QRDMX)" in {
 def VQRDMLAH_LANE : SOpInst<"vqrdmlah_lane", "...qI", "siQsQi", OP_QRDMLAH_LN>;
@@ -950,9 +958,10 @@ def VQDMULL_HIGH_LANE   : SOpInst<"vqdmull_high_lane", "(>Q)Q.I", "si",
 def VQDMULL_HIGH_LANEQ  : SOpInst<"vqdmull_high_laneq", "(>Q)QQI", "si",
                                   OP_QDMULLHi_LN>;
 
-def VQDMULH_LANEQ  : SOpInst<"vqdmulh_laneq", "..QI", "siQsQi", OP_QDMULH_LN>;
-def VQRDMULH_LANEQ : SOpInst<"vqrdmulh_laneq", "..QI", "siQsQi", OP_QRDMULH_LN>;
-
+let isLaneQ = 1 in {
+def VQDMULH_LANEQ  : SInst<"vqdmulh_laneq", "..QI", "siQsQi">;
+def VQRDMULH_LANEQ : SInst<"vqrdmulh_laneq", "..QI", "siQsQi">;
+}
 let ArchGuard = "defined(__ARM_FEATURE_QRDMX) && defined(__aarch64__)" in {
 def VQRDMLAH_LANEQ : SOpInst<"vqrdmlah_laneq", "...QI", "siQsQi", OP_QRDMLAH_LN>;
 def VQRDMLSH_LANEQ : SOpInst<"vqrdmlsh_laneq", "...QI", "siQsQi", OP_QRDMLSH_LN>;
@@ -1671,4 +1680,22 @@ let ArchGuard = "defined(__ARM_FEATURE_FP16FML) && defined(__aarch64__)" in {
   def VFMLSL_LANEQ_LOW  : SOpInst<"vfmlsl_laneq_low",  "(F>)(F>)F(FQ)I", "hQh", OP_FMLSL_LN>;
   def VFMLAL_LANEQ_HIGH : SOpInst<"vfmlal_laneq_high", "(F>)(F>)F(FQ)I", "hQh", OP_FMLAL_LN_Hi>;
   def VFMLSL_LANEQ_HIGH : SOpInst<"vfmlsl_laneq_high", "(F>)(F>)F(FQ)I", "hQh", OP_FMLSL_LN_Hi>;
+}
+
+// v8.3-A Vector complex addition intrinsics
+let ArchGuard = "defined(__ARM_FEATURE_COMPLEX) && defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC)" in {
+  def VCADD_ROT90_FP16   : SInst<"vcadd_rot90", "...", "h">;
+  def VCADD_ROT270_FP16  : SInst<"vcadd_rot270", "...", "h">;
+  def VCADDQ_ROT90_FP16  : SInst<"vcaddq_rot90", "QQQ", "h">;
+  def VCADDQ_ROT270_FP16 : SInst<"vcaddq_rot270", "QQQ", "h">;
+}
+let ArchGuard = "defined(__ARM_FEATURE_COMPLEX)" in {
+  def VCADD_ROT90   : SInst<"vcadd_rot90", "...", "f">;
+  def VCADD_ROT270  : SInst<"vcadd_rot270", "...", "f">;
+  def VCADDQ_ROT90  : SInst<"vcaddq_rot90", "QQQ", "f">;
+  def VCADDQ_ROT270 : SInst<"vcaddq_rot270", "QQQ", "f">;
+}
+let ArchGuard = "defined(__ARM_FEATURE_COMPLEX) && defined(__aarch64__)" in {
+  def VCADDQ_ROT90_FP64  : SInst<"vcaddq_rot90", "QQQ", "d">;
+  def VCADDQ_ROT270_FP64 : SInst<"vcaddq_rot270", "QQQ", "d">;
 }

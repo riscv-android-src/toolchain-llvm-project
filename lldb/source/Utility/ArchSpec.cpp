@@ -1,4 +1,4 @@
-//===-- ArchSpec.cpp --------------------------------------------*- C++ -*-===//
+//===-- ArchSpec.cpp ------------------------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -9,17 +9,13 @@
 #include "lldb/Utility/ArchSpec.h"
 
 #include "lldb/Utility/Log.h"
-#include "lldb/Utility/NameMatches.h"
-#include "lldb/Utility/Stream.h"
 #include "lldb/Utility/StringList.h"
 #include "lldb/lldb-defines.h"
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/ADT/Twine.h"
 #include "llvm/BinaryFormat/COFF.h"
 #include "llvm/BinaryFormat/ELF.h"
 #include "llvm/BinaryFormat/MachO.h"
 #include "llvm/Support/Compiler.h"
-#include "llvm/Support/Host.h"
 
 using namespace lldb;
 using namespace lldb_private;
@@ -104,9 +100,9 @@ static const CoreDefinition g_core_definitions[] = {
     {eByteOrderLittle, 8, 4, 4, llvm::Triple::aarch64,
      ArchSpec::eCore_arm_armv8, "armv8"},
     {eByteOrderLittle, 4, 2, 4, llvm::Triple::arm,
-      ArchSpec::eCore_arm_armv8l, "armv8l"},
+     ArchSpec::eCore_arm_armv8l, "armv8l"},
     {eByteOrderLittle, 4, 4, 4, llvm::Triple::aarch64_32,
-      ArchSpec::eCore_arm_arm64_32, "arm64_32"},
+     ArchSpec::eCore_arm_arm64_32, "arm64_32"},
     {eByteOrderLittle, 8, 4, 4, llvm::Triple::aarch64,
      ArchSpec::eCore_arm_aarch64, "aarch64"},
 
@@ -220,7 +216,12 @@ static const CoreDefinition g_core_definitions[] = {
      ArchSpec::eCore_uknownMach32, "unknown-mach-32"},
     {eByteOrderLittle, 8, 4, 4, llvm::Triple::UnknownArch,
      ArchSpec::eCore_uknownMach64, "unknown-mach-64"},
-    {eByteOrderLittle, 4, 2, 4, llvm::Triple::arc, ArchSpec::eCore_arc, "arc"}
+    {eByteOrderLittle, 4, 2, 4, llvm::Triple::arc, ArchSpec::eCore_arc, "arc"},
+
+    {eByteOrderLittle, 2, 2, 4, llvm::Triple::avr, ArchSpec::eCore_avr, "avr"},
+
+    {eByteOrderLittle, 4, 1, 4, llvm::Triple::wasm32, ArchSpec::eCore_wasm32,
+     "wasm32"},
 };
 
 // Ensure that we have an entry in the g_core_definitions for each core. If you
@@ -448,7 +449,9 @@ static const ArchDefinitionEntry g_elf_arch_entries[] = {
     {ArchSpec::eCore_hexagon_generic, llvm::ELF::EM_HEXAGON,
      LLDB_INVALID_CPUTYPE, 0xFFFFFFFFu, 0xFFFFFFFFu}, // HEXAGON
     {ArchSpec::eCore_arc, llvm::ELF::EM_ARC_COMPACT2, LLDB_INVALID_CPUTYPE,
-     0xFFFFFFFFu, 0xFFFFFFFFu }, // ARC
+     0xFFFFFFFFu, 0xFFFFFFFFu}, // ARC
+    {ArchSpec::eCore_avr, llvm::ELF::EM_AVR, LLDB_INVALID_CPUTYPE,
+     0xFFFFFFFFu, 0xFFFFFFFFu}, // AVR
 };
 
 static const ArchDefinition g_elf_arch_def = {
@@ -868,7 +871,7 @@ void ArchSpec::MergeFrom(const ArchSpec &other) {
       IsCompatibleMatch(other) && GetCore() == ArchSpec::eCore_arm_generic &&
       other.GetCore() != ArchSpec::eCore_arm_generic) {
     m_core = other.GetCore();
-    CoreUpdated(true);
+    CoreUpdated(false);
   }
   if (GetFlags() == 0) {
     SetFlags(other.GetFlags());
@@ -1443,21 +1446,24 @@ bool ArchSpec::IsAlwaysThumbInstructions() const {
         GetCore() == ArchSpec::Core::eCore_thumbv6m) {
       return true;
     }
+    // Windows on ARM is always thumb.
+    if (GetTriple().isOSWindows())
+      return true;
   }
   return false;
 }
 
-void ArchSpec::DumpTriple(Stream &s) const {
+void ArchSpec::DumpTriple(llvm::raw_ostream &s) const {
   const llvm::Triple &triple = GetTriple();
   llvm::StringRef arch_str = triple.getArchName();
   llvm::StringRef vendor_str = triple.getVendorName();
   llvm::StringRef os_str = triple.getOSName();
   llvm::StringRef environ_str = triple.getEnvironmentName();
 
-  s.Printf("%s-%s-%s", arch_str.empty() ? "*" : arch_str.str().c_str(),
-           vendor_str.empty() ? "*" : vendor_str.str().c_str(),
-           os_str.empty() ? "*" : os_str.str().c_str());
+  s << llvm::formatv("{0}-{1}-{2}", arch_str.empty() ? "*" : arch_str,
+                     vendor_str.empty() ? "*" : vendor_str,
+                     os_str.empty() ? "*" : os_str);
 
   if (!environ_str.empty())
-    s.Printf("-%s", environ_str.str().c_str());
+    s << "-" << environ_str;
 }

@@ -132,7 +132,8 @@ bool llvm::forcePrintModuleIR() { return PrintModuleScope; }
 bool llvm::isFunctionInPrintList(StringRef FunctionName) {
   static std::unordered_set<std::string> PrintFuncNames(PrintFuncsList.begin(),
                                                         PrintFuncsList.end());
-  return PrintFuncNames.empty() || PrintFuncNames.count(FunctionName);
+  return PrintFuncNames.empty() ||
+         PrintFuncNames.count(std::string(FunctionName));
 }
 /// isPassDebuggingExecutionsOrMore - Return true if -debug-pass=Executions
 /// or higher is specified.
@@ -239,7 +240,7 @@ void PMDataManager::emitInstrCountChangedRemark(
 
   // Helper lambda that emits a remark when the size of a function has changed.
   auto EmitFunctionSizeChangedRemark = [&FunctionToInstrCount, &F, &BB,
-                                        &PassName](const std::string &Fname) {
+                                        &PassName](StringRef Fname) {
     unsigned FnCountBefore, FnCountAfter;
     std::pair<unsigned, unsigned> &Change = FunctionToInstrCount[Fname];
     std::tie(FnCountBefore, FnCountAfter) = Change;
@@ -1776,58 +1777,42 @@ LLVM_DUMP_METHOD void PMStack::dump() const {
 void ModulePass::assignPassManager(PMStack &PMS,
                                    PassManagerType PreferredType) {
   // Find Module Pass Manager
-  while (!PMS.empty()) {
-    PassManagerType TopPMType = PMS.top()->getPassManagerType();
-    if (TopPMType == PreferredType)
-      break; // We found desired pass manager
-    else if (TopPMType > PMT_ModulePassManager)
-      PMS.pop();    // Pop children pass managers
-    else
-      break;
-  }
-  assert(!PMS.empty() && "Unable to find appropriate Pass Manager");
+  PassManagerType T;
+  while ((T = PMS.top()->getPassManagerType()) > PMT_ModulePassManager &&
+         T != PreferredType)
+    PMS.pop();
   PMS.top()->add(this);
 }
 
 /// Find appropriate Function Pass Manager or Call Graph Pass Manager
 /// in the PM Stack and add self into that manager.
 void FunctionPass::assignPassManager(PMStack &PMS,
-                                     PassManagerType PreferredType) {
-
+                                     PassManagerType /*PreferredType*/) {
   // Find Function Pass Manager
-  while (!PMS.empty()) {
-    if (PMS.top()->getPassManagerType() > PMT_FunctionPassManager)
-      PMS.pop();
-    else
-      break;
-  }
+  PMDataManager *PM;
+  while (PM = PMS.top(), PM->getPassManagerType() > PMT_FunctionPassManager)
+    PMS.pop();
 
   // Create new Function Pass Manager if needed.
-  FPPassManager *FPP;
-  if (PMS.top()->getPassManagerType() == PMT_FunctionPassManager) {
-    FPP = (FPPassManager *)PMS.top();
-  } else {
-    assert(!PMS.empty() && "Unable to create Function Pass Manager");
-    PMDataManager *PMD = PMS.top();
-
+  if (PM->getPassManagerType() != PMT_FunctionPassManager) {
     // [1] Create new Function Pass Manager
-    FPP = new FPPassManager();
+    auto *FPP = new FPPassManager;
     FPP->populateInheritedAnalysis(PMS);
 
     // [2] Set up new manager's top level manager
-    PMTopLevelManager *TPM = PMD->getTopLevelManager();
-    TPM->addIndirectPassManager(FPP);
+    PM->getTopLevelManager()->addIndirectPassManager(FPP);
 
     // [3] Assign manager to manage this new manager. This may create
     // and push new managers into PMS
-    FPP->assignPassManager(PMS, PMD->getPassManagerType());
+    FPP->assignPassManager(PMS, PM->getPassManagerType());
 
     // [4] Push new manager into PMS
     PMS.push(FPP);
+    PM = FPP;
   }
 
   // Assign FPP as the manager of this pass.
-  FPP->add(this);
+  PM->add(this);
 }
 
 PassManagerBase::~PassManagerBase() {}

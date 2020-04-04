@@ -1261,7 +1261,7 @@ void X86FrameLowering::emitPrologue(MachineFunction &MF,
     if (Is64Bit) {
       // Handle the 64-bit Windows ABI case where we need to call __chkstk.
       // Function prologue is responsible for adjusting the stack pointer.
-      int Alloc = isEAXAlive ? NumBytes - 8 : NumBytes;
+      int64_t Alloc = isEAXAlive ? NumBytes - 8 : NumBytes;
       if (isUInt<32>(Alloc)) {
         BuildMI(MBB, MBBI, DL, TII.get(X86::MOV32ri), X86::EAX)
             .addImm(Alloc)
@@ -3218,4 +3218,25 @@ void X86FrameLowering::processFunctionBeforeFrameFinalized(
   addFrameReference(BuildMI(MBB, MBBI, DL, TII.get(X86::MOV64mi32)),
                     UnwindHelpFI)
       .addImm(-2);
+}
+
+void X86FrameLowering::processFunctionBeforeFrameIndicesReplaced(
+    MachineFunction &MF, RegScavenger *RS) const {
+  if (STI.is32Bit() && MF.hasEHFunclets())
+    restoreWinEHStackPointersInParent(MF);
+}
+
+void X86FrameLowering::restoreWinEHStackPointersInParent(
+    MachineFunction &MF) const {
+  // 32-bit functions have to restore stack pointers when control is transferred
+  // back to the parent function. These blocks are identified as eh pads that
+  // are not funclet entries.
+  bool IsSEH = isAsynchronousEHPersonality(
+      classifyEHPersonality(MF.getFunction().getPersonalityFn()));
+  for (MachineBasicBlock &MBB : MF) {
+    bool NeedsRestore = MBB.isEHPad() && !MBB.isEHFuncletEntry();
+    if (NeedsRestore)
+      restoreWin32EHStackPointers(MBB, MBB.begin(), DebugLoc(),
+                                  /*RestoreSP=*/IsSEH);
+  }
 }

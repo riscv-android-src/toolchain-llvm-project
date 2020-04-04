@@ -124,6 +124,8 @@ void DAGTypeLegalizer::PerformExpensiveChecks() {
         Mapped |= 128;
       if (ResId && PromotedFloats.find(ResId) != PromotedFloats.end())
         Mapped |= 256;
+      if (ResId && SoftPromotedHalfs.find(ResId) != SoftPromotedHalfs.end())
+        Mapped |= 512;
 
       if (Node.getNodeId() != Processed) {
         // Since we allow ReplacedValues to map deleted nodes, it may map nodes
@@ -168,6 +170,8 @@ void DAGTypeLegalizer::PerformExpensiveChecks() {
           dbgs() << " WidenedVectors";
         if (Mapped & 256)
           dbgs() << " PromotedFloats";
+        if (Mapped & 512)
+          dbgs() << " SoftPromoteHalfs";
         dbgs() << "\n";
         llvm_unreachable(nullptr);
       }
@@ -204,7 +208,8 @@ bool DAGTypeLegalizer::run() {
   // non-leaves.
   for (SDNode &Node : DAG.allnodes()) {
     if (Node.getNumOperands() == 0) {
-      AddToWorklist(&Node);
+      Node.setNodeId(ReadyToProcess);
+      Worklist.push_back(&Node);
     } else {
       Node.setNodeId(Unanalyzed);
     }
@@ -275,6 +280,10 @@ bool DAGTypeLegalizer::run() {
         PromoteFloatResult(N, i);
         Changed = true;
         goto NodeDone;
+      case TargetLowering::TypeSoftPromoteHalf:
+        SoftPromoteHalfResult(N, i);
+        Changed = true;
+        goto NodeDone;
       }
     }
 
@@ -329,6 +338,10 @@ ScanOperands:
         break;
       case TargetLowering::TypePromoteFloat:
         NeedsReanalyzing = PromoteFloatOperand(N, i);
+        Changed = true;
+        break;
+      case TargetLowering::TypeSoftPromoteHalf:
+        NeedsReanalyzing = SoftPromoteHalfOperand(N, i);
         Changed = true;
         break;
       }
@@ -718,6 +731,16 @@ void DAGTypeLegalizer::SetPromotedFloat(SDValue Op, SDValue Result) {
   OpIdEntry = getTableId(Result);
 }
 
+void DAGTypeLegalizer::SetSoftPromotedHalf(SDValue Op, SDValue Result) {
+  assert(Result.getValueType() == MVT::i16 &&
+         "Invalid type for soft-promoted half");
+  AnalyzeNewValue(Result);
+
+  auto &OpIdEntry = SoftPromotedHalfs[getTableId(Op)];
+  assert((OpIdEntry == 0) && "Node is already promoted!");
+  OpIdEntry = getTableId(Result);
+}
+
 void DAGTypeLegalizer::SetScalarizedVector(SDValue Op, SDValue Result) {
   // Note that in some cases vector operation operands may be greater than
   // the vector element type. For example BUILD_VECTOR of type <1 x i1> with
@@ -972,32 +995,6 @@ SDValue DAGTypeLegalizer::JoinIntegers(SDValue Lo, SDValue Hi) {
   Hi = DAG.getNode(ISD::SHL, dlHi, NVT, Hi,
                    DAG.getConstant(LVT.getSizeInBits(), dlHi, ShiftAmtVT));
   return DAG.getNode(ISD::OR, dlHi, NVT, Lo, Hi);
-}
-
-/// Convert the node into a libcall with the same prototype.
-SDValue DAGTypeLegalizer::LibCallify(RTLIB::Libcall LC, SDNode *N,
-                                     bool isSigned) {
-  TargetLowering::MakeLibCallOptions CallOptions;
-  CallOptions.setSExt(isSigned);
-  unsigned NumOps = N->getNumOperands();
-  SDLoc dl(N);
-  if (NumOps == 0) {
-    return TLI.makeLibCall(DAG, LC, N->getValueType(0), None, CallOptions,
-                           dl).first;
-  } else if (NumOps == 1) {
-    SDValue Op = N->getOperand(0);
-    return TLI.makeLibCall(DAG, LC, N->getValueType(0), Op, CallOptions,
-                           dl).first;
-  } else if (NumOps == 2) {
-    SDValue Ops[2] = { N->getOperand(0), N->getOperand(1) };
-    return TLI.makeLibCall(DAG, LC, N->getValueType(0), Ops, CallOptions,
-                           dl).first;
-  }
-  SmallVector<SDValue, 8> Ops(NumOps);
-  for (unsigned i = 0; i < NumOps; ++i)
-    Ops[i] = N->getOperand(i);
-
-  return TLI.makeLibCall(DAG, LC, N->getValueType(0), Ops, CallOptions, dl).first;
 }
 
 /// Promote the given target boolean to a target boolean of the given type.

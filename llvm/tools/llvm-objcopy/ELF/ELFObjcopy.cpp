@@ -83,6 +83,8 @@ uint64_t getNewShfFlags(SectionFlag AllFlags) {
     NewFlags |= ELF::SHF_MERGE;
   if (AllFlags & SectionFlag::SecStrings)
     NewFlags |= ELF::SHF_STRINGS;
+  if (AllFlags & SectionFlag::SecExclude)
+    NewFlags |= ELF::SHF_EXCLUDE;
   return NewFlags;
 }
 
@@ -90,10 +92,11 @@ static uint64_t getSectionFlagsPreserveMask(uint64_t OldFlags,
                                             uint64_t NewFlags) {
   // Preserve some flags which should not be dropped when setting flags.
   // Also, preserve anything OS/processor dependant.
-  const uint64_t PreserveMask = ELF::SHF_COMPRESSED | ELF::SHF_EXCLUDE |
-                                ELF::SHF_GROUP | ELF::SHF_LINK_ORDER |
-                                ELF::SHF_MASKOS | ELF::SHF_MASKPROC |
-                                ELF::SHF_TLS | ELF::SHF_INFO_LINK;
+  const uint64_t PreserveMask =
+      (ELF::SHF_COMPRESSED | ELF::SHF_GROUP | ELF::SHF_LINK_ORDER |
+       ELF::SHF_MASKOS | ELF::SHF_MASKPROC | ELF::SHF_TLS |
+       ELF::SHF_INFO_LINK) &
+      ~ELF::SHF_EXCLUDE;
   return (OldFlags & PreserveMask) | (NewFlags & ~PreserveMask);
 }
 
@@ -175,7 +178,7 @@ findBuildID(const CopyConfig &Config, const object::ELFFile<ELFT> &In) {
     if (Phdr.p_type != PT_NOTE)
       continue;
     Error Err = Error::success();
-    for (const auto &Note : In.notes(Phdr, Err))
+    for (auto Note : In.notes(Phdr, Err))
       if (Note.getType() == NT_GNU_BUILD_ID && Note.getName() == ELF_NOTE_GNU)
         return Note.getDesc();
     if (Err)
@@ -387,7 +390,7 @@ static Error updateAndRemoveSymbols(const CopyConfig &Config, Object &Obj) {
 
     const auto I = Config.SymbolsToRename.find(Sym.Name);
     if (I != Config.SymbolsToRename.end())
-      Sym.Name = I->getValue();
+      Sym.Name = std::string(I->getValue());
 
     if (!Config.SymbolsPrefix.empty() && Sym.Type != STT_SECTION)
       Sym.Name = (Config.SymbolsPrefix + Sym.Name).str();
@@ -624,7 +627,7 @@ static Error handleArgs(const CopyConfig &Config, Object &Obj,
       const auto Iter = Config.SectionsToRename.find(Sec.Name);
       if (Iter != Config.SectionsToRename.end()) {
         const SectionRename &SR = Iter->second;
-        Sec.Name = SR.NewName;
+        Sec.Name = std::string(SR.NewName);
         if (SR.NewFlags.hasValue())
           setSectionFlagsAndType(Sec, SR.NewFlags.getValue());
       }

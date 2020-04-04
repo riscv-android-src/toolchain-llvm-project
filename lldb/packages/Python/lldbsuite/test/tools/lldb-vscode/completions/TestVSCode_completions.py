@@ -2,7 +2,6 @@
 Test lldb-vscode completions request
 """
 
-from __future__ import print_function
 
 import lldbvscode_testcase
 import unittest2
@@ -25,7 +24,6 @@ class TestVSCode_variables(lldbvscode_testcase.VSCodeTestCaseBase):
 
     @skipIfWindows
     @skipIfDarwin # Skip this test for now until we can figure out why tings aren't working on build bots
-    @no_debug_info_test
     def test_completions(self):
         """
             Tests the completion request at different breakpoints
@@ -114,4 +112,77 @@ class TestVSCode_variables(lldbvscode_testcase.VSCodeTestCaseBase):
                     "label": "command -- Commands for managing custom LLDB commands.",
                 }
             ],
+        )
+
+        self.verify_completions(
+            self.vscode.get_completions("foo1.v"),
+            [
+                {
+                    "text": "var1",
+                    "label": "foo1.var1 -- int"
+                }
+            ]
+        )
+
+        self.verify_completions(
+            self.vscode.get_completions("foo1.my_bar_object.v"),
+            [
+                {
+                    "text": "var1",
+                    "label": "foo1.my_bar_object.var1 -- int"
+                }
+            ]
+        )
+
+        self.verify_completions(
+            self.vscode.get_completions("foo1.var1 + foo1.v"),
+            [
+                {
+                    "text": "var1",
+                    "label": "foo1.var1 -- int"
+                }
+            ]
+        )
+
+        self.verify_completions(
+            self.vscode.get_completions("foo1.var1 + v"),
+            [
+                {
+                    "text": "var1",
+                    "label": "var1 -- int &"
+                }
+            ]
+        )
+
+        #should correctly handle spaces between objects and member operators
+        self.verify_completions(
+            self.vscode.get_completions("foo1 .v"),
+            [
+                {
+                    "text": "var1",
+                    "label": ".var1 -- int"
+                }
+            ],
+            [
+                {
+                    "text": "var2",
+                    "label": ".var2 -- int"
+                }
+            ]
+        )
+
+        self.verify_completions(
+            self.vscode.get_completions("foo1 . v"),
+            [
+                {
+                    "text": "var1",
+                    "label": "var1 -- int"
+                }
+            ], 
+            [
+                {
+                    "text": "var2",
+                    "label": "var2 -- int"
+                }
+            ]
         )

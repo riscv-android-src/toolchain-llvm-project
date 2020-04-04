@@ -1,4 +1,4 @@
-//===-- ValueObject.cpp -----------------------------------------*- C++ -*-===//
+//===-- ValueObject.cpp ---------------------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -22,10 +22,9 @@
 #include "lldb/DataFormatters/StringPrinter.h"
 #include "lldb/DataFormatters/TypeFormat.h"
 #include "lldb/DataFormatters/TypeSummary.h"
-#include "lldb/DataFormatters/TypeValidator.h"
 #include "lldb/DataFormatters/ValueObjectPrinter.h"
 #include "lldb/Expression/ExpressionVariable.h"
-#include "lldb/Symbol/ClangASTContext.h"
+#include "lldb/Host/Config.h"
 #include "lldb/Symbol/CompileUnit.h"
 #include "lldb/Symbol/CompilerType.h"
 #include "lldb/Symbol/Declaration.h"
@@ -82,13 +81,12 @@ ValueObject::ValueObject(ValueObject &parent)
       m_parent(&parent), m_root(nullptr),
       m_update_point(parent.GetUpdatePoint()), m_name(), m_data(), m_value(),
       m_error(), m_value_str(), m_old_value_str(), m_location_str(),
-      m_summary_str(), m_object_desc_str(), m_validation_result(),
-      m_manager(parent.GetManager()), m_children(), m_synthetic_children(),
-      m_dynamic_value(nullptr), m_synthetic_value(nullptr),
-      m_deref_valobj(nullptr), m_format(eFormatDefault),
-      m_last_format(eFormatDefault), m_last_format_mgr_revision(0),
-      m_type_summary_sp(), m_type_format_sp(), m_synthetic_children_sp(),
-      m_type_validator_sp(), m_user_id_of_forced_summary(),
+      m_summary_str(), m_object_desc_str(), m_manager(parent.GetManager()),
+      m_children(), m_synthetic_children(), m_dynamic_value(nullptr),
+      m_synthetic_value(nullptr), m_deref_valobj(nullptr),
+      m_format(eFormatDefault), m_last_format(eFormatDefault),
+      m_last_format_mgr_revision(0), m_type_summary_sp(), m_type_format_sp(),
+      m_synthetic_children_sp(), m_user_id_of_forced_summary(),
       m_address_type_of_ptr_or_ref_children(eAddressTypeInvalid),
       m_value_checksum(),
       m_preferred_display_language(lldb::eLanguageTypeUnknown),
@@ -112,12 +110,12 @@ ValueObject::ValueObject(ExecutionContextScope *exe_scope,
       m_parent(nullptr), m_root(nullptr), m_update_point(exe_scope), m_name(),
       m_data(), m_value(), m_error(), m_value_str(), m_old_value_str(),
       m_location_str(), m_summary_str(), m_object_desc_str(),
-      m_validation_result(), m_manager(), m_children(), m_synthetic_children(),
+      m_manager(), m_children(), m_synthetic_children(),
       m_dynamic_value(nullptr), m_synthetic_value(nullptr),
       m_deref_valobj(nullptr), m_format(eFormatDefault),
       m_last_format(eFormatDefault), m_last_format_mgr_revision(0),
       m_type_summary_sp(), m_type_format_sp(), m_synthetic_children_sp(),
-      m_type_validator_sp(), m_user_id_of_forced_summary(),
+      m_user_id_of_forced_summary(),
       m_address_type_of_ptr_or_ref_children(child_ptr_or_ref_addr_type),
       m_value_checksum(),
       m_preferred_display_language(lldb::eLanguageTypeUnknown),
@@ -304,11 +302,10 @@ bool ValueObject::UpdateFormatsIfNeeded() {
     SetValueFormat(DataVisualization::GetFormat(*this, eNoDynamicValues));
     SetSummaryFormat(
         DataVisualization::GetSummaryFormat(*this, GetDynamicValueType()));
-#ifndef LLDB_DISABLE_PYTHON
+#if LLDB_ENABLE_PYTHON
     SetSyntheticChildren(
         DataVisualization::GetSyntheticChildren(*this, GetDynamicValueType()));
 #endif
-    SetValidator(DataVisualization::GetValidator(*this, GetDynamicValueType()));
   }
 
   return any_change;
@@ -418,7 +415,7 @@ const char *ValueObject::GetLocationAsCStringImpl(const Value &value,
         uint32_t addr_nibble_size = data.GetAddressByteSize() * 2;
         sstr.Printf("0x%*.*llx", addr_nibble_size, addr_nibble_size,
                     value.GetScalar().ULongLong(LLDB_INVALID_ADDRESS));
-        m_location_str = sstr.GetString();
+        m_location_str = std::string(sstr.GetString());
       } break;
       }
     }
@@ -1104,23 +1101,6 @@ ValueObject::ReadPointedString(lldb::DataBufferSP &buffer_sp, Status &error,
   return {total_bytes_read, was_capped};
 }
 
-std::pair<TypeValidatorResult, std::string> ValueObject::GetValidationStatus() {
-  if (!UpdateValueIfNeeded(true))
-    return {TypeValidatorResult::Success,
-            ""}; // not the validator's job to discuss update problems
-
-  if (m_validation_result.hasValue())
-    return m_validation_result.getValue();
-
-  if (!m_type_validator_sp)
-    return {TypeValidatorResult::Success, ""}; // no validator no failure
-
-  auto outcome = m_type_validator_sp->FormatObject(this);
-
-  return (m_validation_result = {outcome.m_result, outcome.m_message})
-      .getValue();
-}
-
 const char *ValueObject::GetObjectDescription() {
   if (!UpdateValueIfNeeded(true))
     return nullptr;
@@ -1139,7 +1119,7 @@ const char *ValueObject::GetObjectDescription() {
     if (LanguageRuntime *runtime = process->GetLanguageRuntime(language)) {
       StreamString s;
       if (runtime->GetObjectDescription(s, *this)) {
-        m_object_desc_str.append(s.GetString());
+        m_object_desc_str.append(std::string(s.GetString()));
         return m_object_desc_str.c_str();
       }
     }
@@ -1466,7 +1446,7 @@ bool ValueObject::DumpPrintableRepresentation(
       break;
 
     case eValueObjectRepresentationStyleExpressionPath:
-      GetExpressionPath(strm, false);
+      GetExpressionPath(strm);
       str = strm.GetString();
       break;
     }
@@ -2032,23 +2012,6 @@ bool ValueObject::HasSyntheticValue() {
   return m_synthetic_value != nullptr;
 }
 
-bool ValueObject::GetBaseClassPath(Stream &s) {
-  if (IsBaseClass()) {
-    bool parent_had_base_class =
-        GetParent() && GetParent()->GetBaseClassPath(s);
-    CompilerType compiler_type = GetCompilerType();
-    llvm::Optional<std::string> cxx_class_name =
-        ClangASTContext::GetCXXClassName(compiler_type);
-    if (cxx_class_name) {
-      if (parent_had_base_class)
-        s.PutCString("::");
-      s.PutCString(cxx_class_name.getValue());
-    }
-    return parent_had_base_class || cxx_class_name;
-  }
-  return false;
-}
-
 ValueObject *ValueObject::GetNonBaseClassParent() {
   if (GetParent()) {
     if (GetParent()->IsBaseClass())
@@ -2074,7 +2037,7 @@ bool ValueObject::IsBaseClass(uint32_t &depth) {
   return true;
 }
 
-void ValueObject::GetExpressionPath(Stream &s, bool qualify_cxx_base_classes,
+void ValueObject::GetExpressionPath(Stream &s,
                                     GetExpressionPathFormat epformat) {
   // synthetic children do not actually "exist" as part of the hierarchy, and
   // sometimes they are consed up in ways that don't make sense from an
@@ -2123,7 +2086,7 @@ void ValueObject::GetExpressionPath(Stream &s, bool qualify_cxx_base_classes,
   ValueObject *parent = GetParent();
 
   if (parent)
-    parent->GetExpressionPath(s, qualify_cxx_base_classes, epformat);
+    parent->GetExpressionPath(s, epformat);
 
   // if we are a deref_of_parent just because we are synthetic array members
   // made up to allow ptr[%d] syntax to work in variable printing, then add our
@@ -2158,13 +2121,8 @@ void ValueObject::GetExpressionPath(Stream &s, bool qualify_cxx_base_classes,
       }
 
       const char *name = GetName().GetCString();
-      if (name) {
-        if (qualify_cxx_base_classes) {
-          if (GetBaseClassPath(s))
-            s.PutCString("::");
-        }
+      if (name)
         s.PutCString(name);
-      }
     }
   }
 
@@ -2878,6 +2836,9 @@ ValueObjectSP ValueObject::Dereference(Status &error) {
         GetSyntheticValue()
             ->GetChildMemberWithName(ConstString("$$dereference$$"), true)
             .get();
+  } else if (IsSynthetic()) {
+    m_deref_valobj =
+        GetChildMemberWithName(ConstString("$$dereference$$"), true).get();
   }
 
   if (m_deref_valobj) {
@@ -2885,7 +2846,7 @@ ValueObjectSP ValueObject::Dereference(Status &error) {
     return m_deref_valobj->GetSP();
   } else {
     StreamString strm;
-    GetExpressionPath(strm, true);
+    GetExpressionPath(strm);
 
     if (is_pointer_or_reference_type)
       error.SetErrorStringWithFormat("dereference failed: (%s) %s",
@@ -2911,7 +2872,7 @@ ValueObjectSP ValueObject::AddressOf(Status &error) {
     switch (address_type) {
     case eAddressTypeInvalid: {
       StreamString expr_path_strm;
-      GetExpressionPath(expr_path_strm, true);
+      GetExpressionPath(expr_path_strm);
       error.SetErrorStringWithFormat("'%s' is not in memory",
                                      expr_path_strm.GetData());
     } break;
@@ -2934,7 +2895,7 @@ ValueObjectSP ValueObject::AddressOf(Status &error) {
     }
   } else {
     StreamString expr_path_strm;
-    GetExpressionPath(expr_path_strm, true);
+    GetExpressionPath(expr_path_strm);
     error.SetErrorStringWithFormat("'%s' doesn't have a valid address",
                                    expr_path_strm.GetData());
   }
@@ -3129,10 +3090,6 @@ void ValueObject::ClearUserVisibleData(uint32_t clear_mask) {
     if (m_synthetic_value)
       m_synthetic_value = nullptr;
   }
-
-  if ((clear_mask & eClearUserVisibleDataItemsValidator) ==
-      eClearUserVisibleDataItemsValidator)
-    m_validation_result.reset();
 }
 
 SymbolContextScope *ValueObject::GetSymbolContextScope() {
@@ -3321,12 +3278,12 @@ ValueObjectSP ValueObject::Persist() {
   ValueObjectSP const_result_sp =
       ValueObjectConstResult::Create(target_sp.get(), GetValue(), name);
 
-  ExpressionVariableSP clang_var_sp =
+  ExpressionVariableSP persistent_var_sp =
       persistent_state->CreatePersistentVariable(const_result_sp);
-  clang_var_sp->m_live_sp = clang_var_sp->m_frozen_sp;
-  clang_var_sp->m_flags |= ExpressionVariable::EVIsProgramReference;
+  persistent_var_sp->m_live_sp = persistent_var_sp->m_frozen_sp;
+  persistent_var_sp->m_flags |= ExpressionVariable::EVIsProgramReference;
 
-  return clang_var_sp->GetValueObject();
+  return persistent_var_sp->GetValueObject();
 }
 
 bool ValueObject::IsSyntheticChildrenGenerated() {

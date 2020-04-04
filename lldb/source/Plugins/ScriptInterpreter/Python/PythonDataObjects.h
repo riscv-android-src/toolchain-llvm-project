@@ -48,7 +48,9 @@
 #ifndef LLDB_PLUGINS_SCRIPTINTERPRETER_PYTHON_PYTHONDATAOBJECTS_H
 #define LLDB_PLUGINS_SCRIPTINTERPRETER_PYTHON_PYTHONDATAOBJECTS_H
 
-#ifndef LLDB_DISABLE_PYTHON
+#include "lldb/Host/Config.h"
+
+#if LLDB_ENABLE_PYTHON
 
 // LLDB Python header must be included first
 #include "lldb-python.h"
@@ -593,7 +595,7 @@ public:
 
   // safe, returns invalid on error;
   static PythonModule ImportModule(llvm::StringRef name) {
-    std::string s = name;
+    std::string s = std::string(name);
     auto mod = Import(s.c_str());
     if (!mod) {
       llvm::consumeError(mod.takeError());

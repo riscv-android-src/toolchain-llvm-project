@@ -291,10 +291,11 @@ public:
                      SmallVectorImpl<MachineOperand> &Cond,
                      bool AllowModify) const override;
 
-  bool getMemOperandWithOffset(const MachineInstr &LdSt,
-                               const MachineOperand *&BaseOp,
-                               int64_t &Offset,
-                               const TargetRegisterInfo *TRI) const override;
+  bool
+  getMemOperandsWithOffset(const MachineInstr &LdSt,
+                           SmallVectorImpl<const MachineOperand *> &BaseOps,
+                           int64_t &Offset,
+                           const TargetRegisterInfo *TRI) const override;
   bool analyzeBranchPredicate(MachineBasicBlock &MBB,
                               TargetInstrInfo::MachineBranchPredicate &MBP,
                               bool AllowModify = false) const override;
@@ -306,7 +307,8 @@ public:
                         const DebugLoc &DL,
                         int *BytesAdded = nullptr) const override;
   bool canInsertSelect(const MachineBasicBlock &, ArrayRef<MachineOperand> Cond,
-                       unsigned, unsigned, int &, int &, int &) const override;
+                       unsigned, unsigned, unsigned, int &, int &,
+                       int &) const override;
   void insertSelect(MachineBasicBlock &MBB, MachineBasicBlock::iterator MI,
                     const DebugLoc &DL, unsigned DstReg,
                     ArrayRef<MachineOperand> Cond, unsigned TrueReg,
@@ -315,13 +317,13 @@ public:
                    const DebugLoc &DL, MCRegister DestReg, MCRegister SrcReg,
                    bool KillSrc) const override;
   void storeRegToStackSlot(MachineBasicBlock &MBB,
-                           MachineBasicBlock::iterator MI, unsigned SrcReg,
+                           MachineBasicBlock::iterator MI, Register SrcReg,
                            bool isKill, int FrameIndex,
                            const TargetRegisterClass *RC,
                            const TargetRegisterInfo *TRI) const override;
 
   void loadRegFromStackSlot(MachineBasicBlock &MBB,
-                            MachineBasicBlock::iterator MI, unsigned DestReg,
+                            MachineBasicBlock::iterator MI, Register DestReg,
                             int FrameIndex, const TargetRegisterClass *RC,
                             const TargetRegisterInfo *TRI) const override;
 
@@ -522,8 +524,8 @@ public:
     return MI.getDesc().TSFlags & X86II::LOCK;
   }
 
-  Optional<ParamLoadedValue>
-  describeLoadedValue(const MachineInstr &MI) const override;
+  Optional<ParamLoadedValue> describeLoadedValue(const MachineInstr &MI,
+                                                 Register Reg) const override;
 
 protected:
   /// Commutes the operands in the given instruction by changing the operands

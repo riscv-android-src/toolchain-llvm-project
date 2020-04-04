@@ -1167,7 +1167,6 @@ def : RWSysReg<"ICC_SRE_EL3",        0b11, 0b110, 0b1100, 0b1100, 0b101>;
 def : RWSysReg<"ICC_IGRPEN0_EL1",    0b11, 0b000, 0b1100, 0b1100, 0b110>;
 def : RWSysReg<"ICC_IGRPEN1_EL1",    0b11, 0b000, 0b1100, 0b1100, 0b111>;
 def : RWSysReg<"ICC_IGRPEN1_EL3",    0b11, 0b110, 0b1100, 0b1100, 0b111>;
-def : RWSysReg<"ICC_SEIEN_EL1",      0b11, 0b000, 0b1100, 0b1101, 0b000>;
 def : RWSysReg<"ICC_AP0R0_EL1",      0b11, 0b000, 0b1100, 0b1000, 0b100>;
 def : RWSysReg<"ICC_AP0R1_EL1",      0b11, 0b000, 0b1100, 0b1000, 0b101>;
 def : RWSysReg<"ICC_AP0R2_EL1",      0b11, 0b000, 0b1100, 0b1000, 0b110>;
@@ -1187,7 +1186,6 @@ def : RWSysReg<"ICH_AP1R3_EL2",      0b11, 0b100, 0b1100, 0b1001, 0b011>;
 def : RWSysReg<"ICH_HCR_EL2",        0b11, 0b100, 0b1100, 0b1011, 0b000>;
 def : RWSysReg<"ICH_MISR_EL2",       0b11, 0b100, 0b1100, 0b1011, 0b010>;
 def : RWSysReg<"ICH_VMCR_EL2",       0b11, 0b100, 0b1100, 0b1011, 0b111>;
-def : RWSysReg<"ICH_VSEIR_EL2",      0b11, 0b100, 0b1100, 0b1001, 0b100>;
 def : RWSysReg<"ICH_LR0_EL2",        0b11, 0b100, 0b1100, 0b1100, 0b000>;
 def : RWSysReg<"ICH_LR1_EL2",        0b11, 0b100, 0b1100, 0b1100, 0b001>;
 def : RWSysReg<"ICH_LR2_EL2",        0b11, 0b100, 0b1100, 0b1100, 0b010>;
@@ -1492,5 +1490,5 @@ def : ROSysReg<"TRBIDR_EL1",    0b11, 0b000, 0b1001, 0b1011, 0b111>;
 
 // Cyclone specific system registers
 //                                 Op0    Op1     CRn     CRm    Op2
-let Requires = [{ {AArch64::ProcCyclone} }] in
+let Requires = [{ {AArch64::ProcAppleA7} }] in
 def : RWSysReg<"CPM_IOACC_CTL_EL3", 0b11, 0b111, 0b1111, 0b0010, 0b000>;

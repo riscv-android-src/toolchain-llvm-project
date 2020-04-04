@@ -24,19 +24,15 @@ public:
   static bool classof(const SymbolFile *obj) { return obj->isA(&ID); }
   /// \}
 
-  SymbolFileDWARFDwo(lldb::ObjectFileSP objfile, DWARFCompileUnit &dwarf_cu);
+  SymbolFileDWARFDwo(SymbolFileDWARF &m_base_symbol_file,
+                     lldb::ObjectFileSP objfile, uint32_t id);
 
   ~SymbolFileDWARFDwo() override = default;
-
-  lldb::CompUnitSP ParseCompileUnit(DWARFCompileUnit &dwarf_cu) override;
 
   DWARFCompileUnit *GetCompileUnit();
 
   DWARFUnit *
   GetDWARFCompileUnit(lldb_private::CompileUnit *comp_unit) override;
-
-  lldb_private::DWARFExpression::LocationListFormat
-  GetLocationListFormat() const override;
 
   size_t GetObjCMethodDIEOffsets(lldb_private::ConstString class_name,
                                  DIEArray &method_die_offsets) override;
@@ -46,14 +42,6 @@ public:
 
   DWARFDIE
   GetDIE(const DIERef &die_ref) override;
-
-  std::unique_ptr<SymbolFileDWARFDwo>
-  GetDwoSymbolFileForCompileUnit(DWARFUnit &dwarf_cu,
-                                 const DWARFDebugInfoEntry &cu_die) override {
-    return nullptr;
-  }
-
-  DWARFCompileUnit *GetBaseCompileUnit() override { return &m_base_dwarf_cu; }
 
   llvm::Optional<uint32_t> GetDwoNum() override { return GetID() >> 32; }
 
@@ -78,11 +66,11 @@ protected:
       const DWARFDIE &die, lldb_private::ConstString type_name,
       bool must_be_implementation) override;
 
-  SymbolFileDWARF &GetBaseSymbolFile();
+  SymbolFileDWARF &GetBaseSymbolFile() { return m_base_symbol_file; }
 
   DWARFCompileUnit *ComputeCompileUnit();
 
-  DWARFCompileUnit &m_base_dwarf_cu;
+  SymbolFileDWARF &m_base_symbol_file;
   DWARFCompileUnit *m_cu = nullptr;
 };
 

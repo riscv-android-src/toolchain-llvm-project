@@ -47,8 +47,8 @@ Expected<std::unique_ptr<LinkGraph>> MachOLinkGraphBuilder::buildGraph() {
 
 MachOLinkGraphBuilder::MachOLinkGraphBuilder(const object::MachOObjectFile &Obj)
     : Obj(Obj),
-      G(std::make_unique<LinkGraph>(Obj.getFileName(), getPointerSize(Obj),
-                                    getEndianness(Obj))) {}
+      G(std::make_unique<LinkGraph>(std::string(Obj.getFileName()),
+                                    getPointerSize(Obj), getEndianness(Obj))) {}
 
 void MachOLinkGraphBuilder::addCustomSectionParser(
     StringRef SectionName, SectionParserFunction Parser) {
@@ -313,7 +313,7 @@ Error MachOLinkGraphBuilder::graphifyRegularSymbols() {
           return make_error<JITLinkError>("Anonymous common symbol at index " +
                                           Twine(KV.first));
         NSym.GraphSymbol = &G->addCommonSymbol(
-            *NSym.Name, NSym.S, getCommonSection(), NSym.Value, 0,
+            *NSym.Name, NSym.S, getCommonSection(), 0, NSym.Value,
             1ull << MachO::GET_COMM_ALIGN(NSym.Desc),
             NSym.Desc & MachO::N_NO_DEAD_STRIP);
       } else {
@@ -321,7 +321,9 @@ Error MachOLinkGraphBuilder::graphifyRegularSymbols() {
           return make_error<JITLinkError>("Anonymous external symbol at "
                                           "index " +
                                           Twine(KV.first));
-        NSym.GraphSymbol = &G->addExternalSymbol(*NSym.Name, 0);
+        NSym.GraphSymbol = &G->addExternalSymbol(
+            *NSym.Name, 0,
+            NSym.Desc & MachO::N_WEAK_REF ? Linkage::Weak : Linkage::Strong);
       }
       break;
     case MachO::N_ABS:

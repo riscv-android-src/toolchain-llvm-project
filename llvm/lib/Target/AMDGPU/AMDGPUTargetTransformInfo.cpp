@@ -69,6 +69,11 @@ static cl::opt<unsigned> UnrollThresholdIf(
   cl::desc("Unroll threshold increment for AMDGPU for each if statement inside loop"),
   cl::init(150), cl::Hidden);
 
+static cl::opt<bool> UseLegacyDA(
+  "amdgpu-use-legacy-divergence-analysis",
+  cl::desc("Enable legacy divergence analysis for AMDGPU"),
+  cl::init(false), cl::Hidden);
+
 static bool dependsOnLocalPhi(const Loop *L, const Value *Cond,
                               unsigned Depth = 0) {
   const Instruction *I = dyn_cast<Instruction>(Cond);
@@ -338,10 +343,13 @@ bool GCNTTIImpl::getTgtMemIntrinsic(IntrinsicInst *Inst,
   }
 }
 
-int GCNTTIImpl::getArithmeticInstrCost(
-    unsigned Opcode, Type *Ty, TTI::OperandValueKind Opd1Info,
-    TTI::OperandValueKind Opd2Info, TTI::OperandValueProperties Opd1PropInfo,
-    TTI::OperandValueProperties Opd2PropInfo, ArrayRef<const Value *> Args ) {
+int GCNTTIImpl::getArithmeticInstrCost(unsigned Opcode, Type *Ty,
+                                       TTI::OperandValueKind Opd1Info,
+                                       TTI::OperandValueKind Opd2Info,
+                                       TTI::OperandValueProperties Opd1PropInfo,
+                                       TTI::OperandValueProperties Opd2PropInfo,
+                                       ArrayRef<const Value *> Args,
+                                       const Instruction *CxtI) {
   EVT OrigTy = TLI->getValueType(DL, Ty);
   if (!OrigTy.isSimple()) {
     return BaseT::getArithmeticInstrCost(Opcode, Ty, Opd1Info, Opd2Info,
@@ -366,6 +374,9 @@ int GCNTTIImpl::getArithmeticInstrCost(
     if (SLT == MVT::i64)
       return get64BitInstrCost() * LT.first * NElts;
 
+    if (ST->has16BitInsts() && SLT == MVT::i16)
+      NElts = (NElts + 1) / 2;
+
     // i32
     return getFullRateInstrCost() * LT.first * NElts;
   case ISD::ADD:
@@ -373,10 +384,13 @@ int GCNTTIImpl::getArithmeticInstrCost(
   case ISD::AND:
   case ISD::OR:
   case ISD::XOR:
-    if (SLT == MVT::i64){
+    if (SLT == MVT::i64) {
       // and, or and xor are typically split into 2 VALU instructions.
       return 2 * getFullRateInstrCost() * LT.first * NElts;
     }
+
+    if (ST->has16BitInsts() && SLT == MVT::i16)
+      NElts = (NElts + 1) / 2;
 
     return LT.first * NElts * getFullRateInstrCost();
   case ISD::MUL: {
@@ -386,6 +400,9 @@ int GCNTTIImpl::getArithmeticInstrCost(
       return (4 * QuarterRateCost + (2 * 2) * FullRateCost) * LT.first * NElts;
     }
 
+    if (ST->has16BitInsts() && SLT == MVT::i16)
+      NElts = (NElts + 1) / 2;
+
     // i32
     return QuarterRateCost * NElts * LT.first;
   }
@@ -394,6 +411,9 @@ int GCNTTIImpl::getArithmeticInstrCost(
   case ISD::FMUL:
     if (SLT == MVT::f64)
       return LT.first * NElts * get64BitInstrCost();
+
+    if (ST->has16BitInsts() && SLT == MVT::f16)
+      NElts = (NElts + 1) / 2;
 
     if (SLT == MVT::f32 || SLT == MVT::f16)
       return LT.first * NElts * getFullRateInstrCost();
@@ -446,6 +466,49 @@ int GCNTTIImpl::getArithmeticInstrCost(
 
   return BaseT::getArithmeticInstrCost(Opcode, Ty, Opd1Info, Opd2Info,
                                        Opd1PropInfo, Opd2PropInfo);
+}
+
+template <typename T>
+int GCNTTIImpl::getIntrinsicInstrCost(Intrinsic::ID ID, Type *RetTy,
+                                      ArrayRef<T *> Args,
+                                      FastMathFlags FMF, unsigned VF) {
+  if (ID != Intrinsic::fma)
+    return BaseT::getIntrinsicInstrCost(ID, RetTy, Args, FMF, VF);
+
+  EVT OrigTy = TLI->getValueType(DL, RetTy);
+  if (!OrigTy.isSimple()) {
+    return BaseT::getIntrinsicInstrCost(ID, RetTy, Args, FMF, VF);
+  }
+
+  // Legalize the type.
+  std::pair<int, MVT> LT = TLI->getTypeLegalizationCost(DL, RetTy);
+
+  unsigned NElts = LT.second.isVector() ?
+    LT.second.getVectorNumElements() : 1;
+
+  MVT::SimpleValueType SLT = LT.second.getScalarType().SimpleTy;
+
+  if (SLT == MVT::f64)
+    return LT.first * NElts * get64BitInstrCost();
+
+  if (ST->has16BitInsts() && SLT == MVT::f16)
+    NElts = (NElts + 1) / 2;
+
+  return LT.first * NElts * (ST->hasFastFMAF32() ? getHalfRateInstrCost()
+                                                 : getQuarterRateInstrCost());
+}
+
+int GCNTTIImpl::getIntrinsicInstrCost(Intrinsic::ID ID, Type *RetTy,
+                                      ArrayRef<Value*> Args, FastMathFlags FMF,
+                                      unsigned VF) {
+  return getIntrinsicInstrCost<Value>(ID, RetTy, Args, FMF, VF);
+}
+
+int GCNTTIImpl::getIntrinsicInstrCost(Intrinsic::ID ID, Type *RetTy,
+                                      ArrayRef<Type *> Tys, FastMathFlags FMF,
+                                      unsigned ScalarizationCostPassed) {
+  return getIntrinsicInstrCost<Type>(ID, RetTy, Tys, FMF,
+                                     ScalarizationCostPassed);
 }
 
 unsigned GCNTTIImpl::getCFInstrCost(unsigned Opcode) {
@@ -515,8 +578,6 @@ int GCNTTIImpl::getVectorInstrCost(unsigned Opcode, Type *ValTy,
   }
 }
 
-
-
 static bool isArgPassedInSGPR(const Argument *A) {
   const Function *F = A->getParent();
 
@@ -541,6 +602,59 @@ static bool isArgPassedInSGPR(const Argument *A) {
     // TODO: Should calls support inreg for SGPR inputs?
     return false;
   }
+}
+
+/// Analyze if the results of inline asm are divergent. If \p Indices is empty,
+/// this is analyzing the collective result of all output registers. Otherwise,
+/// this is only querying a specific result index if this returns multiple
+/// registers in a struct.
+bool GCNTTIImpl::isInlineAsmSourceOfDivergence(
+  const CallInst *CI, ArrayRef<unsigned> Indices) const {
+  // TODO: Handle complex extract indices
+  if (Indices.size() > 1)
+    return true;
+
+  const DataLayout &DL = CI->getModule()->getDataLayout();
+  const SIRegisterInfo *TRI = ST->getRegisterInfo();
+  ImmutableCallSite CS(CI);
+  TargetLowering::AsmOperandInfoVector TargetConstraints
+    = TLI->ParseConstraints(DL, ST->getRegisterInfo(), CS);
+
+  const int TargetOutputIdx = Indices.empty() ? -1 : Indices[0];
+
+  int OutputIdx = 0;
+  for (auto &TC : TargetConstraints) {
+    if (TC.Type != InlineAsm::isOutput)
+      continue;
+
+    // Skip outputs we don't care about.
+    if (TargetOutputIdx != -1 && TargetOutputIdx != OutputIdx++)
+      continue;
+
+    TLI->ComputeConstraintToUse(TC, SDValue());
+
+    Register AssignedReg;
+    const TargetRegisterClass *RC;
+    std::tie(AssignedReg, RC) = TLI->getRegForInlineAsmConstraint(
+      TRI, TC.ConstraintCode, TC.ConstraintVT);
+    if (AssignedReg) {
+      // FIXME: This is a workaround for getRegForInlineAsmConstraint
+      // returning VS_32
+      RC = TRI->getPhysRegClass(AssignedReg);
+    }
+
+    // For AGPR constraints null is returned on subtargets without AGPRs, so
+    // assume divergent for null.
+    if (!RC || !TRI->isSGPRClass(RC))
+      return true;
+  }
+
+  return false;
+}
+
+/// \returns true if the new GPU divergence analysis is enabled.
+bool GCNTTIImpl::useGPUDivergenceAnalysis() const {
+  return !UseLegacyDA;
 }
 
 /// \returns true if the result of the value could potentially be
@@ -570,7 +684,14 @@ bool GCNTTIImpl::isSourceOfDivergence(const Value *V) const {
     return AMDGPU::isIntrinsicSourceOfDivergence(Intrinsic->getIntrinsicID());
 
   // Assume all function calls are a source of divergence.
-  if (isa<CallInst>(V) || isa<InvokeInst>(V))
+  if (const CallInst *CI = dyn_cast<CallInst>(V)) {
+    if (isa<InlineAsm>(CI->getCalledValue()))
+      return isInlineAsmSourceOfDivergence(CI);
+    return true;
+  }
+
+  // Assume all function calls are a source of divergence.
+  if (isa<InvokeInst>(V))
     return true;
 
   return false;
@@ -585,9 +706,43 @@ bool GCNTTIImpl::isAlwaysUniform(const Value *V) const {
     case Intrinsic::amdgcn_readlane:
     case Intrinsic::amdgcn_icmp:
     case Intrinsic::amdgcn_fcmp:
+    case Intrinsic::amdgcn_if_break:
       return true;
     }
   }
+
+  if (const CallInst *CI = dyn_cast<CallInst>(V)) {
+    if (isa<InlineAsm>(CI->getCalledValue()))
+      return !isInlineAsmSourceOfDivergence(CI);
+    return false;
+  }
+
+  const ExtractValueInst *ExtValue = dyn_cast<ExtractValueInst>(V);
+  if (!ExtValue)
+    return false;
+
+  const CallInst *CI = dyn_cast<CallInst>(ExtValue->getOperand(0));
+  if (!CI)
+    return false;
+
+  if (const IntrinsicInst *Intrinsic = dyn_cast<IntrinsicInst>(CI)) {
+    switch (Intrinsic->getIntrinsicID()) {
+    default:
+      return false;
+    case Intrinsic::amdgcn_if:
+    case Intrinsic::amdgcn_else: {
+      ArrayRef<unsigned> Indices = ExtValue->getIndices();
+      return Indices.size() == 1 && Indices[0] == 1;
+    }
+    }
+  }
+
+  // If we have inline asm returning mixed SGPR and VGPR results, we inferred
+  // divergent for the overall struct return. We need to override it in the
+  // case we're extracting an SGPR component here.
+  if (isa<InlineAsm>(CI->getCalledValue()))
+    return !isInlineAsmSourceOfDivergence(CI, ExtValue->getIndices());
+
   return false;
 }
 
@@ -801,7 +956,7 @@ unsigned GCNTTIImpl::getUserCost(const User *U,
   case Instruction::FNeg: {
     return getArithmeticInstrCost(I->getOpcode(), I->getType(),
                                   TTI::OK_AnyValue, TTI::OK_AnyValue,
-                                  TTI::OP_None, TTI::OP_None, Operands);
+                                  TTI::OP_None, TTI::OP_None, Operands, I);
   }
   default:
     break;

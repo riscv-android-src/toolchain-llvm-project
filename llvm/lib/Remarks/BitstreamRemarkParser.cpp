@@ -323,7 +323,7 @@ remarks::createBitstreamParserFromMeta(
              : std::make_unique<BitstreamRemarkParser>(Buf);
 
   if (ExternalFilePrependPath)
-    Parser->ExternalFilePrependPath = *ExternalFilePrependPath;
+    Parser->ExternalFilePrependPath = std::string(*ExternalFilePrependPath);
 
   return std::move(Parser);
 }
@@ -428,7 +428,12 @@ Error BitstreamRemarkParser::processExternalFilePath(
       MemoryBuffer::getFile(FullPath);
   if (std::error_code EC = BufferOrErr.getError())
     return createFileError(FullPath, EC);
+
   TmpRemarkBuffer = std::move(*BufferOrErr);
+
+  // Don't try to parse the file if it's empty.
+  if (TmpRemarkBuffer->getBufferSize() == 0)
+    return make_error<EndOfFileError>();
 
   // Create a separate parser used for parsing the separate file.
   ParserHelper = BitstreamParserHelper(TmpRemarkBuffer->getBuffer());

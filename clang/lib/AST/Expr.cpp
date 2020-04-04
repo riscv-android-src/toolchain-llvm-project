@@ -280,7 +280,8 @@ ConstantExpr::ConstantExpr(Expr *subexpr, ResultStorageKind StorageKind)
 }
 
 ConstantExpr *ConstantExpr::Create(const ASTContext &Context, Expr *E,
-                                   ResultStorageKind StorageKind) {
+                                   ResultStorageKind StorageKind,
+                                   bool IsImmediateInvocation) {
   assert(!isa<ConstantExpr>(E));
   AssertResultStorageKind(StorageKind);
   unsigned Size = totalSizeToAlloc<APValue, uint64_t>(
@@ -288,6 +289,8 @@ ConstantExpr *ConstantExpr::Create(const ASTContext &Context, Expr *E,
       StorageKind == ConstantExpr::RSK_Int64);
   void *Mem = Context.Allocate(Size, alignof(ConstantExpr));
   ConstantExpr *Self = new (Mem) ConstantExpr(E, StorageKind);
+  Self->ConstantExprBits.IsImmediateInvocation =
+      IsImmediateInvocation;
   return Self;
 }
 
@@ -317,7 +320,7 @@ ConstantExpr *ConstantExpr::CreateEmpty(const ASTContext &Context,
 }
 
 void ConstantExpr::MoveIntoResult(APValue &Value, const ASTContext &Context) {
-  assert(getStorageKind(Value) == ConstantExprBits.ResultKind &&
+  assert((unsigned)getStorageKind(Value) <= ConstantExprBits.ResultKind &&
          "Invalid storage for this value kind");
   ConstantExprBits.APValueKind = Value.getKind();
   switch (ConstantExprBits.ResultKind) {
@@ -689,10 +692,10 @@ std::string PredefinedExpr::ComputeName(IdentKind IK, const Decl *CurrentDecl) {
           MC->mangleName(ND, Out);
 
         if (!Buffer.empty() && Buffer.front() == '\01')
-          return Buffer.substr(1);
-        return Buffer.str();
+          return std::string(Buffer.substr(1));
+        return std::string(Buffer.str());
       } else
-        return ND->getIdentifier()->getName();
+        return std::string(ND->getIdentifier()->getName());
     }
     return "";
   }
@@ -711,7 +714,7 @@ std::string PredefinedExpr::ComputeName(IdentKind IK, const Decl *CurrentDecl) {
       Out << ComputeName(IK, DCBlock);
     else if (auto *DCDecl = dyn_cast<Decl>(DC))
       Out << ComputeName(IK, DCDecl) << "_block_invoke";
-    return Out.str();
+    return std::string(Out.str());
   }
   if (const FunctionDecl *FD = dyn_cast<FunctionDecl>(CurrentDecl)) {
     if (IK != PrettyFunction && IK != PrettyFunctionNoVirtual &&
@@ -856,7 +859,7 @@ std::string PredefinedExpr::ComputeName(IdentKind IK, const Decl *CurrentDecl) {
 
     Out << Proto;
 
-    return Name.str().str();
+    return std::string(Name);
   }
   if (const CapturedDecl *CD = dyn_cast<CapturedDecl>(CurrentDecl)) {
     for (const DeclContext *DC = CD->getParent(); DC; DC = DC->getParent())
@@ -887,7 +890,7 @@ std::string PredefinedExpr::ComputeName(IdentKind IK, const Decl *CurrentDecl) {
     MD->getSelector().print(Out);
     Out <<  ']';
 
-    return Name.str().str();
+    return std::string(Name);
   }
   if (isa<TranslationUnitDecl>(CurrentDecl) && IK == PrettyFunction) {
     // __PRETTY_FUNCTION__ -> "top level", the others produce an empty string.
@@ -962,7 +965,7 @@ std::string FixedPointLiteral::getValueAsString(unsigned Radix) const {
   SmallString<64> S;
   FixedPointValueToString(
       S, llvm::APSInt::getUnsigned(getValue().getZExtValue()), Scale);
-  return S.str();
+  return std::string(S.str());
 }
 
 FloatingLiteral::FloatingLiteral(const ASTContext &C, const llvm::APFloat &V,
@@ -1443,19 +1446,28 @@ void CallExpr::updateDependenciesFromArg(Expr *Arg) {
 Decl *Expr::getReferencedDeclOfCallee() {
   Expr *CEE = IgnoreParenImpCasts();
 
-  while (SubstNonTypeTemplateParmExpr *NTTP
-                                = dyn_cast<SubstNonTypeTemplateParmExpr>(CEE)) {
-    CEE = NTTP->getReplacement()->IgnoreParenCasts();
+  while (SubstNonTypeTemplateParmExpr *NTTP =
+             dyn_cast<SubstNonTypeTemplateParmExpr>(CEE)) {
+    CEE = NTTP->getReplacement()->IgnoreParenImpCasts();
   }
 
   // If we're calling a dereference, look at the pointer instead.
-  if (BinaryOperator *BO = dyn_cast<BinaryOperator>(CEE)) {
-    if (BO->isPtrMemOp())
-      CEE = BO->getRHS()->IgnoreParenCasts();
-  } else if (UnaryOperator *UO = dyn_cast<UnaryOperator>(CEE)) {
-    if (UO->getOpcode() == UO_Deref)
-      CEE = UO->getSubExpr()->IgnoreParenCasts();
+  while (true) {
+    if (BinaryOperator *BO = dyn_cast<BinaryOperator>(CEE)) {
+      if (BO->isPtrMemOp()) {
+        CEE = BO->getRHS()->IgnoreParenImpCasts();
+        continue;
+      }
+    } else if (UnaryOperator *UO = dyn_cast<UnaryOperator>(CEE)) {
+      if (UO->getOpcode() == UO_Deref || UO->getOpcode() == UO_AddrOf ||
+          UO->getOpcode() == UO_Plus) {
+        CEE = UO->getSubExpr()->IgnoreParenImpCasts();
+        continue;
+      }
+    }
+    break;
   }
+
   if (DeclRefExpr *DRE = dyn_cast<DeclRefExpr>(CEE))
     return DRE->getDecl();
   if (MemberExpr *ME = dyn_cast<MemberExpr>(CEE))
@@ -1466,28 +1478,11 @@ Decl *Expr::getReferencedDeclOfCallee() {
   return nullptr;
 }
 
-/// getBuiltinCallee - If this is a call to a builtin, return the builtin ID. If
-/// not, return 0.
+/// If this is a call to a builtin, return the builtin ID. If not, return 0.
 unsigned CallExpr::getBuiltinCallee() const {
-  // All simple function calls (e.g. func()) are implicitly cast to pointer to
-  // function. As a result, we try and obtain the DeclRefExpr from the
-  // ImplicitCastExpr.
-  const ImplicitCastExpr *ICE = dyn_cast<ImplicitCastExpr>(getCallee());
-  if (!ICE) // FIXME: deal with more complex calls (e.g. (func)(), (*func)()).
-    return 0;
-
-  const DeclRefExpr *DRE = dyn_cast<DeclRefExpr>(ICE->getSubExpr());
-  if (!DRE)
-    return 0;
-
-  const FunctionDecl *FDecl = dyn_cast<FunctionDecl>(DRE->getDecl());
-  if (!FDecl)
-    return 0;
-
-  if (!FDecl->getIdentifier())
-    return 0;
-
-  return FDecl->getBuiltinID();
+  auto *FDecl =
+      dyn_cast_or_null<FunctionDecl>(getCallee()->getReferencedDeclOfCallee());
+  return FDecl ? FDecl->getBuiltinID() : 0;
 }
 
 bool CallExpr::isUnevaluatedBuiltinCall(const ASTContext &Ctx) const {
@@ -1678,6 +1673,15 @@ MemberExpr *MemberExpr::Create(
   MemberExpr *E = new (Mem) MemberExpr(Base, IsArrow, OperatorLoc, MemberDecl,
                                        NameInfo, T, VK, OK, NOUR);
 
+  if (isa<FieldDecl>(MemberDecl)) {
+    DeclContext *DC = MemberDecl->getDeclContext();
+    // dyn_cast_or_null is used to handle objC variables which do not
+    // have a declaration context.
+    CXXRecordDecl *RD = dyn_cast_or_null<CXXRecordDecl>(DC);
+    if (RD && RD->isDependentContext() && RD->isCurrentInstantiation(DC))
+      E->setTypeDependent(T->isDependentType());
+  }
+
   if (HasQualOrFound) {
     // FIXME: Wrong. We should be looking at the member declaration we found.
     if (QualifierLoc && QualifierLoc.getNestedNameSpecifier()->isDependent()) {
@@ -1814,7 +1818,7 @@ bool CastExpr::CastConsistency() const {
     auto Ty = getType();
     auto SETy = getSubExpr()->getType();
     assert(getValueKindForType(Ty) == Expr::getValueKindForType(SETy));
-    if (/*isRValue()*/ !Ty->getPointeeType().isNull()) {
+    if (isRValue()) {
       Ty = Ty->getPointeeType();
       SETy = SETy->getPointeeType();
     }
@@ -2884,6 +2888,19 @@ static Expr *IgnoreImplicitSingleStep(Expr *E) {
   return E;
 }
 
+static Expr *IgnoreImplicitAsWrittenSingleStep(Expr *E) {
+  if (auto *ICE = dyn_cast<ImplicitCastExpr>(E))
+    return ICE->getSubExprAsWritten();
+
+  return IgnoreImplicitSingleStep(E);
+}
+
+static Expr *IgnoreParensOnlySingleStep(Expr *E) {
+  if (auto *PE = dyn_cast<ParenExpr>(E))
+    return PE->getSubExpr();
+  return E;
+}
+
 static Expr *IgnoreParensSingleStep(Expr *E) {
   if (auto *PE = dyn_cast<ParenExpr>(E))
     return PE->getSubExpr();
@@ -2963,6 +2980,10 @@ Expr *Expr::IgnoreImplicit() {
   return IgnoreExprNodes(this, IgnoreImplicitSingleStep);
 }
 
+Expr *Expr::IgnoreImplicitAsWritten() {
+  return IgnoreExprNodes(this, IgnoreImplicitAsWrittenSingleStep);
+}
+
 Expr *Expr::IgnoreParens() {
   return IgnoreExprNodes(this, IgnoreParensSingleStep);
 }
@@ -2998,6 +3019,35 @@ Expr *Expr::IgnoreParenNoopCasts(const ASTContext &Ctx) {
   return IgnoreExprNodes(this, IgnoreParensSingleStep, [&Ctx](Expr *E) {
     return IgnoreNoopCastsSingleStep(Ctx, E);
   });
+}
+
+Expr *Expr::IgnoreUnlessSpelledInSource() {
+  Expr *E = this;
+
+  Expr *LastE = nullptr;
+  while (E != LastE) {
+    LastE = E;
+    E = IgnoreExprNodes(E, IgnoreImplicitSingleStep, IgnoreImpCastsSingleStep,
+                        IgnoreParensOnlySingleStep);
+
+    auto SR = E->getSourceRange();
+
+    if (auto *C = dyn_cast<CXXConstructExpr>(E)) {
+      if (C->getNumArgs() == 1) {
+        Expr *A = C->getArg(0);
+        if (A->getSourceRange() == SR || !isa<CXXTemporaryObjectExpr>(C))
+          E = A;
+      }
+    }
+
+    if (auto *C = dyn_cast<CXXMemberCallExpr>(E)) {
+      Expr *ExprNode = C->getImplicitObjectArgument()->IgnoreParenImpCasts();
+      if (ExprNode->getSourceRange() == SR)
+        E = ExprNode;
+    }
+  }
+
+  return E;
 }
 
 bool Expr::isDefaultArgument() const {
@@ -3409,6 +3459,7 @@ bool Expr::HasSideEffects(const ASTContext &Ctx,
   case OpaqueValueExprClass:
   case SourceLocExprClass:
   case ConceptSpecializationExprClass:
+  case RequiresExprClass:
     // These never have a side-effect.
     return false;
 

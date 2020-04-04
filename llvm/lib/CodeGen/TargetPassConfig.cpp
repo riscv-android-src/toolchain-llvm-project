@@ -179,10 +179,10 @@ static cl::opt<CFLAAType> UseCFLAA(
 /// Option names for limiting the codegen pipeline.
 /// Those are used in error reporting and we didn't want
 /// to duplicate their names all over the place.
-static const char *StartAfterOptName = "start-after";
-static const char *StartBeforeOptName = "start-before";
-static const char *StopAfterOptName = "stop-after";
-static const char *StopBeforeOptName = "stop-before";
+static const char StartAfterOptName[] = "start-after";
+static const char StartBeforeOptName[] = "start-before";
+static const char StopAfterOptName[] = "stop-after";
+static const char StopBeforeOptName[] = "stop-before";
 
 static cl::opt<std::string>
     StartAfterOpt(StringRef(StartAfterOptName),
@@ -956,6 +956,12 @@ void TargetPassConfig::addMachinePasses() {
   if (getOptLevel() != CodeGenOpt::None)
     addBlockPlacement();
 
+  // Insert before XRay Instrumentation.
+  addPass(&FEntryInserterID, false);
+
+  addPass(&XRayInstrumentationID, false);
+  addPass(&PatchableFunctionID, false);
+
   addPreEmitPass();
 
   if (TM->Options.EnableIPRA)
@@ -967,12 +973,6 @@ void TargetPassConfig::addMachinePasses() {
 
   addPass(&StackMapLivenessID, false);
   addPass(&LiveDebugValuesID, false);
-
-  // Insert before XRay Instrumentation.
-  addPass(&FEntryInserterID, false);
-
-  addPass(&XRayInstrumentationID, false);
-  addPass(&PatchableFunctionID, false);
 
   if (TM->Options.EnableMachineOutliner && getOptLevel() != CodeGenOpt::None &&
       EnableMachineOutliner != NeverOutline) {

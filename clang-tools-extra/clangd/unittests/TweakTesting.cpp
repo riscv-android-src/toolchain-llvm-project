@@ -63,14 +63,16 @@ std::pair<unsigned, unsigned> rangeOrPoint(const Annotations &A) {
           cantFail(positionToOffset(A.code(), SelectionRng.end))};
 }
 
-MATCHER_P6(TweakIsAvailable, TweakID, Ctx, Header, ExtraArgs, ExtraFiles, Index,
+MATCHER_P7(TweakIsAvailable, TweakID, Ctx, Header, ExtraArgs, ExtraFiles, Index,
+           FileName,
            (TweakID + (negation ? " is unavailable" : " is available")).str()) {
   std::string WrappedCode = wrap(Ctx, arg);
   Annotations Input(WrappedCode);
   auto Selection = rangeOrPoint(Input);
   TestTU TU;
+  TU.Filename = std::string(FileName);
   TU.HeaderCode = Header;
-  TU.Code = Input.code();
+  TU.Code = std::string(Input.code());
   TU.ExtraArgs = ExtraArgs;
   TU.AdditionalFiles = std::move(ExtraFiles);
   ParsedAST AST = TU.build();
@@ -91,9 +93,10 @@ std::string TweakTest::apply(llvm::StringRef MarkedCode,
   auto Selection = rangeOrPoint(Input);
 
   TestTU TU;
+  TU.Filename = std::string(FileName);
   TU.HeaderCode = Header;
   TU.AdditionalFiles = std::move(ExtraFiles);
-  TU.Code = Input.code();
+  TU.Code = std::string(Input.code());
   TU.ExtraArgs = ExtraArgs;
   ParsedAST AST = TU.build();
   Tweak::Selection S(Index.get(), AST, Selection.first, Selection.second);
@@ -118,13 +121,13 @@ std::string TweakTest::apply(llvm::StringRef MarkedCode,
       return "bad edits: " + llvm::toString(NewText.takeError());
     llvm::StringRef Unwrapped = unwrap(Context, *NewText);
     if (It.first() == testPath(TU.Filename))
-      EditedMainFile = Unwrapped;
+      EditedMainFile = std::string(Unwrapped);
     else {
       if (!EditedFiles)
         ADD_FAILURE() << "There were changes to additional files, but client "
                          "provided a nullptr for EditedFiles.";
       else
-        EditedFiles->try_emplace(It.first(), Unwrapped.str());
+        EditedFiles->insert_or_assign(It.first(), Unwrapped.str());
     }
   }
   return EditedMainFile;
@@ -132,7 +135,7 @@ std::string TweakTest::apply(llvm::StringRef MarkedCode,
 
 ::testing::Matcher<llvm::StringRef> TweakTest::isAvailable() const {
   return TweakIsAvailable(llvm::StringRef(TweakID), Context, Header, ExtraArgs,
-                          ExtraFiles, Index.get());
+                          ExtraFiles, Index.get(), FileName);
 }
 
 std::vector<std::string> TweakTest::expandCases(llvm::StringRef MarkedCode) {

@@ -7,6 +7,8 @@ add_subdirectory(LLJITExamples)
 add_subdirectory(Kaleidoscope)
 add_subdirectory(ModuleMaker)
 add_subdirectory(SpeculativeJIT)
+add_subdirectory(Bye)
+add_subdirectory(ThinLtoJIT)
 
 if(LLVM_ENABLE_EH AND (NOT WIN32) AND (NOT "${LLVM_NATIVE_ARCH}" STREQUAL "ARM"))
     add_subdirectory(ExceptionDemo)

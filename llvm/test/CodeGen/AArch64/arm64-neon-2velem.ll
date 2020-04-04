@@ -9,20 +9,36 @@ declare <4 x float> @llvm.aarch64.neon.fmulx.v4f32(<4 x float>, <4 x float>)
 declare <2 x float> @llvm.aarch64.neon.fmulx.v2f32(<2 x float>, <2 x float>)
 
 declare <4 x i32> @llvm.aarch64.neon.sqrdmulh.v4i32(<4 x i32>, <4 x i32>)
+declare <4 x i32> @llvm.aarch64.neon.sqrdmulh.lane.v4i32.v2i32(<4 x i32>, <2 x i32>, i32)
+declare <4 x i32> @llvm.aarch64.neon.sqrdmulh.laneq.v4i32.v4i32(<4 x i32>, <4 x i32>, i32)
 
 declare <2 x i32> @llvm.aarch64.neon.sqrdmulh.v2i32(<2 x i32>, <2 x i32>)
+declare <2 x i32> @llvm.aarch64.neon.sqrdmulh.lane.v2i32.v2i32(<2 x i32>, <2 x i32>, i32)
+declare <2 x i32> @llvm.aarch64.neon.sqrdmulh.laneq.v2i32.v4i32(<2 x i32>, <4 x i32>, i32)
 
 declare <8 x i16> @llvm.aarch64.neon.sqrdmulh.v8i16(<8 x i16>, <8 x i16>)
+declare <8 x i16> @llvm.aarch64.neon.sqrdmulh.lane.v8i16.v4i16(<8 x i16>, <4 x i16>, i32)
+declare <8 x i16> @llvm.aarch64.neon.sqrdmulh.laneq.v8i16.v8i16(<8 x i16>, <8 x i16>, i32)
 
 declare <4 x i16> @llvm.aarch64.neon.sqrdmulh.v4i16(<4 x i16>, <4 x i16>)
+declare <4 x i16> @llvm.aarch64.neon.sqrdmulh.lane.v4i16.v4i16(<4 x i16>, <4 x i16>, i32)
+declare <4 x i16> @llvm.aarch64.neon.sqrdmulh.laneq.v4i16.v8i16(<4 x i16>, <8 x i16>, i32)
 
 declare <4 x i32> @llvm.aarch64.neon.sqdmulh.v4i32(<4 x i32>, <4 x i32>)
+declare <4 x i32> @llvm.aarch64.neon.sqdmulh.lane.v4i32.v2i32(<4 x i32>, <2 x i32>, i32)
+declare <4 x i32> @llvm.aarch64.neon.sqdmulh.laneq.v4i32.v4i32(<4 x i32>, <4 x i32>, i32)
 
 declare <2 x i32> @llvm.aarch64.neon.sqdmulh.v2i32(<2 x i32>, <2 x i32>)
+declare <2 x i32> @llvm.aarch64.neon.sqdmulh.lane.v2i32.v2i32(<2 x i32>, <2 x i32>, i32)
+declare <2 x i32> @llvm.aarch64.neon.sqdmulh.laneq.v2i32.v4i32(<2 x i32>, <4 x i32>, i32)
 
 declare <8 x i16> @llvm.aarch64.neon.sqdmulh.v8i16(<8 x i16>, <8 x i16>)
+declare <8 x i16> @llvm.aarch64.neon.sqdmulh.lane.v8i16.v4i16(<8 x i16>, <4 x i16>, i32)
+declare <8 x i16> @llvm.aarch64.neon.sqdmulh.laneq.v8i16.v8i16(<8 x i16>, <8 x i16>, i32)
 
 declare <4 x i16> @llvm.aarch64.neon.sqdmulh.v4i16(<4 x i16>, <4 x i16>)
+declare <4 x i16> @llvm.aarch64.neon.sqdmulh.lane.v4i16.v4i16(<4 x i16>, <4 x i16>, i32)
+declare <4 x i16> @llvm.aarch64.neon.sqdmulh.laneq.v4i16.v8i16(<4 x i16>, <8 x i16>, i32)
 
 declare <2 x i64> @llvm.aarch64.neon.sqdmull.v2i64(<2 x i32>, <2 x i32>)
 
@@ -429,17 +445,11 @@ entry:
 }
 
 define <2 x float> @test_vfma_lane_f32(<2 x float> %a, <2 x float> %b, <2 x float> %v) {
-; GENERIC-LABEL: test_vfma_lane_f32:
-; GENERIC:       // %bb.0: // %entry
-; GENERIC-NEXT:    // kill: def $d2 killed $d2 def $q2
-; GENERIC-NEXT:    fmla v0.2s, v1.2s, v2.s[1]
-; GENERIC-NEXT:    ret
-;
-; EXYNOSM3-LABEL: test_vfma_lane_f32:
-; EXYNOSM3:       // %bb.0: // %entry
-; EXYNOSM3-NEXT:    // kill: def $d2 killed $d2 def $q2
-; EXYNOSM3-NEXT:    fmla v0.2s, v1.2s, v2.s[1]
-; EXYNOSM3-NEXT:    ret
+; CHECK-LABEL: test_vfma_lane_f32:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    // kill: def $d2 killed $d2 def $q2
+; CHECK-NEXT:    fmla v0.2s, v1.2s, v2.s[1]
+; CHECK-NEXT:    ret
 entry:
   %lane = shufflevector <2 x float> %v, <2 x float> undef, <2 x i32> <i32 1, i32 1>
   %0 = tail call <2 x float> @llvm.fma.v2f32(<2 x float> %lane, <2 x float> %b, <2 x float> %a)
@@ -449,17 +459,11 @@ entry:
 declare <2 x float> @llvm.fma.v2f32(<2 x float>, <2 x float>, <2 x float>)
 
 define <4 x float> @test_vfmaq_lane_f32(<4 x float> %a, <4 x float> %b, <2 x float> %v) {
-; GENERIC-LABEL: test_vfmaq_lane_f32:
-; GENERIC:       // %bb.0: // %entry
-; GENERIC-NEXT:    // kill: def $d2 killed $d2 def $q2
-; GENERIC-NEXT:    fmla v0.4s, v1.4s, v2.s[1]
-; GENERIC-NEXT:    ret
-;
-; EXYNOSM3-LABEL: test_vfmaq_lane_f32:
-; EXYNOSM3:       // %bb.0: // %entry
-; EXYNOSM3-NEXT:    // kill: def $d2 killed $d2 def $q2
-; EXYNOSM3-NEXT:    fmla v0.4s, v1.4s, v2.s[1]
-; EXYNOSM3-NEXT:    ret
+; CHECK-LABEL: test_vfmaq_lane_f32:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    // kill: def $d2 killed $d2 def $q2
+; CHECK-NEXT:    fmla v0.4s, v1.4s, v2.s[1]
+; CHECK-NEXT:    ret
 entry:
   %lane = shufflevector <2 x float> %v, <2 x float> undef, <4 x i32> <i32 1, i32 1, i32 1, i32 1>
   %0 = tail call <4 x float> @llvm.fma.v4f32(<4 x float> %lane, <4 x float> %b, <4 x float> %a)
@@ -469,15 +473,10 @@ entry:
 declare <4 x float> @llvm.fma.v4f32(<4 x float>, <4 x float>, <4 x float>)
 
 define <2 x float> @test_vfma_laneq_f32(<2 x float> %a, <2 x float> %b, <4 x float> %v) {
-; GENERIC-LABEL: test_vfma_laneq_f32:
-; GENERIC:       // %bb.0: // %entry
-; GENERIC-NEXT:    fmla v0.2s, v1.2s, v2.s[3]
-; GENERIC-NEXT:    ret
-;
-; EXYNOSM3-LABEL: test_vfma_laneq_f32:
-; EXYNOSM3:       // %bb.0: // %entry
-; EXYNOSM3-NEXT:    fmla v0.2s, v1.2s, v2.s[3]
-; EXYNOSM3-NEXT:    ret
+; CHECK-LABEL: test_vfma_laneq_f32:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    fmla v0.2s, v1.2s, v2.s[3]
+; CHECK-NEXT:    ret
 entry:
   %lane = shufflevector <4 x float> %v, <4 x float> undef, <2 x i32> <i32 3, i32 3>
   %0 = tail call <2 x float> @llvm.fma.v2f32(<2 x float> %lane, <2 x float> %b, <2 x float> %a)
@@ -485,15 +484,10 @@ entry:
 }
 
 define <4 x float> @test_vfmaq_laneq_f32(<4 x float> %a, <4 x float> %b, <4 x float> %v) {
-; GENERIC-LABEL: test_vfmaq_laneq_f32:
-; GENERIC:       // %bb.0: // %entry
-; GENERIC-NEXT:    fmla v0.4s, v1.4s, v2.s[3]
-; GENERIC-NEXT:    ret
-;
-; EXYNOSM3-LABEL: test_vfmaq_laneq_f32:
-; EXYNOSM3:       // %bb.0: // %entry
-; EXYNOSM3-NEXT:    fmla v0.4s, v1.4s, v2.s[3]
-; EXYNOSM3-NEXT:    ret
+; CHECK-LABEL: test_vfmaq_laneq_f32:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    fmla v0.4s, v1.4s, v2.s[3]
+; CHECK-NEXT:    ret
 entry:
   %lane = shufflevector <4 x float> %v, <4 x float> undef, <4 x i32> <i32 3, i32 3, i32 3, i32 3>
   %0 = tail call <4 x float> @llvm.fma.v4f32(<4 x float> %lane, <4 x float> %b, <4 x float> %a)
@@ -501,17 +495,11 @@ entry:
 }
 
 define <2 x float> @test_vfms_lane_f32(<2 x float> %a, <2 x float> %b, <2 x float> %v) {
-; GENERIC-LABEL: test_vfms_lane_f32:
-; GENERIC:       // %bb.0: // %entry
-; GENERIC-NEXT:    // kill: def $d2 killed $d2 def $q2
-; GENERIC-NEXT:    fmls v0.2s, v1.2s, v2.s[1]
-; GENERIC-NEXT:    ret
-;
-; EXYNOSM3-LABEL: test_vfms_lane_f32:
-; EXYNOSM3:       // %bb.0: // %entry
-; EXYNOSM3-NEXT:    // kill: def $d2 killed $d2 def $q2
-; EXYNOSM3-NEXT:    fmls v0.2s, v1.2s, v2.s[1]
-; EXYNOSM3-NEXT:    ret
+; CHECK-LABEL: test_vfms_lane_f32:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    // kill: def $d2 killed $d2 def $q2
+; CHECK-NEXT:    fmls v0.2s, v1.2s, v2.s[1]
+; CHECK-NEXT:    ret
 entry:
   %sub = fsub <2 x float> <float -0.000000e+00, float -0.000000e+00>, %v
   %lane = shufflevector <2 x float> %sub, <2 x float> undef, <2 x i32> <i32 1, i32 1>
@@ -520,17 +508,11 @@ entry:
 }
 
 define <4 x float> @test_vfmsq_lane_f32(<4 x float> %a, <4 x float> %b, <2 x float> %v) {
-; GENERIC-LABEL: test_vfmsq_lane_f32:
-; GENERIC:       // %bb.0: // %entry
-; GENERIC-NEXT:    // kill: def $d2 killed $d2 def $q2
-; GENERIC-NEXT:    fmls v0.4s, v1.4s, v2.s[1]
-; GENERIC-NEXT:    ret
-;
-; EXYNOSM3-LABEL: test_vfmsq_lane_f32:
-; EXYNOSM3:       // %bb.0: // %entry
-; EXYNOSM3-NEXT:    // kill: def $d2 killed $d2 def $q2
-; EXYNOSM3-NEXT:    fmls v0.4s, v1.4s, v2.s[1]
-; EXYNOSM3-NEXT:    ret
+; CHECK-LABEL: test_vfmsq_lane_f32:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    // kill: def $d2 killed $d2 def $q2
+; CHECK-NEXT:    fmls v0.4s, v1.4s, v2.s[1]
+; CHECK-NEXT:    ret
 entry:
   %sub = fsub <2 x float> <float -0.000000e+00, float -0.000000e+00>, %v
   %lane = shufflevector <2 x float> %sub, <2 x float> undef, <4 x i32> <i32 1, i32 1, i32 1, i32 1>
@@ -539,15 +521,10 @@ entry:
 }
 
 define <2 x float> @test_vfms_laneq_f32(<2 x float> %a, <2 x float> %b, <4 x float> %v) {
-; GENERIC-LABEL: test_vfms_laneq_f32:
-; GENERIC:       // %bb.0: // %entry
-; GENERIC-NEXT:    fmls v0.2s, v1.2s, v2.s[3]
-; GENERIC-NEXT:    ret
-;
-; EXYNOSM3-LABEL: test_vfms_laneq_f32:
-; EXYNOSM3:       // %bb.0: // %entry
-; EXYNOSM3-NEXT:    fmls v0.2s, v1.2s, v2.s[3]
-; EXYNOSM3-NEXT:    ret
+; CHECK-LABEL: test_vfms_laneq_f32:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    fmls v0.2s, v1.2s, v2.s[3]
+; CHECK-NEXT:    ret
 entry:
   %sub = fsub <4 x float> <float -0.000000e+00, float -0.000000e+00, float -0.000000e+00, float -0.000000e+00>, %v
   %lane = shufflevector <4 x float> %sub, <4 x float> undef, <2 x i32> <i32 3, i32 3>
@@ -556,15 +533,10 @@ entry:
 }
 
 define <4 x float> @test_vfmsq_laneq_f32(<4 x float> %a, <4 x float> %b, <4 x float> %v) {
-; GENERIC-LABEL: test_vfmsq_laneq_f32:
-; GENERIC:       // %bb.0: // %entry
-; GENERIC-NEXT:    fmls v0.4s, v1.4s, v2.s[3]
-; GENERIC-NEXT:    ret
-;
-; EXYNOSM3-LABEL: test_vfmsq_laneq_f32:
-; EXYNOSM3:       // %bb.0: // %entry
-; EXYNOSM3-NEXT:    fmls v0.4s, v1.4s, v2.s[3]
-; EXYNOSM3-NEXT:    ret
+; CHECK-LABEL: test_vfmsq_laneq_f32:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    fmls v0.4s, v1.4s, v2.s[3]
+; CHECK-NEXT:    ret
 entry:
   %sub = fsub <4 x float> <float -0.000000e+00, float -0.000000e+00, float -0.000000e+00, float -0.000000e+00>, %v
   %lane = shufflevector <4 x float> %sub, <4 x float> undef, <4 x i32> <i32 3, i32 3, i32 3, i32 3>
@@ -573,17 +545,11 @@ entry:
 }
 
 define <2 x double> @test_vfmaq_lane_f64(<2 x double> %a, <2 x double> %b, <1 x double> %v) {
-; GENERIC-LABEL: test_vfmaq_lane_f64:
-; GENERIC:       // %bb.0: // %entry
-; GENERIC-NEXT:    // kill: def $d2 killed $d2 def $q2
-; GENERIC-NEXT:    fmla v0.2d, v1.2d, v2.d[0]
-; GENERIC-NEXT:    ret
-;
-; EXYNOSM3-LABEL: test_vfmaq_lane_f64:
-; EXYNOSM3:       // %bb.0: // %entry
-; EXYNOSM3-NEXT:    // kill: def $d2 killed $d2 def $q2
-; EXYNOSM3-NEXT:    fmla v0.2d, v1.2d, v2.d[0]
-; EXYNOSM3-NEXT:    ret
+; CHECK-LABEL: test_vfmaq_lane_f64:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    // kill: def $d2 killed $d2 def $q2
+; CHECK-NEXT:    fmla v0.2d, v1.2d, v2.d[0]
+; CHECK-NEXT:    ret
 entry:
   %lane = shufflevector <1 x double> %v, <1 x double> undef, <2 x i32> zeroinitializer
   %0 = tail call <2 x double> @llvm.fma.v2f64(<2 x double> %lane, <2 x double> %b, <2 x double> %a)
@@ -593,15 +559,10 @@ entry:
 declare <2 x double> @llvm.fma.v2f64(<2 x double>, <2 x double>, <2 x double>)
 
 define <2 x double> @test_vfmaq_laneq_f64(<2 x double> %a, <2 x double> %b, <2 x double> %v) {
-; GENERIC-LABEL: test_vfmaq_laneq_f64:
-; GENERIC:       // %bb.0: // %entry
-; GENERIC-NEXT:    fmla v0.2d, v1.2d, v2.d[1]
-; GENERIC-NEXT:    ret
-;
-; EXYNOSM3-LABEL: test_vfmaq_laneq_f64:
-; EXYNOSM3:       // %bb.0: // %entry
-; EXYNOSM3-NEXT:    fmla v0.2d, v1.2d, v2.d[1]
-; EXYNOSM3-NEXT:    ret
+; CHECK-LABEL: test_vfmaq_laneq_f64:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    fmla v0.2d, v1.2d, v2.d[1]
+; CHECK-NEXT:    ret
 entry:
   %lane = shufflevector <2 x double> %v, <2 x double> undef, <2 x i32> <i32 1, i32 1>
   %0 = tail call <2 x double> @llvm.fma.v2f64(<2 x double> %lane, <2 x double> %b, <2 x double> %a)
@@ -609,17 +570,11 @@ entry:
 }
 
 define <2 x double> @test_vfmsq_lane_f64(<2 x double> %a, <2 x double> %b, <1 x double> %v) {
-; GENERIC-LABEL: test_vfmsq_lane_f64:
-; GENERIC:       // %bb.0: // %entry
-; GENERIC-NEXT:    // kill: def $d2 killed $d2 def $q2
-; GENERIC-NEXT:    fmls v0.2d, v1.2d, v2.d[0]
-; GENERIC-NEXT:    ret
-;
-; EXYNOSM3-LABEL: test_vfmsq_lane_f64:
-; EXYNOSM3:       // %bb.0: // %entry
-; EXYNOSM3-NEXT:    // kill: def $d2 killed $d2 def $q2
-; EXYNOSM3-NEXT:    fmls v0.2d, v1.2d, v2.d[0]
-; EXYNOSM3-NEXT:    ret
+; CHECK-LABEL: test_vfmsq_lane_f64:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    // kill: def $d2 killed $d2 def $q2
+; CHECK-NEXT:    fmls v0.2d, v1.2d, v2.d[0]
+; CHECK-NEXT:    ret
 entry:
   %sub = fsub <1 x double> <double -0.000000e+00>, %v
   %lane = shufflevector <1 x double> %sub, <1 x double> undef, <2 x i32> zeroinitializer
@@ -628,15 +583,10 @@ entry:
 }
 
 define <2 x double> @test_vfmsq_laneq_f64(<2 x double> %a, <2 x double> %b, <2 x double> %v) {
-; GENERIC-LABEL: test_vfmsq_laneq_f64:
-; GENERIC:       // %bb.0: // %entry
-; GENERIC-NEXT:    fmls v0.2d, v1.2d, v2.d[1]
-; GENERIC-NEXT:    ret
-;
-; EXYNOSM3-LABEL: test_vfmsq_laneq_f64:
-; EXYNOSM3:       // %bb.0: // %entry
-; EXYNOSM3-NEXT:    fmls v0.2d, v1.2d, v2.d[1]
-; EXYNOSM3-NEXT:    ret
+; CHECK-LABEL: test_vfmsq_laneq_f64:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    fmls v0.2d, v1.2d, v2.d[1]
+; CHECK-NEXT:    ret
 entry:
   %sub = fsub <2 x double> <double -0.000000e+00, double -0.000000e+00>, %v
   %lane = shufflevector <2 x double> %sub, <2 x double> undef, <2 x i32> <i32 1, i32 1>
@@ -1581,6 +1531,37 @@ entry:
   ret <4 x i16> %vqdmulh2.i
 }
 
+define <4 x i16> @test_vqdmulh_lane_s16_intrinsic(<4 x i16> %a, <4 x i16> %v) {
+; CHECK-LABEL: test_vqdmulh_lane_s16_intrinsic:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    // kill: def $d1 killed $d1 def $q1
+; CHECK-NEXT:    sqdmulh v0.4h, v0.4h, v1.h[3]
+; CHECK-NEXT:    ret
+entry:
+  %vqdmulh2.i = tail call <4 x i16> @llvm.aarch64.neon.sqdmulh.lane.v4i16.v4i16(<4 x i16> %a, <4 x i16> %v, i32 3)
+  ret <4 x i16> %vqdmulh2.i
+}
+
+define <4 x i16> @test_vqdmulh_laneq_s16_intrinsic_lo(<4 x i16> %a, <8 x i16> %v) {
+; CHECK-LABEL: test_vqdmulh_laneq_s16_intrinsic_lo:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    sqdmulh v0.4h, v0.4h, v1.h[3]
+; CHECK-NEXT:    ret
+entry:
+  %vqdmulh2.i = tail call <4 x i16> @llvm.aarch64.neon.sqdmulh.laneq.v4i16.v8i16(<4 x i16> %a, <8 x i16> %v, i32 3)
+  ret <4 x i16> %vqdmulh2.i
+}
+
+define <4 x i16> @test_vqdmulh_laneq_s16_intrinsic_hi(<4 x i16> %a, <8 x i16> %v) {
+; CHECK-LABEL: test_vqdmulh_laneq_s16_intrinsic_hi:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    sqdmulh v0.4h, v0.4h, v1.h[7]
+; CHECK-NEXT:    ret
+entry:
+  %vqdmulh2.i = tail call <4 x i16> @llvm.aarch64.neon.sqdmulh.laneq.v4i16.v8i16(<4 x i16> %a, <8 x i16> %v, i32 7)
+  ret <4 x i16> %vqdmulh2.i
+}
+
 define <8 x i16> @test_vqdmulhq_lane_s16(<8 x i16> %a, <4 x i16> %v) {
 ; CHECK-LABEL: test_vqdmulhq_lane_s16:
 ; CHECK:       // %bb.0: // %entry
@@ -1590,6 +1571,37 @@ define <8 x i16> @test_vqdmulhq_lane_s16(<8 x i16> %a, <4 x i16> %v) {
 entry:
   %shuffle = shufflevector <4 x i16> %v, <4 x i16> undef, <8 x i32> <i32 3, i32 3, i32 3, i32 3, i32 3, i32 3, i32 3, i32 3>
   %vqdmulh2.i = tail call <8 x i16> @llvm.aarch64.neon.sqdmulh.v8i16(<8 x i16> %a, <8 x i16> %shuffle)
+  ret <8 x i16> %vqdmulh2.i
+}
+
+define <8 x i16> @test_vqdmulhq_lane_s16_intrinsic(<8 x i16> %a, <4 x i16> %v) {
+; CHECK-LABEL: test_vqdmulhq_lane_s16_intrinsic:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    // kill: def $d1 killed $d1 def $q1
+; CHECK-NEXT:    sqdmulh v0.8h, v0.8h, v1.h[3]
+; CHECK-NEXT:    ret
+entry:
+  %vqdmulh2.i = tail call <8 x i16> @llvm.aarch64.neon.sqdmulh.lane.v8i16.v4i16(<8 x i16> %a, <4 x i16> %v, i32 3)
+  ret <8 x i16> %vqdmulh2.i
+}
+
+define <8 x i16> @test_vqdmulhq_laneq_s16_intrinsic_lo(<8 x i16> %a, <8 x i16> %v) {
+; CHECK-LABEL: test_vqdmulhq_laneq_s16_intrinsic_lo:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    sqdmulh v0.8h, v0.8h, v1.h[3]
+; CHECK-NEXT:    ret
+entry:
+  %vqdmulh2.i = tail call <8 x i16> @llvm.aarch64.neon.sqdmulh.laneq.v8i16.v8i16(<8 x i16> %a, <8 x i16> %v, i32 3)
+  ret <8 x i16> %vqdmulh2.i
+}
+
+define <8 x i16> @test_vqdmulhq_laneq_s16_intrinsic_hi(<8 x i16> %a, <8 x i16> %v) {
+; CHECK-LABEL: test_vqdmulhq_laneq_s16_intrinsic_hi:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    sqdmulh v0.8h, v0.8h, v1.h[7]
+; CHECK-NEXT:    ret
+entry:
+  %vqdmulh2.i = tail call <8 x i16> @llvm.aarch64.neon.sqdmulh.laneq.v8i16.v8i16(<8 x i16> %a, <8 x i16> %v, i32 7)
   ret <8 x i16> %vqdmulh2.i
 }
 
@@ -1605,6 +1617,37 @@ entry:
   ret <2 x i32> %vqdmulh2.i
 }
 
+define <2 x i32> @test_vqdmulh_lane_s32_intrinsic(<2 x i32> %a, <2 x i32> %v) {
+; CHECK-LABEL: test_vqdmulh_lane_s32_intrinsic:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    // kill: def $d1 killed $d1 def $q1
+; CHECK-NEXT:    sqdmulh v0.2s, v0.2s, v1.s[1]
+; CHECK-NEXT:    ret
+entry:
+  %vqdmulh2.i = tail call <2 x i32> @llvm.aarch64.neon.sqdmulh.lane.v2i32.v2i32(<2 x i32> %a, <2 x i32> %v, i32 1)
+  ret <2 x i32> %vqdmulh2.i
+}
+
+define <2 x i32> @test_vqdmulh_laneq_s32_intrinsic_lo(<2 x i32> %a, <4 x i32> %v) {
+; CHECK-LABEL: test_vqdmulh_laneq_s32_intrinsic_lo:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    sqdmulh v0.2s, v0.2s, v1.s[1]
+; CHECK-NEXT:    ret
+entry:
+  %vqdmulh2.i = tail call <2 x i32> @llvm.aarch64.neon.sqdmulh.laneq.v2i32.v4i32(<2 x i32> %a, <4 x i32> %v, i32 1)
+  ret <2 x i32> %vqdmulh2.i
+}
+
+define <2 x i32> @test_vqdmulh_laneq_s32_intrinsic_hi(<2 x i32> %a, <4 x i32> %v) {
+; CHECK-LABEL: test_vqdmulh_laneq_s32_intrinsic_hi:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    sqdmulh v0.2s, v0.2s, v1.s[3]
+; CHECK-NEXT:    ret
+entry:
+  %vqdmulh2.i = tail call <2 x i32> @llvm.aarch64.neon.sqdmulh.laneq.v2i32.v4i32(<2 x i32> %a, <4 x i32> %v, i32 3)
+  ret <2 x i32> %vqdmulh2.i
+}
+
 define <4 x i32> @test_vqdmulhq_lane_s32(<4 x i32> %a, <2 x i32> %v) {
 ; CHECK-LABEL: test_vqdmulhq_lane_s32:
 ; CHECK:       // %bb.0: // %entry
@@ -1614,6 +1657,37 @@ define <4 x i32> @test_vqdmulhq_lane_s32(<4 x i32> %a, <2 x i32> %v) {
 entry:
   %shuffle = shufflevector <2 x i32> %v, <2 x i32> undef, <4 x i32> <i32 1, i32 1, i32 1, i32 1>
   %vqdmulh2.i = tail call <4 x i32> @llvm.aarch64.neon.sqdmulh.v4i32(<4 x i32> %a, <4 x i32> %shuffle)
+  ret <4 x i32> %vqdmulh2.i
+}
+
+define <4 x i32> @test_vqdmulhq_lane_s32_intrinsic(<4 x i32> %a, <2 x i32> %v) {
+; CHECK-LABEL: test_vqdmulhq_lane_s32_intrinsic:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    // kill: def $d1 killed $d1 def $q1
+; CHECK-NEXT:    sqdmulh v0.4s, v0.4s, v1.s[1]
+; CHECK-NEXT:    ret
+entry:
+  %vqdmulh2.i = tail call <4 x i32> @llvm.aarch64.neon.sqdmulh.lane.v4i32.v2i32(<4 x i32> %a, <2 x i32> %v, i32 1)
+  ret <4 x i32> %vqdmulh2.i
+}
+
+define <4 x i32> @test_vqdmulhq_laneq_s32_intrinsic_lo(<4 x i32> %a, <4 x i32> %v) {
+; CHECK-LABEL: test_vqdmulhq_laneq_s32_intrinsic_lo:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    sqdmulh v0.4s, v0.4s, v1.s[1]
+; CHECK-NEXT:    ret
+entry:
+  %vqdmulh2.i = tail call <4 x i32> @llvm.aarch64.neon.sqdmulh.laneq.v4i32.v4i32(<4 x i32> %a, <4 x i32> %v, i32 1)
+  ret <4 x i32> %vqdmulh2.i
+}
+
+define <4 x i32> @test_vqdmulhq_laneq_s32_intrinsic_hi(<4 x i32> %a, <4 x i32> %v) {
+; CHECK-LABEL: test_vqdmulhq_laneq_s32_intrinsic_hi:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    sqdmulh v0.4s, v0.4s, v1.s[3]
+; CHECK-NEXT:    ret
+entry:
+  %vqdmulh2.i = tail call <4 x i32> @llvm.aarch64.neon.sqdmulh.laneq.v4i32.v4i32(<4 x i32> %a, <4 x i32> %v, i32 3)
   ret <4 x i32> %vqdmulh2.i
 }
 
@@ -1629,6 +1703,37 @@ entry:
   ret <4 x i16> %vqrdmulh2.i
 }
 
+define <4 x i16> @test_vqrdmulh_lane_s16_intrinsic(<4 x i16> %a, <4 x i16> %v) {
+; CHECK-LABEL: test_vqrdmulh_lane_s16_intrinsic:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    // kill: def $d1 killed $d1 def $q1
+; CHECK-NEXT:    sqrdmulh v0.4h, v0.4h, v1.h[3]
+; CHECK-NEXT:    ret
+entry:
+  %vqrdmulh2.i = tail call <4 x i16> @llvm.aarch64.neon.sqrdmulh.lane.v4i16.v4i16(<4 x i16> %a, <4 x i16> %v, i32 3)
+  ret <4 x i16> %vqrdmulh2.i
+}
+
+define <4 x i16> @test_vqrdmulh_laneq_s16_intrinsic_lo(<4 x i16> %a, <8 x i16> %v) {
+; CHECK-LABEL: test_vqrdmulh_laneq_s16_intrinsic_lo:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    sqrdmulh v0.4h, v0.4h, v1.h[3]
+; CHECK-NEXT:    ret
+entry:
+  %vqrdmulh2.i = tail call <4 x i16> @llvm.aarch64.neon.sqrdmulh.laneq.v4i16.v8i16(<4 x i16> %a, <8 x i16> %v, i32 3)
+  ret <4 x i16> %vqrdmulh2.i
+}
+
+define <4 x i16> @test_vqrdmulh_laneq_s16_intrinsic_hi(<4 x i16> %a, <8 x i16> %v) {
+; CHECK-LABEL: test_vqrdmulh_laneq_s16_intrinsic_hi:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    sqrdmulh v0.4h, v0.4h, v1.h[7]
+; CHECK-NEXT:    ret
+entry:
+  %vqrdmulh2.i = tail call <4 x i16> @llvm.aarch64.neon.sqrdmulh.laneq.v4i16.v8i16(<4 x i16> %a, <8 x i16> %v, i32 7)
+  ret <4 x i16> %vqrdmulh2.i
+}
+
 define <8 x i16> @test_vqrdmulhq_lane_s16(<8 x i16> %a, <4 x i16> %v) {
 ; CHECK-LABEL: test_vqrdmulhq_lane_s16:
 ; CHECK:       // %bb.0: // %entry
@@ -1638,6 +1743,37 @@ define <8 x i16> @test_vqrdmulhq_lane_s16(<8 x i16> %a, <4 x i16> %v) {
 entry:
   %shuffle = shufflevector <4 x i16> %v, <4 x i16> undef, <8 x i32> <i32 3, i32 3, i32 3, i32 3, i32 3, i32 3, i32 3, i32 3>
   %vqrdmulh2.i = tail call <8 x i16> @llvm.aarch64.neon.sqrdmulh.v8i16(<8 x i16> %a, <8 x i16> %shuffle)
+  ret <8 x i16> %vqrdmulh2.i
+}
+
+define <8 x i16> @test_vqrdmulhq_lane_s16_intrinsic(<8 x i16> %a, <4 x i16> %v) {
+; CHECK-LABEL: test_vqrdmulhq_lane_s16_intrinsic:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    // kill: def $d1 killed $d1 def $q1
+; CHECK-NEXT:    sqrdmulh v0.8h, v0.8h, v1.h[3]
+; CHECK-NEXT:    ret
+entry:
+  %vqrdmulh2.i = tail call <8 x i16> @llvm.aarch64.neon.sqrdmulh.lane.v8i16.v4i16(<8 x i16> %a, <4 x i16> %v, i32 3)
+  ret <8 x i16> %vqrdmulh2.i
+}
+
+define <8 x i16> @test_vqrdmulhq_laneq_s16_intrinsic_lo(<8 x i16> %a, <8 x i16> %v) {
+; CHECK-LABEL: test_vqrdmulhq_laneq_s16_intrinsic_lo:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    sqrdmulh v0.8h, v0.8h, v1.h[3]
+; CHECK-NEXT:    ret
+entry:
+  %vqrdmulh2.i = tail call <8 x i16> @llvm.aarch64.neon.sqrdmulh.laneq.v8i16.v8i16(<8 x i16> %a, <8 x i16> %v, i32 3)
+  ret <8 x i16> %vqrdmulh2.i
+}
+
+define <8 x i16> @test_vqrdmulhq_laneq_s16_intrinsic_hi(<8 x i16> %a, <8 x i16> %v) {
+; CHECK-LABEL: test_vqrdmulhq_laneq_s16_intrinsic_hi:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    sqrdmulh v0.8h, v0.8h, v1.h[7]
+; CHECK-NEXT:    ret
+entry:
+  %vqrdmulh2.i = tail call <8 x i16> @llvm.aarch64.neon.sqrdmulh.laneq.v8i16.v8i16(<8 x i16> %a, <8 x i16> %v, i32 7)
   ret <8 x i16> %vqrdmulh2.i
 }
 
@@ -1653,6 +1789,37 @@ entry:
   ret <2 x i32> %vqrdmulh2.i
 }
 
+define <2 x i32> @test_vqrdmulh_lane_s32_intrinsic(<2 x i32> %a, <2 x i32> %v) {
+; CHECK-LABEL: test_vqrdmulh_lane_s32_intrinsic:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    // kill: def $d1 killed $d1 def $q1
+; CHECK-NEXT:    sqrdmulh v0.2s, v0.2s, v1.s[1]
+; CHECK-NEXT:    ret
+entry:
+  %vqrdmulh2.i = tail call <2 x i32> @llvm.aarch64.neon.sqrdmulh.lane.v2i32.v2i32(<2 x i32> %a, <2 x i32> %v, i32 1)
+  ret <2 x i32> %vqrdmulh2.i
+}
+
+define <2 x i32> @test_vqrdmulh_laneq_s32_intrinsic_lo(<2 x i32> %a, <4 x i32> %v) {
+; CHECK-LABEL: test_vqrdmulh_laneq_s32_intrinsic_lo:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    sqrdmulh v0.2s, v0.2s, v1.s[1]
+; CHECK-NEXT:    ret
+entry:
+  %vqrdmulh2.i = tail call <2 x i32> @llvm.aarch64.neon.sqrdmulh.laneq.v2i32.v4i32(<2 x i32> %a, <4 x i32> %v, i32 1)
+  ret <2 x i32> %vqrdmulh2.i
+}
+
+define <2 x i32> @test_vqrdmulh_laneq_s32_intrinsic_hi(<2 x i32> %a, <4 x i32> %v) {
+; CHECK-LABEL: test_vqrdmulh_laneq_s32_intrinsic_hi:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    sqrdmulh v0.2s, v0.2s, v1.s[3]
+; CHECK-NEXT:    ret
+entry:
+  %vqrdmulh2.i = tail call <2 x i32> @llvm.aarch64.neon.sqrdmulh.laneq.v2i32.v4i32(<2 x i32> %a, <4 x i32> %v, i32 3)
+  ret <2 x i32> %vqrdmulh2.i
+}
+
 define <4 x i32> @test_vqrdmulhq_lane_s32(<4 x i32> %a, <2 x i32> %v) {
 ; CHECK-LABEL: test_vqrdmulhq_lane_s32:
 ; CHECK:       // %bb.0: // %entry
@@ -1665,18 +1832,43 @@ entry:
   ret <4 x i32> %vqrdmulh2.i
 }
 
+define <4 x i32> @test_vqrdmulhq_lane_s32_intrinsic(<4 x i32> %a, <2 x i32> %v) {
+; CHECK-LABEL: test_vqrdmulhq_lane_s32_intrinsic:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    // kill: def $d1 killed $d1 def $q1
+; CHECK-NEXT:    sqrdmulh v0.4s, v0.4s, v1.s[1]
+; CHECK-NEXT:    ret
+entry:
+  %vqrdmulh2.i = tail call <4 x i32> @llvm.aarch64.neon.sqrdmulh.lane.v4i32.v2i32(<4 x i32> %a, <2 x i32> %v, i32 1)
+  ret <4 x i32> %vqrdmulh2.i
+}
+
+define <4 x i32> @test_vqrdmulhq_laneq_s32_intrinsic_lo(<4 x i32> %a, <4 x i32> %v) {
+; CHECK-LABEL: test_vqrdmulhq_laneq_s32_intrinsic_lo:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    sqrdmulh v0.4s, v0.4s, v1.s[1]
+; CHECK-NEXT:    ret
+entry:
+  %vqrdmulh2.i = tail call <4 x i32> @llvm.aarch64.neon.sqrdmulh.laneq.v4i32.v4i32(<4 x i32> %a, <4 x i32> %v, i32 1)
+  ret <4 x i32> %vqrdmulh2.i
+}
+
+define <4 x i32> @test_vqrdmulhq_laneq_s32_intrinsic_hi(<4 x i32> %a, <4 x i32> %v) {
+; CHECK-LABEL: test_vqrdmulhq_laneq_s32_intrinsic_hi:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    sqrdmulh v0.4s, v0.4s, v1.s[3]
+; CHECK-NEXT:    ret
+entry:
+  %vqrdmulh2.i = tail call <4 x i32> @llvm.aarch64.neon.sqrdmulh.laneq.v4i32.v4i32(<4 x i32> %a, <4 x i32> %v, i32 3)
+  ret <4 x i32> %vqrdmulh2.i
+}
+
 define <2 x float> @test_vmul_lane_f32(<2 x float> %a, <2 x float> %v) {
-; GENERIC-LABEL: test_vmul_lane_f32:
-; GENERIC:       // %bb.0: // %entry
-; GENERIC-NEXT:    // kill: def $d1 killed $d1 def $q1
-; GENERIC-NEXT:    fmul v0.2s, v0.2s, v1.s[1]
-; GENERIC-NEXT:    ret
-;
-; EXYNOSM3-LABEL: test_vmul_lane_f32:
-; EXYNOSM3:       // %bb.0: // %entry
-; EXYNOSM3-NEXT:    // kill: def $d1 killed $d1 def $q1
-; EXYNOSM3-NEXT:    fmul v0.2s, v0.2s, v1.s[1]
-; EXYNOSM3-NEXT:    ret
+; CHECK-LABEL: test_vmul_lane_f32:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    // kill: def $d1 killed $d1 def $q1
+; CHECK-NEXT:    fmul v0.2s, v0.2s, v1.s[1]
+; CHECK-NEXT:    ret
 entry:
   %shuffle = shufflevector <2 x float> %v, <2 x float> undef, <2 x i32> <i32 1, i32 1>
   %mul = fmul <2 x float> %shuffle, %a
@@ -1698,17 +1890,11 @@ entry:
 }
 
 define <4 x float> @test_vmulq_lane_f32(<4 x float> %a, <2 x float> %v) {
-; GENERIC-LABEL: test_vmulq_lane_f32:
-; GENERIC:       // %bb.0: // %entry
-; GENERIC-NEXT:    // kill: def $d1 killed $d1 def $q1
-; GENERIC-NEXT:    fmul v0.4s, v0.4s, v1.s[1]
-; GENERIC-NEXT:    ret
-;
-; EXYNOSM3-LABEL: test_vmulq_lane_f32:
-; EXYNOSM3:       // %bb.0: // %entry
-; EXYNOSM3-NEXT:    // kill: def $d1 killed $d1 def $q1
-; EXYNOSM3-NEXT:    fmul v0.4s, v0.4s, v1.s[1]
-; EXYNOSM3-NEXT:    ret
+; CHECK-LABEL: test_vmulq_lane_f32:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    // kill: def $d1 killed $d1 def $q1
+; CHECK-NEXT:    fmul v0.4s, v0.4s, v1.s[1]
+; CHECK-NEXT:    ret
 entry:
   %shuffle = shufflevector <2 x float> %v, <2 x float> undef, <4 x i32> <i32 1, i32 1, i32 1, i32 1>
   %mul = fmul <4 x float> %shuffle, %a
@@ -1716,17 +1902,11 @@ entry:
 }
 
 define <2 x double> @test_vmulq_lane_f64(<2 x double> %a, <1 x double> %v) {
-; GENERIC-LABEL: test_vmulq_lane_f64:
-; GENERIC:       // %bb.0: // %entry
-; GENERIC-NEXT:    // kill: def $d1 killed $d1 def $q1
-; GENERIC-NEXT:    fmul v0.2d, v0.2d, v1.d[0]
-; GENERIC-NEXT:    ret
-;
-; EXYNOSM3-LABEL: test_vmulq_lane_f64:
-; EXYNOSM3:       // %bb.0: // %entry
-; EXYNOSM3-NEXT:    // kill: def $d1 killed $d1 def $q1
-; EXYNOSM3-NEXT:    fmul v0.2d, v0.2d, v1.d[0]
-; EXYNOSM3-NEXT:    ret
+; CHECK-LABEL: test_vmulq_lane_f64:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    // kill: def $d1 killed $d1 def $q1
+; CHECK-NEXT:    fmul v0.2d, v0.2d, v1.d[0]
+; CHECK-NEXT:    ret
 entry:
   %shuffle = shufflevector <1 x double> %v, <1 x double> undef, <2 x i32> zeroinitializer
   %mul = fmul <2 x double> %shuffle, %a
@@ -1734,19 +1914,96 @@ entry:
 }
 
 define <2 x float> @test_vmul_laneq_f32(<2 x float> %a, <4 x float> %v) {
-; GENERIC-LABEL: test_vmul_laneq_f32:
-; GENERIC:       // %bb.0: // %entry
-; GENERIC-NEXT:    fmul v0.2s, v0.2s, v1.s[3]
-; GENERIC-NEXT:    ret
-;
-; EXYNOSM3-LABEL: test_vmul_laneq_f32:
-; EXYNOSM3:       // %bb.0: // %entry
-; EXYNOSM3-NEXT:    fmul v0.2s, v0.2s, v1.s[3]
-; EXYNOSM3-NEXT:    ret
+; CHECK-LABEL: test_vmul_laneq_f32:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    fmul v0.2s, v0.2s, v1.s[3]
+; CHECK-NEXT:    ret
 entry:
   %shuffle = shufflevector <4 x float> %v, <4 x float> undef, <2 x i32> <i32 3, i32 3>
   %mul = fmul <2 x float> %shuffle, %a
   ret <2 x float> %mul
+}
+
+define <2 x float> @test_vmul_laneq3_f32_bitcast(<2 x float> %a, <2 x double> %v) {
+; CHECK-LABEL: test_vmul_laneq3_f32_bitcast:
+; CHECK:       // %bb.0:
+; CHECK-NEXT:    fmul v0.2s, v0.2s, v1.s[3]
+; CHECK-NEXT:    ret
+  %extract = shufflevector <2 x double> %v, <2 x double> undef, <1 x i32> <i32 1>
+  %bc = bitcast <1 x double> %extract to <2 x float>
+  %splat = shufflevector <2 x float> %bc, <2 x float> undef, <2 x i32> <i32 1, i32 1>
+  %mul = fmul <2 x float> %splat, %a
+  ret <2 x float> %mul
+}
+
+define <2 x float> @test_vmul_laneq2_f32_bitcast(<2 x float> %a, <2 x double> %v) {
+; CHECK-LABEL: test_vmul_laneq2_f32_bitcast:
+; CHECK:       // %bb.0:
+; CHECK-NEXT:    fmul v0.2s, v0.2s, v1.s[2]
+; CHECK-NEXT:    ret
+  %extract = shufflevector <2 x double> %v, <2 x double> undef, <1 x i32> <i32 1>
+  %bc = bitcast <1 x double> %extract to <2 x float>
+  %splat = shufflevector <2 x float> %bc, <2 x float> undef, <2 x i32> <i32 0, i32 0>
+  %mul = fmul <2 x float> %splat, %a
+  ret <2 x float> %mul
+}
+
+define <4 x i16> @test_vadd_laneq5_i16_bitcast(<4 x i16> %a, <2 x double> %v) {
+; CHECK-LABEL: test_vadd_laneq5_i16_bitcast:
+; CHECK:       // %bb.0:
+; CHECK-NEXT:    dup v1.4h, v1.h[5]
+; CHECK-NEXT:    add v0.4h, v1.4h, v0.4h
+; CHECK-NEXT:    ret
+  %extract = shufflevector <2 x double> %v, <2 x double> undef, <1 x i32> <i32 1>
+  %bc = bitcast <1 x double> %extract to <4 x i16>
+  %splat = shufflevector <4 x i16> %bc, <4 x i16> undef, <4 x i32> <i32 1, i32 1, i32 1, i32 1>
+  %r = add <4 x i16> %splat, %a
+  ret <4 x i16> %r
+}
+
+; TODO: The pattern in LowerVECTOR_SHUFFLE does not match what we are looking for.
+
+define <4 x i16> @test_vadd_lane2_i16_bitcast_bigger_aligned(<4 x i16> %a, <16 x i8> %v) {
+; CHECK-LABEL: test_vadd_lane2_i16_bitcast_bigger_aligned:
+; CHECK:       // %bb.0:
+; CHECK-NEXT:    ext v1.8b, v1.8b, v0.8b, #2
+; CHECK-NEXT:    dup v1.4h, v1.h[1]
+; CHECK-NEXT:    add v0.4h, v1.4h, v0.4h
+; CHECK-NEXT:    ret
+  %extract = shufflevector <16 x i8> %v, <16 x i8> undef, <8 x i32> <i32 2, i32 3, i32 4, i32 5, i32 6, i32 7, i32 8, i32 9>
+  %bc = bitcast <8 x i8> %extract to <4 x i16>
+  %splat = shufflevector <4 x i16> %bc, <4 x i16> undef, <4 x i32> <i32 1, i32 1, i32 1, i32 1>
+  %r = add <4 x i16> %splat, %a
+  ret <4 x i16> %r
+}
+
+define <4 x i16> @test_vadd_lane5_i16_bitcast_bigger_aligned(<4 x i16> %a, <16 x i8> %v) {
+; CHECK-LABEL: test_vadd_lane5_i16_bitcast_bigger_aligned:
+; CHECK:       // %bb.0:
+; CHECK-NEXT:    dup v1.4h, v1.h[5]
+; CHECK-NEXT:    add v0.4h, v1.4h, v0.4h
+; CHECK-NEXT:    ret
+  %extract = shufflevector <16 x i8> %v, <16 x i8> undef, <8 x i32> <i32 8, i32 9, i32 10, i32 11, i32 12, i32 13, i32 14, i32 15>
+  %bc = bitcast <8 x i8> %extract to <4 x i16>
+  %splat = shufflevector <4 x i16> %bc, <4 x i16> undef, <4 x i32> <i32 1, i32 1, i32 1, i32 1>
+  %r = add <4 x i16> %splat, %a
+  ret <4 x i16> %r
+}
+
+; Negative test - can't dup bytes {3,4} of v8i16.
+
+define <4 x i16> @test_vadd_lane_i16_bitcast_bigger_unaligned(<4 x i16> %a, <16 x i8> %v) {
+; CHECK-LABEL: test_vadd_lane_i16_bitcast_bigger_unaligned:
+; CHECK:       // %bb.0:
+; CHECK-NEXT:    ext v1.8b, v1.8b, v0.8b, #1
+; CHECK-NEXT:    dup v1.4h, v1.h[1]
+; CHECK-NEXT:    add v0.4h, v1.4h, v0.4h
+; CHECK-NEXT:    ret
+  %extract = shufflevector <16 x i8> %v, <16 x i8> undef, <8 x i32> <i32 1, i32 2, i32 3, i32 4, i32 5, i32 6, i32 7, i32 8>
+  %bc = bitcast <8 x i8> %extract to <4 x i16>
+  %splat = shufflevector <4 x i16> %bc, <4 x i16> undef, <4 x i32> <i32 1, i32 1, i32 1, i32 1>
+  %r = add <4 x i16> %splat, %a
+  ret <4 x i16> %r
 }
 
 define <1 x double> @test_vmul_laneq_f64(<1 x double> %a, <2 x double> %v) {
@@ -1764,15 +2021,10 @@ entry:
 }
 
 define <4 x float> @test_vmulq_laneq_f32(<4 x float> %a, <4 x float> %v) {
-; GENERIC-LABEL: test_vmulq_laneq_f32:
-; GENERIC:       // %bb.0: // %entry
-; GENERIC-NEXT:    fmul v0.4s, v0.4s, v1.s[3]
-; GENERIC-NEXT:    ret
-;
-; EXYNOSM3-LABEL: test_vmulq_laneq_f32:
-; EXYNOSM3:       // %bb.0: // %entry
-; EXYNOSM3-NEXT:    fmul v0.4s, v0.4s, v1.s[3]
-; EXYNOSM3-NEXT:    ret
+; CHECK-LABEL: test_vmulq_laneq_f32:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    fmul v0.4s, v0.4s, v1.s[3]
+; CHECK-NEXT:    ret
 entry:
   %shuffle = shufflevector <4 x float> %v, <4 x float> undef, <4 x i32> <i32 3, i32 3, i32 3, i32 3>
   %mul = fmul <4 x float> %shuffle, %a
@@ -1780,15 +2032,10 @@ entry:
 }
 
 define <2 x double> @test_vmulq_laneq_f64(<2 x double> %a, <2 x double> %v) {
-; GENERIC-LABEL: test_vmulq_laneq_f64:
-; GENERIC:       // %bb.0: // %entry
-; GENERIC-NEXT:    fmul v0.2d, v0.2d, v1.d[1]
-; GENERIC-NEXT:    ret
-;
-; EXYNOSM3-LABEL: test_vmulq_laneq_f64:
-; EXYNOSM3:       // %bb.0: // %entry
-; EXYNOSM3-NEXT:    fmul v0.2d, v0.2d, v1.d[1]
-; EXYNOSM3-NEXT:    ret
+; CHECK-LABEL: test_vmulq_laneq_f64:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    fmul v0.2d, v0.2d, v1.d[1]
+; CHECK-NEXT:    ret
 entry:
   %shuffle = shufflevector <2 x double> %v, <2 x double> undef, <2 x i32> <i32 1, i32 1>
   %mul = fmul <2 x double> %shuffle, %a
@@ -1796,17 +2043,11 @@ entry:
 }
 
 define <2 x float> @test_vmulx_lane_f32(<2 x float> %a, <2 x float> %v) {
-; GENERIC-LABEL: test_vmulx_lane_f32:
-; GENERIC:       // %bb.0: // %entry
-; GENERIC-NEXT:    // kill: def $d1 killed $d1 def $q1
-; GENERIC-NEXT:    fmulx v0.2s, v0.2s, v1.s[1]
-; GENERIC-NEXT:    ret
-;
-; EXYNOSM3-LABEL: test_vmulx_lane_f32:
-; EXYNOSM3:       // %bb.0: // %entry
-; EXYNOSM3-NEXT:    // kill: def $d1 killed $d1 def $q1
-; EXYNOSM3-NEXT:    fmulx v0.2s, v0.2s, v1.s[1]
-; EXYNOSM3-NEXT:    ret
+; CHECK-LABEL: test_vmulx_lane_f32:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    // kill: def $d1 killed $d1 def $q1
+; CHECK-NEXT:    fmulx v0.2s, v0.2s, v1.s[1]
+; CHECK-NEXT:    ret
 entry:
   %shuffle = shufflevector <2 x float> %v, <2 x float> undef, <2 x i32> <i32 1, i32 1>
   %vmulx2.i = tail call <2 x float> @llvm.aarch64.neon.fmulx.v2f32(<2 x float> %a, <2 x float> %shuffle)
@@ -1814,17 +2055,11 @@ entry:
 }
 
 define <4 x float> @test_vmulxq_lane_f32(<4 x float> %a, <2 x float> %v) {
-; GENERIC-LABEL: test_vmulxq_lane_f32:
-; GENERIC:       // %bb.0: // %entry
-; GENERIC-NEXT:    // kill: def $d1 killed $d1 def $q1
-; GENERIC-NEXT:    fmulx v0.4s, v0.4s, v1.s[1]
-; GENERIC-NEXT:    ret
-;
-; EXYNOSM3-LABEL: test_vmulxq_lane_f32:
-; EXYNOSM3:       // %bb.0: // %entry
-; EXYNOSM3-NEXT:    // kill: def $d1 killed $d1 def $q1
-; EXYNOSM3-NEXT:    fmulx v0.4s, v0.4s, v1.s[1]
-; EXYNOSM3-NEXT:    ret
+; CHECK-LABEL: test_vmulxq_lane_f32:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    // kill: def $d1 killed $d1 def $q1
+; CHECK-NEXT:    fmulx v0.4s, v0.4s, v1.s[1]
+; CHECK-NEXT:    ret
 entry:
   %shuffle = shufflevector <2 x float> %v, <2 x float> undef, <4 x i32> <i32 1, i32 1, i32 1, i32 1>
   %vmulx2.i = tail call <4 x float> @llvm.aarch64.neon.fmulx.v4f32(<4 x float> %a, <4 x float> %shuffle)
@@ -1832,17 +2067,11 @@ entry:
 }
 
 define <2 x double> @test_vmulxq_lane_f64(<2 x double> %a, <1 x double> %v) {
-; GENERIC-LABEL: test_vmulxq_lane_f64:
-; GENERIC:       // %bb.0: // %entry
-; GENERIC-NEXT:    // kill: def $d1 killed $d1 def $q1
-; GENERIC-NEXT:    fmulx v0.2d, v0.2d, v1.d[0]
-; GENERIC-NEXT:    ret
-;
-; EXYNOSM3-LABEL: test_vmulxq_lane_f64:
-; EXYNOSM3:       // %bb.0: // %entry
-; EXYNOSM3-NEXT:    // kill: def $d1 killed $d1 def $q1
-; EXYNOSM3-NEXT:    fmulx v0.2d, v0.2d, v1.d[0]
-; EXYNOSM3-NEXT:    ret
+; CHECK-LABEL: test_vmulxq_lane_f64:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    // kill: def $d1 killed $d1 def $q1
+; CHECK-NEXT:    fmulx v0.2d, v0.2d, v1.d[0]
+; CHECK-NEXT:    ret
 entry:
   %shuffle = shufflevector <1 x double> %v, <1 x double> undef, <2 x i32> zeroinitializer
   %vmulx2.i = tail call <2 x double> @llvm.aarch64.neon.fmulx.v2f64(<2 x double> %a, <2 x double> %shuffle)
@@ -1850,15 +2079,10 @@ entry:
 }
 
 define <2 x float> @test_vmulx_laneq_f32(<2 x float> %a, <4 x float> %v) {
-; GENERIC-LABEL: test_vmulx_laneq_f32:
-; GENERIC:       // %bb.0: // %entry
-; GENERIC-NEXT:    fmulx v0.2s, v0.2s, v1.s[3]
-; GENERIC-NEXT:    ret
-;
-; EXYNOSM3-LABEL: test_vmulx_laneq_f32:
-; EXYNOSM3:       // %bb.0: // %entry
-; EXYNOSM3-NEXT:    fmulx v0.2s, v0.2s, v1.s[3]
-; EXYNOSM3-NEXT:    ret
+; CHECK-LABEL: test_vmulx_laneq_f32:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    fmulx v0.2s, v0.2s, v1.s[3]
+; CHECK-NEXT:    ret
 entry:
   %shuffle = shufflevector <4 x float> %v, <4 x float> undef, <2 x i32> <i32 3, i32 3>
   %vmulx2.i = tail call <2 x float> @llvm.aarch64.neon.fmulx.v2f32(<2 x float> %a, <2 x float> %shuffle)
@@ -1866,15 +2090,10 @@ entry:
 }
 
 define <4 x float> @test_vmulxq_laneq_f32(<4 x float> %a, <4 x float> %v) {
-; GENERIC-LABEL: test_vmulxq_laneq_f32:
-; GENERIC:       // %bb.0: // %entry
-; GENERIC-NEXT:    fmulx v0.4s, v0.4s, v1.s[3]
-; GENERIC-NEXT:    ret
-;
-; EXYNOSM3-LABEL: test_vmulxq_laneq_f32:
-; EXYNOSM3:       // %bb.0: // %entry
-; EXYNOSM3-NEXT:    fmulx v0.4s, v0.4s, v1.s[3]
-; EXYNOSM3-NEXT:    ret
+; CHECK-LABEL: test_vmulxq_laneq_f32:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    fmulx v0.4s, v0.4s, v1.s[3]
+; CHECK-NEXT:    ret
 entry:
   %shuffle = shufflevector <4 x float> %v, <4 x float> undef, <4 x i32> <i32 3, i32 3, i32 3, i32 3>
   %vmulx2.i = tail call <4 x float> @llvm.aarch64.neon.fmulx.v4f32(<4 x float> %a, <4 x float> %shuffle)
@@ -1882,15 +2101,10 @@ entry:
 }
 
 define <2 x double> @test_vmulxq_laneq_f64(<2 x double> %a, <2 x double> %v) {
-; GENERIC-LABEL: test_vmulxq_laneq_f64:
-; GENERIC:       // %bb.0: // %entry
-; GENERIC-NEXT:    fmulx v0.2d, v0.2d, v1.d[1]
-; GENERIC-NEXT:    ret
-;
-; EXYNOSM3-LABEL: test_vmulxq_laneq_f64:
-; EXYNOSM3:       // %bb.0: // %entry
-; EXYNOSM3-NEXT:    fmulx v0.2d, v0.2d, v1.d[1]
-; EXYNOSM3-NEXT:    ret
+; CHECK-LABEL: test_vmulxq_laneq_f64:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    fmulx v0.2d, v0.2d, v1.d[1]
+; CHECK-NEXT:    ret
 entry:
   %shuffle = shufflevector <2 x double> %v, <2 x double> undef, <2 x i32> <i32 1, i32 1>
   %vmulx2.i = tail call <2 x double> @llvm.aarch64.neon.fmulx.v2f64(<2 x double> %a, <2 x double> %shuffle)
@@ -2282,17 +2496,11 @@ entry:
 }
 
 define <2 x float> @test_vfma_lane_f32_0(<2 x float> %a, <2 x float> %b, <2 x float> %v) {
-; GENERIC-LABEL: test_vfma_lane_f32_0:
-; GENERIC:       // %bb.0: // %entry
-; GENERIC-NEXT:    // kill: def $d2 killed $d2 def $q2
-; GENERIC-NEXT:    fmla v0.2s, v1.2s, v2.s[0]
-; GENERIC-NEXT:    ret
-;
-; EXYNOSM3-LABEL: test_vfma_lane_f32_0:
-; EXYNOSM3:       // %bb.0: // %entry
-; EXYNOSM3-NEXT:    // kill: def $d2 killed $d2 def $q2
-; EXYNOSM3-NEXT:    fmla v0.2s, v1.2s, v2.s[0]
-; EXYNOSM3-NEXT:    ret
+; CHECK-LABEL: test_vfma_lane_f32_0:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    // kill: def $d2 killed $d2 def $q2
+; CHECK-NEXT:    fmla v0.2s, v1.2s, v2.s[0]
+; CHECK-NEXT:    ret
 entry:
   %lane = shufflevector <2 x float> %v, <2 x float> undef, <2 x i32> zeroinitializer
   %0 = tail call <2 x float> @llvm.fma.v2f32(<2 x float> %lane, <2 x float> %b, <2 x float> %a)
@@ -2300,17 +2508,11 @@ entry:
 }
 
 define <4 x float> @test_vfmaq_lane_f32_0(<4 x float> %a, <4 x float> %b, <2 x float> %v) {
-; GENERIC-LABEL: test_vfmaq_lane_f32_0:
-; GENERIC:       // %bb.0: // %entry
-; GENERIC-NEXT:    // kill: def $d2 killed $d2 def $q2
-; GENERIC-NEXT:    fmla v0.4s, v1.4s, v2.s[0]
-; GENERIC-NEXT:    ret
-;
-; EXYNOSM3-LABEL: test_vfmaq_lane_f32_0:
-; EXYNOSM3:       // %bb.0: // %entry
-; EXYNOSM3-NEXT:    // kill: def $d2 killed $d2 def $q2
-; EXYNOSM3-NEXT:    fmla v0.4s, v1.4s, v2.s[0]
-; EXYNOSM3-NEXT:    ret
+; CHECK-LABEL: test_vfmaq_lane_f32_0:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    // kill: def $d2 killed $d2 def $q2
+; CHECK-NEXT:    fmla v0.4s, v1.4s, v2.s[0]
+; CHECK-NEXT:    ret
 entry:
   %lane = shufflevector <2 x float> %v, <2 x float> undef, <4 x i32> zeroinitializer
   %0 = tail call <4 x float> @llvm.fma.v4f32(<4 x float> %lane, <4 x float> %b, <4 x float> %a)
@@ -2318,15 +2520,10 @@ entry:
 }
 
 define <2 x float> @test_vfma_laneq_f32_0(<2 x float> %a, <2 x float> %b, <4 x float> %v) {
-; GENERIC-LABEL: test_vfma_laneq_f32_0:
-; GENERIC:       // %bb.0: // %entry
-; GENERIC-NEXT:    fmla v0.2s, v1.2s, v2.s[0]
-; GENERIC-NEXT:    ret
-;
-; EXYNOSM3-LABEL: test_vfma_laneq_f32_0:
-; EXYNOSM3:       // %bb.0: // %entry
-; EXYNOSM3-NEXT:    fmla v0.2s, v1.2s, v2.s[0]
-; EXYNOSM3-NEXT:    ret
+; CHECK-LABEL: test_vfma_laneq_f32_0:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    fmla v0.2s, v1.2s, v2.s[0]
+; CHECK-NEXT:    ret
 entry:
   %lane = shufflevector <4 x float> %v, <4 x float> undef, <2 x i32> zeroinitializer
   %0 = tail call <2 x float> @llvm.fma.v2f32(<2 x float> %lane, <2 x float> %b, <2 x float> %a)
@@ -2334,15 +2531,10 @@ entry:
 }
 
 define <4 x float> @test_vfmaq_laneq_f32_0(<4 x float> %a, <4 x float> %b, <4 x float> %v) {
-; GENERIC-LABEL: test_vfmaq_laneq_f32_0:
-; GENERIC:       // %bb.0: // %entry
-; GENERIC-NEXT:    fmla v0.4s, v1.4s, v2.s[0]
-; GENERIC-NEXT:    ret
-;
-; EXYNOSM3-LABEL: test_vfmaq_laneq_f32_0:
-; EXYNOSM3:       // %bb.0: // %entry
-; EXYNOSM3-NEXT:    fmla v0.4s, v1.4s, v2.s[0]
-; EXYNOSM3-NEXT:    ret
+; CHECK-LABEL: test_vfmaq_laneq_f32_0:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    fmla v0.4s, v1.4s, v2.s[0]
+; CHECK-NEXT:    ret
 entry:
   %lane = shufflevector <4 x float> %v, <4 x float> undef, <4 x i32> zeroinitializer
   %0 = tail call <4 x float> @llvm.fma.v4f32(<4 x float> %lane, <4 x float> %b, <4 x float> %a)
@@ -2350,17 +2542,11 @@ entry:
 }
 
 define <2 x float> @test_vfms_lane_f32_0(<2 x float> %a, <2 x float> %b, <2 x float> %v) {
-; GENERIC-LABEL: test_vfms_lane_f32_0:
-; GENERIC:       // %bb.0: // %entry
-; GENERIC-NEXT:    // kill: def $d2 killed $d2 def $q2
-; GENERIC-NEXT:    fmls v0.2s, v1.2s, v2.s[0]
-; GENERIC-NEXT:    ret
-;
-; EXYNOSM3-LABEL: test_vfms_lane_f32_0:
-; EXYNOSM3:       // %bb.0: // %entry
-; EXYNOSM3-NEXT:    // kill: def $d2 killed $d2 def $q2
-; EXYNOSM3-NEXT:    fmls v0.2s, v1.2s, v2.s[0]
-; EXYNOSM3-NEXT:    ret
+; CHECK-LABEL: test_vfms_lane_f32_0:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    // kill: def $d2 killed $d2 def $q2
+; CHECK-NEXT:    fmls v0.2s, v1.2s, v2.s[0]
+; CHECK-NEXT:    ret
 entry:
   %sub = fsub <2 x float> <float -0.000000e+00, float -0.000000e+00>, %v
   %lane = shufflevector <2 x float> %sub, <2 x float> undef, <2 x i32> zeroinitializer
@@ -2369,17 +2555,11 @@ entry:
 }
 
 define <4 x float> @test_vfmsq_lane_f32_0(<4 x float> %a, <4 x float> %b, <2 x float> %v) {
-; GENERIC-LABEL: test_vfmsq_lane_f32_0:
-; GENERIC:       // %bb.0: // %entry
-; GENERIC-NEXT:    // kill: def $d2 killed $d2 def $q2
-; GENERIC-NEXT:    fmls v0.4s, v1.4s, v2.s[0]
-; GENERIC-NEXT:    ret
-;
-; EXYNOSM3-LABEL: test_vfmsq_lane_f32_0:
-; EXYNOSM3:       // %bb.0: // %entry
-; EXYNOSM3-NEXT:    // kill: def $d2 killed $d2 def $q2
-; EXYNOSM3-NEXT:    fmls v0.4s, v1.4s, v2.s[0]
-; EXYNOSM3-NEXT:    ret
+; CHECK-LABEL: test_vfmsq_lane_f32_0:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    // kill: def $d2 killed $d2 def $q2
+; CHECK-NEXT:    fmls v0.4s, v1.4s, v2.s[0]
+; CHECK-NEXT:    ret
 entry:
   %sub = fsub <2 x float> <float -0.000000e+00, float -0.000000e+00>, %v
   %lane = shufflevector <2 x float> %sub, <2 x float> undef, <4 x i32> zeroinitializer
@@ -2388,15 +2568,10 @@ entry:
 }
 
 define <2 x float> @test_vfms_laneq_f32_0(<2 x float> %a, <2 x float> %b, <4 x float> %v) {
-; GENERIC-LABEL: test_vfms_laneq_f32_0:
-; GENERIC:       // %bb.0: // %entry
-; GENERIC-NEXT:    fmls v0.2s, v1.2s, v2.s[0]
-; GENERIC-NEXT:    ret
-;
-; EXYNOSM3-LABEL: test_vfms_laneq_f32_0:
-; EXYNOSM3:       // %bb.0: // %entry
-; EXYNOSM3-NEXT:    fmls v0.2s, v1.2s, v2.s[0]
-; EXYNOSM3-NEXT:    ret
+; CHECK-LABEL: test_vfms_laneq_f32_0:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    fmls v0.2s, v1.2s, v2.s[0]
+; CHECK-NEXT:    ret
 entry:
   %sub = fsub <4 x float> <float -0.000000e+00, float -0.000000e+00, float -0.000000e+00, float -0.000000e+00>, %v
   %lane = shufflevector <4 x float> %sub, <4 x float> undef, <2 x i32> zeroinitializer
@@ -2405,15 +2580,10 @@ entry:
 }
 
 define <4 x float> @test_vfmsq_laneq_f32_0(<4 x float> %a, <4 x float> %b, <4 x float> %v) {
-; GENERIC-LABEL: test_vfmsq_laneq_f32_0:
-; GENERIC:       // %bb.0: // %entry
-; GENERIC-NEXT:    fmls v0.4s, v1.4s, v2.s[0]
-; GENERIC-NEXT:    ret
-;
-; EXYNOSM3-LABEL: test_vfmsq_laneq_f32_0:
-; EXYNOSM3:       // %bb.0: // %entry
-; EXYNOSM3-NEXT:    fmls v0.4s, v1.4s, v2.s[0]
-; EXYNOSM3-NEXT:    ret
+; CHECK-LABEL: test_vfmsq_laneq_f32_0:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    fmls v0.4s, v1.4s, v2.s[0]
+; CHECK-NEXT:    ret
 entry:
   %sub = fsub <4 x float> <float -0.000000e+00, float -0.000000e+00, float -0.000000e+00, float -0.000000e+00>, %v
   %lane = shufflevector <4 x float> %sub, <4 x float> undef, <4 x i32> zeroinitializer
@@ -2422,15 +2592,10 @@ entry:
 }
 
 define <2 x double> @test_vfmaq_laneq_f64_0(<2 x double> %a, <2 x double> %b, <2 x double> %v) {
-; GENERIC-LABEL: test_vfmaq_laneq_f64_0:
-; GENERIC:       // %bb.0: // %entry
-; GENERIC-NEXT:    fmla v0.2d, v1.2d, v2.d[0]
-; GENERIC-NEXT:    ret
-;
-; EXYNOSM3-LABEL: test_vfmaq_laneq_f64_0:
-; EXYNOSM3:       // %bb.0: // %entry
-; EXYNOSM3-NEXT:    fmla v0.2d, v1.2d, v2.d[0]
-; EXYNOSM3-NEXT:    ret
+; CHECK-LABEL: test_vfmaq_laneq_f64_0:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    fmla v0.2d, v1.2d, v2.d[0]
+; CHECK-NEXT:    ret
 entry:
   %lane = shufflevector <2 x double> %v, <2 x double> undef, <2 x i32> zeroinitializer
   %0 = tail call <2 x double> @llvm.fma.v2f64(<2 x double> %lane, <2 x double> %b, <2 x double> %a)
@@ -2438,15 +2603,10 @@ entry:
 }
 
 define <2 x double> @test_vfmsq_laneq_f64_0(<2 x double> %a, <2 x double> %b, <2 x double> %v) {
-; GENERIC-LABEL: test_vfmsq_laneq_f64_0:
-; GENERIC:       // %bb.0: // %entry
-; GENERIC-NEXT:    fmls v0.2d, v1.2d, v2.d[0]
-; GENERIC-NEXT:    ret
-;
-; EXYNOSM3-LABEL: test_vfmsq_laneq_f64_0:
-; EXYNOSM3:       // %bb.0: // %entry
-; EXYNOSM3-NEXT:    fmls v0.2d, v1.2d, v2.d[0]
-; EXYNOSM3-NEXT:    ret
+; CHECK-LABEL: test_vfmsq_laneq_f64_0:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    fmls v0.2d, v1.2d, v2.d[0]
+; CHECK-NEXT:    ret
 entry:
   %sub = fsub <2 x double> <double -0.000000e+00, double -0.000000e+00>, %v
   %lane = shufflevector <2 x double> %sub, <2 x double> undef, <2 x i32> zeroinitializer
@@ -3363,17 +3523,11 @@ entry:
 }
 
 define <2 x float> @test_vmul_lane_f32_0(<2 x float> %a, <2 x float> %v) {
-; GENERIC-LABEL: test_vmul_lane_f32_0:
-; GENERIC:       // %bb.0: // %entry
-; GENERIC-NEXT:    // kill: def $d1 killed $d1 def $q1
-; GENERIC-NEXT:    fmul v0.2s, v0.2s, v1.s[0]
-; GENERIC-NEXT:    ret
-;
-; EXYNOSM3-LABEL: test_vmul_lane_f32_0:
-; EXYNOSM3:       // %bb.0: // %entry
-; EXYNOSM3-NEXT:    // kill: def $d1 killed $d1 def $q1
-; EXYNOSM3-NEXT:    fmul v0.2s, v0.2s, v1.s[0]
-; EXYNOSM3-NEXT:    ret
+; CHECK-LABEL: test_vmul_lane_f32_0:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    // kill: def $d1 killed $d1 def $q1
+; CHECK-NEXT:    fmul v0.2s, v0.2s, v1.s[0]
+; CHECK-NEXT:    ret
 entry:
   %shuffle = shufflevector <2 x float> %v, <2 x float> undef, <2 x i32> zeroinitializer
   %mul = fmul <2 x float> %shuffle, %a
@@ -3381,17 +3535,11 @@ entry:
 }
 
 define <4 x float> @test_vmulq_lane_f32_0(<4 x float> %a, <2 x float> %v) {
-; GENERIC-LABEL: test_vmulq_lane_f32_0:
-; GENERIC:       // %bb.0: // %entry
-; GENERIC-NEXT:    // kill: def $d1 killed $d1 def $q1
-; GENERIC-NEXT:    fmul v0.4s, v0.4s, v1.s[0]
-; GENERIC-NEXT:    ret
-;
-; EXYNOSM3-LABEL: test_vmulq_lane_f32_0:
-; EXYNOSM3:       // %bb.0: // %entry
-; EXYNOSM3-NEXT:    // kill: def $d1 killed $d1 def $q1
-; EXYNOSM3-NEXT:    fmul v0.4s, v0.4s, v1.s[0]
-; EXYNOSM3-NEXT:    ret
+; CHECK-LABEL: test_vmulq_lane_f32_0:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    // kill: def $d1 killed $d1 def $q1
+; CHECK-NEXT:    fmul v0.4s, v0.4s, v1.s[0]
+; CHECK-NEXT:    ret
 entry:
   %shuffle = shufflevector <2 x float> %v, <2 x float> undef, <4 x i32> zeroinitializer
   %mul = fmul <4 x float> %shuffle, %a
@@ -3399,15 +3547,10 @@ entry:
 }
 
 define <2 x float> @test_vmul_laneq_f32_0(<2 x float> %a, <4 x float> %v) {
-; GENERIC-LABEL: test_vmul_laneq_f32_0:
-; GENERIC:       // %bb.0: // %entry
-; GENERIC-NEXT:    fmul v0.2s, v0.2s, v1.s[0]
-; GENERIC-NEXT:    ret
-;
-; EXYNOSM3-LABEL: test_vmul_laneq_f32_0:
-; EXYNOSM3:       // %bb.0: // %entry
-; EXYNOSM3-NEXT:    fmul v0.2s, v0.2s, v1.s[0]
-; EXYNOSM3-NEXT:    ret
+; CHECK-LABEL: test_vmul_laneq_f32_0:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    fmul v0.2s, v0.2s, v1.s[0]
+; CHECK-NEXT:    ret
 entry:
   %shuffle = shufflevector <4 x float> %v, <4 x float> undef, <2 x i32> zeroinitializer
   %mul = fmul <2 x float> %shuffle, %a
@@ -3429,15 +3572,10 @@ entry:
 }
 
 define <4 x float> @test_vmulq_laneq_f32_0(<4 x float> %a, <4 x float> %v) {
-; GENERIC-LABEL: test_vmulq_laneq_f32_0:
-; GENERIC:       // %bb.0: // %entry
-; GENERIC-NEXT:    fmul v0.4s, v0.4s, v1.s[0]
-; GENERIC-NEXT:    ret
-;
-; EXYNOSM3-LABEL: test_vmulq_laneq_f32_0:
-; EXYNOSM3:       // %bb.0: // %entry
-; EXYNOSM3-NEXT:    fmul v0.4s, v0.4s, v1.s[0]
-; EXYNOSM3-NEXT:    ret
+; CHECK-LABEL: test_vmulq_laneq_f32_0:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    fmul v0.4s, v0.4s, v1.s[0]
+; CHECK-NEXT:    ret
 entry:
   %shuffle = shufflevector <4 x float> %v, <4 x float> undef, <4 x i32> zeroinitializer
   %mul = fmul <4 x float> %shuffle, %a
@@ -3445,15 +3583,10 @@ entry:
 }
 
 define <2 x double> @test_vmulq_laneq_f64_0(<2 x double> %a, <2 x double> %v) {
-; GENERIC-LABEL: test_vmulq_laneq_f64_0:
-; GENERIC:       // %bb.0: // %entry
-; GENERIC-NEXT:    fmul v0.2d, v0.2d, v1.d[0]
-; GENERIC-NEXT:    ret
-;
-; EXYNOSM3-LABEL: test_vmulq_laneq_f64_0:
-; EXYNOSM3:       // %bb.0: // %entry
-; EXYNOSM3-NEXT:    fmul v0.2d, v0.2d, v1.d[0]
-; EXYNOSM3-NEXT:    ret
+; CHECK-LABEL: test_vmulq_laneq_f64_0:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    fmul v0.2d, v0.2d, v1.d[0]
+; CHECK-NEXT:    ret
 entry:
   %shuffle = shufflevector <2 x double> %v, <2 x double> undef, <2 x i32> zeroinitializer
   %mul = fmul <2 x double> %shuffle, %a
@@ -3461,17 +3594,11 @@ entry:
 }
 
 define <2 x float> @test_vmulx_lane_f32_0(<2 x float> %a, <2 x float> %v) {
-; GENERIC-LABEL: test_vmulx_lane_f32_0:
-; GENERIC:       // %bb.0: // %entry
-; GENERIC-NEXT:    // kill: def $d1 killed $d1 def $q1
-; GENERIC-NEXT:    fmulx v0.2s, v0.2s, v1.s[0]
-; GENERIC-NEXT:    ret
-;
-; EXYNOSM3-LABEL: test_vmulx_lane_f32_0:
-; EXYNOSM3:       // %bb.0: // %entry
-; EXYNOSM3-NEXT:    // kill: def $d1 killed $d1 def $q1
-; EXYNOSM3-NEXT:    fmulx v0.2s, v0.2s, v1.s[0]
-; EXYNOSM3-NEXT:    ret
+; CHECK-LABEL: test_vmulx_lane_f32_0:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    // kill: def $d1 killed $d1 def $q1
+; CHECK-NEXT:    fmulx v0.2s, v0.2s, v1.s[0]
+; CHECK-NEXT:    ret
 entry:
   %shuffle = shufflevector <2 x float> %v, <2 x float> undef, <2 x i32> zeroinitializer
   %vmulx2.i = tail call <2 x float> @llvm.aarch64.neon.fmulx.v2f32(<2 x float> %a, <2 x float> %shuffle)
@@ -3479,17 +3606,11 @@ entry:
 }
 
 define <4 x float> @test_vmulxq_lane_f32_0(<4 x float> %a, <2 x float> %v) {
-; GENERIC-LABEL: test_vmulxq_lane_f32_0:
-; GENERIC:       // %bb.0: // %entry
-; GENERIC-NEXT:    // kill: def $d1 killed $d1 def $q1
-; GENERIC-NEXT:    fmulx v0.4s, v0.4s, v1.s[0]
-; GENERIC-NEXT:    ret
-;
-; EXYNOSM3-LABEL: test_vmulxq_lane_f32_0:
-; EXYNOSM3:       // %bb.0: // %entry
-; EXYNOSM3-NEXT:    // kill: def $d1 killed $d1 def $q1
-; EXYNOSM3-NEXT:    fmulx v0.4s, v0.4s, v1.s[0]
-; EXYNOSM3-NEXT:    ret
+; CHECK-LABEL: test_vmulxq_lane_f32_0:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    // kill: def $d1 killed $d1 def $q1
+; CHECK-NEXT:    fmulx v0.4s, v0.4s, v1.s[0]
+; CHECK-NEXT:    ret
 entry:
   %shuffle = shufflevector <2 x float> %v, <2 x float> undef, <4 x i32> zeroinitializer
   %vmulx2.i = tail call <4 x float> @llvm.aarch64.neon.fmulx.v4f32(<4 x float> %a, <4 x float> %shuffle)
@@ -3497,17 +3618,11 @@ entry:
 }
 
 define <2 x double> @test_vmulxq_lane_f64_0(<2 x double> %a, <1 x double> %v) {
-; GENERIC-LABEL: test_vmulxq_lane_f64_0:
-; GENERIC:       // %bb.0: // %entry
-; GENERIC-NEXT:    // kill: def $d1 killed $d1 def $q1
-; GENERIC-NEXT:    fmulx v0.2d, v0.2d, v1.d[0]
-; GENERIC-NEXT:    ret
-;
-; EXYNOSM3-LABEL: test_vmulxq_lane_f64_0:
-; EXYNOSM3:       // %bb.0: // %entry
-; EXYNOSM3-NEXT:    // kill: def $d1 killed $d1 def $q1
-; EXYNOSM3-NEXT:    fmulx v0.2d, v0.2d, v1.d[0]
-; EXYNOSM3-NEXT:    ret
+; CHECK-LABEL: test_vmulxq_lane_f64_0:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    // kill: def $d1 killed $d1 def $q1
+; CHECK-NEXT:    fmulx v0.2d, v0.2d, v1.d[0]
+; CHECK-NEXT:    ret
 entry:
   %shuffle = shufflevector <1 x double> %v, <1 x double> undef, <2 x i32> zeroinitializer
   %vmulx2.i = tail call <2 x double> @llvm.aarch64.neon.fmulx.v2f64(<2 x double> %a, <2 x double> %shuffle)
@@ -3515,15 +3630,10 @@ entry:
 }
 
 define <2 x float> @test_vmulx_laneq_f32_0(<2 x float> %a, <4 x float> %v) {
-; GENERIC-LABEL: test_vmulx_laneq_f32_0:
-; GENERIC:       // %bb.0: // %entry
-; GENERIC-NEXT:    fmulx v0.2s, v0.2s, v1.s[0]
-; GENERIC-NEXT:    ret
-;
-; EXYNOSM3-LABEL: test_vmulx_laneq_f32_0:
-; EXYNOSM3:       // %bb.0: // %entry
-; EXYNOSM3-NEXT:    fmulx v0.2s, v0.2s, v1.s[0]
-; EXYNOSM3-NEXT:    ret
+; CHECK-LABEL: test_vmulx_laneq_f32_0:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    fmulx v0.2s, v0.2s, v1.s[0]
+; CHECK-NEXT:    ret
 entry:
   %shuffle = shufflevector <4 x float> %v, <4 x float> undef, <2 x i32> zeroinitializer
   %vmulx2.i = tail call <2 x float> @llvm.aarch64.neon.fmulx.v2f32(<2 x float> %a, <2 x float> %shuffle)
@@ -3531,15 +3641,10 @@ entry:
 }
 
 define <4 x float> @test_vmulxq_laneq_f32_0(<4 x float> %a, <4 x float> %v) {
-; GENERIC-LABEL: test_vmulxq_laneq_f32_0:
-; GENERIC:       // %bb.0: // %entry
-; GENERIC-NEXT:    fmulx v0.4s, v0.4s, v1.s[0]
-; GENERIC-NEXT:    ret
-;
-; EXYNOSM3-LABEL: test_vmulxq_laneq_f32_0:
-; EXYNOSM3:       // %bb.0: // %entry
-; EXYNOSM3-NEXT:    fmulx v0.4s, v0.4s, v1.s[0]
-; EXYNOSM3-NEXT:    ret
+; CHECK-LABEL: test_vmulxq_laneq_f32_0:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    fmulx v0.4s, v0.4s, v1.s[0]
+; CHECK-NEXT:    ret
 entry:
   %shuffle = shufflevector <4 x float> %v, <4 x float> undef, <4 x i32> zeroinitializer
   %vmulx2.i = tail call <4 x float> @llvm.aarch64.neon.fmulx.v4f32(<4 x float> %a, <4 x float> %shuffle)
@@ -3547,15 +3652,10 @@ entry:
 }
 
 define <2 x double> @test_vmulxq_laneq_f64_0(<2 x double> %a, <2 x double> %v) {
-; GENERIC-LABEL: test_vmulxq_laneq_f64_0:
-; GENERIC:       // %bb.0: // %entry
-; GENERIC-NEXT:    fmulx v0.2d, v0.2d, v1.d[0]
-; GENERIC-NEXT:    ret
-;
-; EXYNOSM3-LABEL: test_vmulxq_laneq_f64_0:
-; EXYNOSM3:       // %bb.0: // %entry
-; EXYNOSM3-NEXT:    fmulx v0.2d, v0.2d, v1.d[0]
-; EXYNOSM3-NEXT:    ret
+; CHECK-LABEL: test_vmulxq_laneq_f64_0:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    fmulx v0.2d, v0.2d, v1.d[0]
+; CHECK-NEXT:    ret
 entry:
   %shuffle = shufflevector <2 x double> %v, <2 x double> undef, <2 x i32> zeroinitializer
   %vmulx2.i = tail call <2 x double> @llvm.aarch64.neon.fmulx.v2f64(<2 x double> %a, <2 x double> %shuffle)
@@ -3563,17 +3663,11 @@ entry:
 }
 
 define <4 x float> @optimize_dup(<4 x float> %a, <4 x float> %b, <4 x float> %c, <4 x float> %v) {
-; GENERIC-LABEL: optimize_dup:
-; GENERIC:       // %bb.0: // %entry
-; GENERIC-NEXT:    fmla v0.4s, v1.4s, v3.s[3]
-; GENERIC-NEXT:    fmls v0.4s, v2.4s, v3.s[3]
-; GENERIC-NEXT:    ret
-;
-; EXYNOSM3-LABEL: optimize_dup:
-; EXYNOSM3:       // %bb.0: // %entry
-; EXYNOSM3-NEXT:    fmla v0.4s, v1.4s, v3.s[3]
-; EXYNOSM3-NEXT:    fmls v0.4s, v2.4s, v3.s[3]
-; EXYNOSM3-NEXT:    ret
+; CHECK-LABEL: optimize_dup:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    fmla v0.4s, v1.4s, v3.s[3]
+; CHECK-NEXT:    fmls v0.4s, v2.4s, v3.s[3]
+; CHECK-NEXT:    ret
 entry:
   %lane1 = shufflevector <4 x float> %v, <4 x float> undef, <4 x i32> <i32 3, i32 3, i32 3, i32 3>
   %0 = tail call <4 x float> @llvm.fma.v4f32(<4 x float> %lane1, <4 x float> %b, <4 x float> %a)
@@ -3584,17 +3678,11 @@ entry:
 }
 
 define <4 x float> @no_optimize_dup(<4 x float> %a, <4 x float> %b, <4 x float> %c, <4 x float> %v) {
-; GENERIC-LABEL: no_optimize_dup:
-; GENERIC:       // %bb.0: // %entry
-; GENERIC-NEXT:    fmla v0.4s, v1.4s, v3.s[3]
-; GENERIC-NEXT:    fmls v0.4s, v2.4s, v3.s[1]
-; GENERIC-NEXT:    ret
-;
-; EXYNOSM3-LABEL: no_optimize_dup:
-; EXYNOSM3:       // %bb.0: // %entry
-; EXYNOSM3-NEXT:    fmla v0.4s, v1.4s, v3.s[3]
-; EXYNOSM3-NEXT:    fmls v0.4s, v2.4s, v3.s[1]
-; EXYNOSM3-NEXT:    ret
+; CHECK-LABEL: no_optimize_dup:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    fmla v0.4s, v1.4s, v3.s[3]
+; CHECK-NEXT:    fmls v0.4s, v2.4s, v3.s[1]
+; CHECK-NEXT:    ret
 entry:
   %lane1 = shufflevector <4 x float> %v, <4 x float> undef, <4 x i32> <i32 3, i32 3, i32 3, i32 3>
   %0 = tail call <4 x float> @llvm.fma.v4f32(<4 x float> %lane1, <4 x float> %b, <4 x float> %a)
@@ -3605,17 +3693,11 @@ entry:
 }
 
 define <2 x float> @test_vfma_lane_simdinstr_opt_pass_caching_a57(<2 x float> %a, <2 x float> %b, <2 x float> %v) "target-cpu"="cortex-a57" {
-; GENERIC-LABEL: test_vfma_lane_simdinstr_opt_pass_caching_a57:
-; GENERIC:       // %bb.0: // %entry
-; GENERIC-NEXT:    // kill: def $d2 killed $d2 def $q2
-; GENERIC-NEXT:    fmla v0.2s, v1.2s, v2.s[1]
-; GENERIC-NEXT:    ret
-;
-; EXYNOSM3-LABEL: test_vfma_lane_simdinstr_opt_pass_caching_a57:
-; EXYNOSM3:       // %bb.0: // %entry
-; EXYNOSM3-NEXT:    // kill: def $d2 killed $d2 def $q2
-; EXYNOSM3-NEXT:    fmla v0.2s, v1.2s, v2.s[1]
-; EXYNOSM3-NEXT:    ret
+; CHECK-LABEL: test_vfma_lane_simdinstr_opt_pass_caching_a57:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    // kill: def $d2 killed $d2 def $q2
+; CHECK-NEXT:    fmla v0.2s, v1.2s, v2.s[1]
+; CHECK-NEXT:    ret
 entry:
   %lane = shufflevector <2 x float> %v, <2 x float> undef, <2 x i32> <i32 1, i32 1>
   %0 = tail call <2 x float> @llvm.fma.v2f32(<2 x float> %lane, <2 x float> %b, <2 x float> %a)
@@ -3623,17 +3705,11 @@ entry:
 }
 
 define <2 x float> @test_vfma_lane_simdinstr_opt_pass_caching_m3(<2 x float> %a, <2 x float> %b, <2 x float> %v) "target-cpu"="exynos-m3" {
-; GENERIC-LABEL: test_vfma_lane_simdinstr_opt_pass_caching_m3:
-; GENERIC:       // %bb.0: // %entry
-; GENERIC-NEXT:    // kill: def $d2 killed $d2 def $q2
-; GENERIC-NEXT:    fmla v0.2s, v1.2s, v2.s[1]
-; GENERIC-NEXT:    ret
-;
-; EXYNOSM3-LABEL: test_vfma_lane_simdinstr_opt_pass_caching_m3:
-; EXYNOSM3:       // %bb.0: // %entry
-; EXYNOSM3-NEXT:    // kill: def $d2 killed $d2 def $q2
-; EXYNOSM3-NEXT:    fmla v0.2s, v1.2s, v2.s[1]
-; EXYNOSM3-NEXT:    ret
+; CHECK-LABEL: test_vfma_lane_simdinstr_opt_pass_caching_m3:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    // kill: def $d2 killed $d2 def $q2
+; CHECK-NEXT:    fmla v0.2s, v1.2s, v2.s[1]
+; CHECK-NEXT:    ret
 entry:
   %lane = shufflevector <2 x float> %v, <2 x float> undef, <2 x i32> <i32 1, i32 1>
   %0 = tail call <2 x float> @llvm.fma.v2f32(<2 x float> %lane, <2 x float> %b, <2 x float> %a)

@@ -45,7 +45,7 @@ std::string toString(const elf::InputFile *f) {
 
   if (f->toStringCache.empty()) {
     if (f->archiveName.empty())
-      f->toStringCache = f->getName();
+      f->toStringCache = std::string(f->getName());
     else
       f->toStringCache = (f->archiveName + "(" + f->getName() + ")").str();
   }
@@ -222,7 +222,7 @@ void parseFile(InputFile *file) {
 
 // Concatenates arguments to construct a string representing an error location.
 static std::string createFileLineMsg(StringRef path, unsigned line) {
-  std::string filename = path::filename(path);
+  std::string filename = std::string(path::filename(path));
   std::string lineno = ":" + std::to_string(line);
   if (filename == path)
     return filename + lineno;
@@ -243,7 +243,7 @@ static std::string getSrcMsgAux(ObjFile<ELFT> &file, const Symbol &sym,
     return createFileLineMsg(fileLine->first, fileLine->second);
 
   // File.sourceFile contains STT_FILE symbol, and that is a last resort.
-  return file.sourceFile;
+  return std::string(file.sourceFile);
 }
 
 std::string InputFile::getSrcMsg(const Symbol &sym, InputSectionBase &sec,
@@ -296,7 +296,7 @@ Optional<DILineInfo> ObjFile<ELFT>::getDILineInfo(InputSectionBase *s,
     }
   }
 
-  // Use fake address calcuated by adding section file offset and offset in
+  // Use fake address calculated by adding section file offset and offset in
   // section. See comments for ObjectInfo class.
   return dwarf->getDILineInfo(s->getOffsetInFile() + offset, sectionIndex);
 }
@@ -497,6 +497,44 @@ static void addDependentLibrary(StringRef specifier, const InputFile *f) {
           specifier);
 }
 
+// Record the membership of a section group so that in the garbage collection
+// pass, section group members are kept or discarded as a unit.
+template <class ELFT>
+static void handleSectionGroup(ArrayRef<InputSectionBase *> sections,
+                               ArrayRef<typename ELFT::Word> entries) {
+  bool hasAlloc = false;
+  for (uint32_t index : entries.slice(1)) {
+    if (index >= sections.size())
+      return;
+    if (InputSectionBase *s = sections[index])
+      if (s != &InputSection::discarded && s->flags & SHF_ALLOC)
+        hasAlloc = true;
+  }
+
+  // If any member has the SHF_ALLOC flag, the whole group is subject to garbage
+  // collection. See the comment in markLive(). This rule retains .debug_types
+  // and .rela.debug_types.
+  if (!hasAlloc)
+    return;
+
+  // Connect the members in a circular doubly-linked list via
+  // nextInSectionGroup.
+  InputSectionBase *head;
+  InputSectionBase *prev = nullptr;
+  for (uint32_t index : entries.slice(1)) {
+    InputSectionBase *s = sections[index];
+    if (!s || s == &InputSection::discarded)
+      continue;
+    if (prev)
+      prev->nextInSectionGroup = s;
+    else
+      head = s;
+    prev = s;
+  }
+  if (prev)
+    prev->nextInSectionGroup = head;
+}
+
 template <class ELFT>
 void ObjFile<ELFT>::initializeSections(bool ignoreComdats) {
   const ELFFile<ELFT> &obj = this->getObj();
@@ -615,26 +653,8 @@ void ObjFile<ELFT>::initializeSections(bool ignoreComdats) {
             toString(linkSec));
   }
 
-  // For each secion group, connect its members in a circular doubly-linked list
-  // via nextInSectionGroup. See the comment in markLive().
-  for (ArrayRef<Elf_Word> entries : selectedGroups) {
-    InputSectionBase *head;
-    InputSectionBase *prev = nullptr;
-    for (uint32_t secIndex : entries.slice(1)) {
-      if (secIndex >= this->sections.size())
-        continue;
-      InputSectionBase *s = this->sections[secIndex];
-      if (!s || s == &InputSection::discarded)
-        continue;
-      if (prev)
-        prev->nextInSectionGroup = s;
-      else
-        head = s;
-      prev = s;
-    }
-    if (prev)
-      prev->nextInSectionGroup = head;
-  }
+  for (ArrayRef<Elf_Word> entries : selectedGroups)
+    handleSectionGroup<ELFT>(this->sections, entries);
 }
 
 // For ARM only, to set the EF_ARM_ABI_FLOAT_SOFT or EF_ARM_ABI_FLOAT_HARD
@@ -1385,7 +1405,7 @@ static uint8_t getBitcodeMachineKind(StringRef path, const Triple &t) {
 BitcodeFile::BitcodeFile(MemoryBufferRef mb, StringRef archiveName,
                          uint64_t offsetInArchive)
     : InputFile(BitcodeKind, mb) {
-  this->archiveName = archiveName;
+  this->archiveName = std::string(archiveName);
 
   std::string path = mb.getBufferIdentifier().str();
   if (config->thinLTOIndexOnly)
@@ -1587,7 +1607,7 @@ std::string replaceThinLTOSuffix(StringRef path) {
 
   if (path.consume_back(suffix))
     return (path + repl).str();
-  return path;
+  return std::string(path);
 }
 
 template void BitcodeFile::parse<ELF32LE>();

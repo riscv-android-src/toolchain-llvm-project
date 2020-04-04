@@ -54,6 +54,7 @@ void ScalarEnumerationTraits<ELFYAML::ELF_PT>::enumeration(
   ECase(PT_GNU_EH_FRAME);
   ECase(PT_GNU_STACK);
   ECase(PT_GNU_RELRO);
+  ECase(PT_GNU_PROPERTY);
 #undef ECase
   IO.enumFallback<Hex32>(Value);
 }
@@ -252,6 +253,7 @@ void ScalarEnumerationTraits<ELFYAML::ELF_ELFOSABI>::enumeration(
   ECase(ELFOSABI_HPUX);
   ECase(ELFOSABI_NETBSD);
   ECase(ELFOSABI_GNU);
+  ECase(ELFOSABI_LINUX);
   ECase(ELFOSABI_HURD);
   ECase(ELFOSABI_SOLARIS);
   ECase(ELFOSABI_AIX);
@@ -273,6 +275,7 @@ void ScalarEnumerationTraits<ELFYAML::ELF_ELFOSABI>::enumeration(
   ECase(ELFOSABI_C6000_LINUX);
   ECase(ELFOSABI_STANDALONE);
 #undef ECase
+  IO.enumFallback<Hex8>(Value);
 }
 
 void ScalarBitSetTraits<ELFYAML::ELF_EF>::bitset(IO &IO,
@@ -346,6 +349,9 @@ void ScalarBitSetTraits<ELFYAML::ELF_EF>::bitset(IO &IO,
     BCase(EF_HEXAGON_MACH_V60);
     BCase(EF_HEXAGON_MACH_V62);
     BCase(EF_HEXAGON_MACH_V65);
+    BCase(EF_HEXAGON_MACH_V66);
+    BCase(EF_HEXAGON_MACH_V67);
+    BCase(EF_HEXAGON_MACH_V67T);
     BCase(EF_HEXAGON_ISA_V2);
     BCase(EF_HEXAGON_ISA_V3);
     BCase(EF_HEXAGON_ISA_V4);
@@ -354,6 +360,8 @@ void ScalarBitSetTraits<ELFYAML::ELF_EF>::bitset(IO &IO,
     BCase(EF_HEXAGON_ISA_V60);
     BCase(EF_HEXAGON_ISA_V62);
     BCase(EF_HEXAGON_ISA_V65);
+    BCase(EF_HEXAGON_ISA_V66);
+    BCase(EF_HEXAGON_ISA_V67);
     break;
   case ELF::EM_AVR:
     BCase(EF_AVR_ARCH_AVR1);
@@ -863,6 +871,24 @@ template <> struct SequenceElementTraits<StOtherPiece> {
   static const bool flow = true;
 };
 
+template <> struct ScalarTraits<ELFYAML::YAMLFlowString> {
+  static void output(const ELFYAML::YAMLFlowString &Val, void *,
+                     raw_ostream &Out) {
+    Out << Val;
+  }
+  static StringRef input(StringRef Scalar, void *,
+                         ELFYAML::YAMLFlowString &Val) {
+    Val = Scalar;
+    return {};
+  }
+  static QuotingType mustQuote(StringRef S) {
+    return ScalarTraits<StringRef>::mustQuote(S);
+  }
+};
+template <> struct SequenceElementTraits<ELFYAML::YAMLFlowString> {
+  static const bool flow = true;
+};
+
 namespace {
 
 struct NormalizedOther {
@@ -958,7 +984,7 @@ struct NormalizedOther {
 
 void MappingTraits<ELFYAML::Symbol>::mapping(IO &IO, ELFYAML::Symbol &Symbol) {
   IO.mapOptional("Name", Symbol.Name, StringRef());
-  IO.mapOptional("NameIndex", Symbol.NameIndex);
+  IO.mapOptional("StName", Symbol.StName);
   IO.mapOptional("Type", Symbol.Type, ELFYAML::ELF_STT(0));
   IO.mapOptional("Section", Symbol.Section, StringRef());
   IO.mapOptional("Index", Symbol.Index);
@@ -980,8 +1006,6 @@ StringRef MappingTraits<ELFYAML::Symbol>::validate(IO &IO,
                                                    ELFYAML::Symbol &Symbol) {
   if (Symbol.Index && Symbol.Section.data())
     return "Index and Section cannot both be specified for Symbol";
-  if (Symbol.NameIndex && !Symbol.Name.empty())
-    return "Name and NameIndex cannot both be specified for Symbol";
   return StringRef();
 }
 
@@ -998,10 +1022,12 @@ static void commonSectionMapping(IO &IO, ELFYAML::Section &Section) {
   // are producing YAML, because yaml2obj sets appropriate values for them
   // automatically when they are not explicitly defined.
   assert(!IO.outputting() ||
-         (!Section.ShOffset.hasValue() && !Section.ShSize.hasValue()));
+         (!Section.ShOffset.hasValue() && !Section.ShSize.hasValue() &&
+          !Section.ShName.hasValue() && !Section.ShFlags.hasValue()));
   IO.mapOptional("ShName", Section.ShName);
   IO.mapOptional("ShOffset", Section.ShOffset);
   IO.mapOptional("ShSize", Section.ShSize);
+  IO.mapOptional("ShFlags", Section.ShFlags);
 }
 
 static void sectionMapping(IO &IO, ELFYAML::DynamicSection &Section) {
@@ -1056,7 +1082,8 @@ static void sectionMapping(IO &IO, ELFYAML::NoBitsSection &Section) {
 static void sectionMapping(IO &IO, ELFYAML::VerdefSection &Section) {
   commonSectionMapping(IO, Section);
   IO.mapRequired("Info", Section.Info);
-  IO.mapRequired("Entries", Section.Entries);
+  IO.mapOptional("Entries", Section.Entries);
+  IO.mapOptional("Content", Section.Content);
 }
 
 static void sectionMapping(IO &IO, ELFYAML::SymverSection &Section) {
@@ -1067,13 +1094,20 @@ static void sectionMapping(IO &IO, ELFYAML::SymverSection &Section) {
 static void sectionMapping(IO &IO, ELFYAML::VerneedSection &Section) {
   commonSectionMapping(IO, Section);
   IO.mapRequired("Info", Section.Info);
-  IO.mapRequired("Dependencies", Section.VerneedV);
+  IO.mapOptional("Dependencies", Section.VerneedV);
+  IO.mapOptional("Content", Section.Content);
 }
 
 static void sectionMapping(IO &IO, ELFYAML::RelocationSection &Section) {
   commonSectionMapping(IO, Section);
   IO.mapOptional("Info", Section.RelocatableSec, StringRef());
   IO.mapOptional("Relocations", Section.Relocations);
+}
+
+static void sectionMapping(IO &IO, ELFYAML::RelrSection &Section) {
+  commonSectionMapping(IO, Section);
+  IO.mapOptional("Entries", Section.Entries);
+  IO.mapOptional("Content", Section.Content);
 }
 
 static void groupSectionMapping(IO &IO, ELFYAML::Group &Group) {
@@ -1103,6 +1137,19 @@ static void fillMapping(IO &IO, ELFYAML::Fill &Fill) {
 static void sectionMapping(IO &IO, ELFYAML::LinkerOptionsSection &Section) {
   commonSectionMapping(IO, Section);
   IO.mapOptional("Options", Section.Options);
+  IO.mapOptional("Content", Section.Content);
+}
+
+static void sectionMapping(IO &IO,
+                           ELFYAML::DependentLibrariesSection &Section) {
+  commonSectionMapping(IO, Section);
+  IO.mapOptional("Libraries", Section.Libs);
+  IO.mapOptional("Content", Section.Content);
+}
+
+static void sectionMapping(IO &IO, ELFYAML::CallGraphProfileSection &Section) {
+  commonSectionMapping(IO, Section);
+  IO.mapOptional("Entries", Section.Entries);
   IO.mapOptional("Content", Section.Content);
 }
 
@@ -1168,6 +1215,11 @@ void MappingTraits<std::unique_ptr<ELFYAML::Chunk>>::mapping(
       Section.reset(new ELFYAML::RelocationSection());
     sectionMapping(IO, *cast<ELFYAML::RelocationSection>(Section.get()));
     break;
+  case ELF::SHT_RELR:
+    if (!IO.outputting())
+      Section.reset(new ELFYAML::RelrSection());
+    sectionMapping(IO, *cast<ELFYAML::RelrSection>(Section.get()));
+    break;
   case ELF::SHT_GROUP:
     if (!IO.outputting())
       Section.reset(new ELFYAML::Group());
@@ -1228,6 +1280,17 @@ void MappingTraits<std::unique_ptr<ELFYAML::Chunk>>::mapping(
       Section.reset(new ELFYAML::LinkerOptionsSection());
     sectionMapping(IO, *cast<ELFYAML::LinkerOptionsSection>(Section.get()));
     break;
+  case ELF::SHT_LLVM_DEPENDENT_LIBRARIES:
+    if (!IO.outputting())
+      Section.reset(new ELFYAML::DependentLibrariesSection());
+    sectionMapping(IO,
+                   *cast<ELFYAML::DependentLibrariesSection>(Section.get()));
+    break;
+  case ELF::SHT_LLVM_CALL_GRAPH_PROFILE:
+    if (!IO.outputting())
+      Section.reset(new ELFYAML::CallGraphProfileSection());
+    sectionMapping(IO, *cast<ELFYAML::CallGraphProfileSection>(Section.get()));
+    break;
   default:
     if (!IO.outputting()) {
       StringRef Name;
@@ -1249,11 +1312,12 @@ void MappingTraits<std::unique_ptr<ELFYAML::Chunk>>::mapping(
 
 StringRef MappingTraits<std::unique_ptr<ELFYAML::Chunk>>::validate(
     IO &io, std::unique_ptr<ELFYAML::Chunk> &C) {
-  if (const auto *RawSection =
-          dyn_cast<ELFYAML::RawContentSection>(C.get())) {
+  if (const auto *RawSection = dyn_cast<ELFYAML::RawContentSection>(C.get())) {
     if (RawSection->Size && RawSection->Content &&
         (uint64_t)(*RawSection->Size) < RawSection->Content->binary_size())
       return "Section size must be greater than or equal to the content size";
+    if (RawSection->Flags && RawSection->ShFlags)
+      return "ShFlags and Flags cannot be used together";
     return {};
   }
 
@@ -1317,11 +1381,6 @@ StringRef MappingTraits<std::unique_ptr<ELFYAML::Chunk>>::validate(
 
     if (!Sec->Symbols)
       return {};
-
-    for (const ELFYAML::AddrsigSymbol &AS : *Sec->Symbols)
-      if (AS.Index && AS.Name)
-        return "\"Index\" and \"Name\" cannot be used together when defining a "
-               "symbol";
     return {};
   }
 
@@ -1372,11 +1431,45 @@ StringRef MappingTraits<std::unique_ptr<ELFYAML::Chunk>>::validate(
     return {};
   }
 
+  if (const auto *Sec = dyn_cast<ELFYAML::DependentLibrariesSection>(C.get())) {
+    if (Sec->Libs && Sec->Content)
+      return "SHT_LLVM_DEPENDENT_LIBRARIES: \"Libraries\" and \"Content\" "
+             "can't "
+             "be used together";
+    return {};
+  }
+
   if (const auto *F = dyn_cast<ELFYAML::Fill>(C.get())) {
     if (!F->Pattern)
       return {};
     if (F->Pattern->binary_size() != 0 && !F->Size)
       return "\"Size\" can't be 0 when \"Pattern\" is not empty";
+    return {};
+  }
+
+  if (const auto *VD = dyn_cast<ELFYAML::VerdefSection>(C.get())) {
+    if (VD->Entries && VD->Content)
+      return "SHT_GNU_verdef: \"Entries\" and \"Content\" can't be used "
+             "together";
+    return {};
+  }
+
+  if (const auto *VD = dyn_cast<ELFYAML::VerneedSection>(C.get())) {
+    if (VD->VerneedV && VD->Content)
+      return "SHT_GNU_verneed: \"Dependencies\" and \"Content\" can't be used "
+             "together";
+    return {};
+  }
+
+  if (const auto *RS = dyn_cast<ELFYAML::RelrSection>(C.get())) {
+    if (RS->Entries && RS->Content)
+      return "\"Entries\" and \"Content\" can't be used together";
+    return {};
+  }
+
+  if (const auto *CGP = dyn_cast<ELFYAML::CallGraphProfileSection>(C.get())) {
+    if (CGP->Entries && CGP->Content)
+      return "\"Entries\" and \"Content\" can't be used together";
     return {};
   }
 
@@ -1504,17 +1597,19 @@ void MappingTraits<ELFYAML::Object>::mapping(IO &IO, ELFYAML::Object &Object) {
   IO.setContext(nullptr);
 }
 
-void MappingTraits<ELFYAML::AddrsigSymbol>::mapping(IO &IO, ELFYAML::AddrsigSymbol &Sym) {
-  assert(IO.getContext() && "The IO context is not initialized");
-  IO.mapOptional("Name", Sym.Name);
-  IO.mapOptional("Index", Sym.Index);
-}
-
 void MappingTraits<ELFYAML::LinkerOption>::mapping(IO &IO,
                                                    ELFYAML::LinkerOption &Opt) {
   assert(IO.getContext() && "The IO context is not initialized");
   IO.mapRequired("Name", Opt.Key);
   IO.mapRequired("Value", Opt.Value);
+}
+
+void MappingTraits<ELFYAML::CallGraphEntry>::mapping(
+    IO &IO, ELFYAML::CallGraphEntry &E) {
+  assert(IO.getContext() && "The IO context is not initialized");
+  IO.mapRequired("From", E.From);
+  IO.mapRequired("To", E.To);
+  IO.mapRequired("Weight", E.Weight);
 }
 
 LLVM_YAML_STRONG_TYPEDEF(uint8_t, MIPS_AFL_REG)

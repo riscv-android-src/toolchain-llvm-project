@@ -1,4 +1,4 @@
-//===-- CPPLanguageRuntime.cpp
+//===-- CPPLanguageRuntime.cpp---------------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -20,7 +20,6 @@
 
 #include "lldb/Core/PluginManager.h"
 #include "lldb/Core/UniqueCStringMap.h"
-#include "lldb/Symbol/ClangASTContext.h"
 #include "lldb/Symbol/CompileUnit.h"
 #include "lldb/Target/ABI.h"
 #include "lldb/Target/ExecutionContext.h"
@@ -62,7 +61,7 @@ bool CPPLanguageRuntime::GetObjectDescription(
 
 bool contains_lambda_identifier(llvm::StringRef &str_ref) {
   return str_ref.contains("$_") || str_ref.contains("'lambda'");
-};
+}
 
 CPPLanguageRuntime::LibCppStdFunctionCallableInfo
 line_entry_helper(Target &target, const SymbolContext &sc, Symbol *symbol,

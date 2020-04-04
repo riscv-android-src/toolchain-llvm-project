@@ -11,8 +11,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-
 // RUN: %libarcher-compile-and-run-race | FileCheck %s
+// REQUIRES: tsan
 #include <omp.h>
 #include <stdio.h>
 
@@ -34,4 +34,3 @@ int main(int argc, char *argv[]) {
 // CHECK-NEXT: #0 {{.*}}parallel-simple.c:23
 // CHECK: DONE
 // CHECK: ThreadSanitizer: reported 1 warnings
-

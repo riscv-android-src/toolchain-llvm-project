@@ -26,7 +26,7 @@ std::string ppc::getPPCTargetCPU(const ArgList &Args) {
     StringRef CPUName = A->getValue();
 
     if (CPUName == "native") {
-      std::string CPU = llvm::sys::getHostCPUName();
+      std::string CPU = std::string(llvm::sys::getHostCPUName());
       if (!CPU.empty() && CPU != "generic")
         return CPU;
       else
@@ -70,6 +70,7 @@ std::string ppc::getPPCTargetCPU(const ArgList &Args) {
         .Case("power7", "pwr7")
         .Case("power8", "pwr8")
         .Case("power9", "pwr9")
+        .Case("future", "future")
         .Case("pwr3", "pwr3")
         .Case("pwr4", "pwr4")
         .Case("pwr5", "pwr5")
@@ -103,6 +104,9 @@ const char *ppc::getPPCAsmModeForCPU(StringRef Name) {
 void ppc::getPPCTargetFeatures(const Driver &D, const llvm::Triple &Triple,
                                const ArgList &Args,
                                std::vector<StringRef> &Features) {
+  if (Triple.getSubArch() == llvm::Triple::PPCSubArch_spe)
+    Features.push_back("+spe");
+
   handleTargetFeaturesGroup(Args, Features, options::OPT_m_ppc_Features_Group);
 
   ppc::FloatABI FloatABI = ppc::getPPCFloatABI(D, Args);

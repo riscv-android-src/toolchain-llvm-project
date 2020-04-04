@@ -1,4 +1,4 @@
-//===-- SymbolFileDWARFDebugMap.cpp -----------------------------*- C++ -*-===//
+//===-- SymbolFileDWARFDebugMap.cpp ---------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -108,8 +108,7 @@ SymbolFileDWARFDebugMap::CompileUnitInfo::GetFileRangeMap(
 
             // First we find the original symbol in the .o file's symbol table
             Symbol *oso_fun_symbol = oso_symtab->FindFirstSymbolWithNameAndType(
-                exe_symbol->GetMangled().GetName(lldb::eLanguageTypeUnknown,
-                                                 Mangled::ePreferMangled),
+                exe_symbol->GetMangled().GetName(Mangled::ePreferMangled),
                 eSymbolTypeCode, Symtab::eDebugNo, Symtab::eVisibilityAny);
             if (oso_fun_symbol) {
               // Add the inverse OSO file address to debug map entry mapping
@@ -139,8 +138,7 @@ SymbolFileDWARFDebugMap::CompileUnitInfo::GetFileRangeMap(
             // in the .o file
             Symbol *oso_gsym_symbol =
                 oso_symtab->FindFirstSymbolWithNameAndType(
-                    exe_symbol->GetMangled().GetName(lldb::eLanguageTypeUnknown,
-                                                     Mangled::ePreferMangled),
+                    exe_symbol->GetMangled().GetName(Mangled::ePreferMangled),
                     eSymbolTypeData, Symtab::eDebugNo, Symtab::eVisibilityAny);
             if (exe_symbol && oso_gsym_symbol && exe_symbol->ValueIsAddress() &&
                 oso_gsym_symbol->ValueIsAddress()) {
@@ -604,7 +602,7 @@ SymbolFileDWARFDebugMap::CompileUnitInfo *
 SymbolFileDWARFDebugMap::GetCompUnitInfo(const CompileUnit &comp_unit) {
   const uint32_t cu_count = GetNumCompileUnits();
   for (uint32_t i = 0; i < cu_count; ++i) {
-    if (comp_unit == m_compile_unit_infos[i].compile_unit_sp.get())
+    if (&comp_unit == m_compile_unit_infos[i].compile_unit_sp.get())
       return &m_compile_unit_infos[i];
   }
   return nullptr;
@@ -812,12 +810,8 @@ uint32_t SymbolFileDWARFDebugMap::ResolveSymbolContext(
 
     if (!resolve) {
       FileSpec so_file_spec;
-      if (GetFileSpecForSO(i, so_file_spec)) {
-        // Match the full path if the incoming file_spec has a directory (not
-        // just a basename)
-        const bool full_match = (bool)file_spec.GetDirectory();
-        resolve = FileSpec::Equal(file_spec, so_file_spec, full_match);
-      }
+      if (GetFileSpecForSO(i, so_file_spec))
+        resolve = FileSpec::Match(file_spec, so_file_spec);
     }
     if (resolve) {
       SymbolFileDWARF *oso_dwarf = GetSymbolFileByOSOIndex(i);
@@ -1076,7 +1070,7 @@ void SymbolFileDWARFDebugMap::GetTypes(SymbolContextScope *sc_scope,
   }
 }
 
-std::vector<lldb_private::CallEdge>
+std::vector<std::unique_ptr<lldb_private::CallEdge>>
 SymbolFileDWARFDebugMap::ParseCallEdgesInFunction(UserID func_id) {
   uint32_t oso_idx = GetOSOIndexFromUserID(func_id.GetID());
   SymbolFileDWARF *oso_dwarf = GetSymbolFileByOSOIndex(oso_idx);
@@ -1229,6 +1223,9 @@ CompilerDeclContext SymbolFileDWARFDebugMap::FindNamespace(
 void SymbolFileDWARFDebugMap::DumpClangAST(Stream &s) {
   ForEachSymbolFile([&s](SymbolFileDWARF *oso_dwarf) -> bool {
     oso_dwarf->DumpClangAST(s);
+    // The underlying assumption is that DumpClangAST(...) will obtain the
+    // AST from the underlying TypeSystem and therefore we only need to do
+    // this once and can stop after the first iteration hence we return true.
     return true;
   });
 }

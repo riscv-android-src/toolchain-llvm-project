@@ -70,7 +70,7 @@ class GCNTTIImpl final : public BasicTTIImplBase<GCNTTIImpl> {
   friend BaseT;
 
   const GCNSubtarget *ST;
-  const AMDGPUTargetLowering *TLI;
+  const SITargetLowering *TLI;
   AMDGPUTTIImpl CommonTTI;
   bool IsGraphicsShader;
   bool HasFP32Denormals;
@@ -136,6 +136,7 @@ public:
       HasFP32Denormals(ST->hasFP32Denormals(F)) { }
 
   bool hasBranchDivergence() { return true; }
+  bool useGPUDivergenceAnalysis() const;
 
   void getUnrollingPreferences(Loop *L, ScalarEvolution &SE,
                                TTI::UnrollingPreferences &UP);
@@ -172,14 +173,18 @@ public:
   bool getTgtMemIntrinsic(IntrinsicInst *Inst, MemIntrinsicInfo &Info) const;
 
   int getArithmeticInstrCost(
-    unsigned Opcode, Type *Ty,
-    TTI::OperandValueKind Opd1Info = TTI::OK_AnyValue,
-    TTI::OperandValueKind Opd2Info = TTI::OK_AnyValue,
-    TTI::OperandValueProperties Opd1PropInfo = TTI::OP_None,
-    TTI::OperandValueProperties Opd2PropInfo = TTI::OP_None,
-    ArrayRef<const Value *> Args = ArrayRef<const Value *>());
+      unsigned Opcode, Type *Ty,
+      TTI::OperandValueKind Opd1Info = TTI::OK_AnyValue,
+      TTI::OperandValueKind Opd2Info = TTI::OK_AnyValue,
+      TTI::OperandValueProperties Opd1PropInfo = TTI::OP_None,
+      TTI::OperandValueProperties Opd2PropInfo = TTI::OP_None,
+      ArrayRef<const Value *> Args = ArrayRef<const Value *>(),
+      const Instruction *CxtI = nullptr);
 
   unsigned getCFInstrCost(unsigned Opcode);
+
+  bool isInlineAsmSourceOfDivergence(const CallInst *CI,
+                                     ArrayRef<unsigned> Indices = {}) const;
 
   int getVectorInstrCost(unsigned Opcode, Type *ValTy, unsigned Index);
   bool isSourceOfDivergence(const Value *V) const;
@@ -213,6 +218,16 @@ public:
   int getArithmeticReductionCost(unsigned Opcode,
                                  Type *Ty,
                                  bool IsPairwise);
+  template <typename T>
+  int getIntrinsicInstrCost(Intrinsic::ID IID, Type *RetTy,
+                            ArrayRef<T *> Args, FastMathFlags FMF,
+                            unsigned VF);
+  int getIntrinsicInstrCost(Intrinsic::ID IID, Type *RetTy,
+                            ArrayRef<Type *> Tys, FastMathFlags FMF,
+                            unsigned ScalarizationCostPassed = UINT_MAX);
+  int getIntrinsicInstrCost(Intrinsic::ID IID, Type *RetTy,
+                            ArrayRef<Value *> Args, FastMathFlags FMF,
+                            unsigned VF = 1);
   int getMinMaxReductionCost(Type *Ty, Type *CondTy,
                              bool IsPairwiseForm,
                              bool IsUnsigned);

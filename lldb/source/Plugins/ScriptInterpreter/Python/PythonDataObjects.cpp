@@ -1,4 +1,4 @@
-//===-- PythonDataObjects.cpp -----------------------------------*- C++ -*-===//
+//===-- PythonDataObjects.cpp ---------------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -6,11 +6,9 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifdef LLDB_DISABLE_PYTHON
+#include "lldb/Host/Config.h"
 
-// Python is disabled in this build
-
-#else
+#if LLDB_ENABLE_PYTHON
 
 #include "PythonDataObjects.h"
 #include "ScriptInterpreterPython.h"
@@ -60,7 +58,7 @@ Expected<std::string> python::As<std::string>(Expected<PythonObject> &&obj) {
   auto utf8 = str.AsUTF8();
   if (!utf8)
     return utf8.takeError();
-  return utf8.get();
+  return std::string(utf8.get());
 }
 
 void StructuredPythonObject::Serialize(llvm::json::OStream &s) const {

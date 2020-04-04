@@ -371,7 +371,6 @@ multiclass ExtractLaneExtended<string sign, bits<32> baseInst> {
 }
 
 defm "" : ExtractLaneExtended<"_s", 5>;
-let Predicates = [HasUnimplementedSIMD128] in
 defm "" : ExtractLaneExtended<"_u", 6>;
 defm "" : ExtractLane<v4i32, "i32x4", LaneIdx4, I32, 13>;
 defm "" : ExtractLane<v2i64, "i64x2", LaneIdx2, I64, 16>;
@@ -732,18 +731,38 @@ defm MUL : SIMDBinaryIntNoI64x2<mul, "mul", 93>;
 
 // Integer min_s / min_u / max_s / max_u
 let isCommutable = 1 in {
-defm MIN_S : SIMDBinaryIntNoI64x2<int_wasm_min_signed, "min_s", 94>;
-defm MIN_U : SIMDBinaryIntNoI64x2<int_wasm_min_unsigned, "min_u", 95>;
-defm MAX_S : SIMDBinaryIntNoI64x2<int_wasm_max_signed, "max_s", 96>;
-defm MAX_U : SIMDBinaryIntNoI64x2<int_wasm_max_unsigned, "max_u", 97>;
+defm MIN_S : SIMDBinaryIntNoI64x2<smin, "min_s", 94>;
+defm MIN_U : SIMDBinaryIntNoI64x2<umin, "min_u", 95>;
+defm MAX_S : SIMDBinaryIntNoI64x2<smax, "max_s", 96>;
+defm MAX_U : SIMDBinaryIntNoI64x2<umax, "max_u", 97>;
 } // isCommutable = 1
+
+// Integer unsigned rounding average: avgr_u
+let isCommutable = 1 in {
+defm AVGR_U : SIMDBinary<v16i8, "i8x16", int_wasm_avgr_unsigned, "avgr_u", 217>;
+defm AVGR_U : SIMDBinary<v8i16, "i16x8", int_wasm_avgr_unsigned, "avgr_u", 218>;
+}
+
+def add_nuw : PatFrag<(ops node:$lhs, node:$rhs),
+                      (add node:$lhs, node:$rhs),
+                      "return N->getFlags().hasNoUnsignedWrap();">;
+
+foreach nodes = [[v16i8, splat16], [v8i16, splat8]] in
+def : Pat<(srl
+            (add_nuw
+              (add_nuw (nodes[0] V128:$lhs), (nodes[0] V128:$rhs)),
+              (nodes[1] (i32 1))
+            ),
+            (nodes[0] (nodes[1] (i32 1)))
+          ),
+          (!cast<NI>("AVGR_U_"#nodes[0]) V128:$lhs, V128:$rhs)>;
 
 // Widening dot product: i32x4.dot_i16x8_s
 let isCommutable = 1 in
 defm DOT : SIMD_I<(outs V128:$dst), (ins V128:$lhs, V128:$rhs), (outs), (ins),
                   [(set V128:$dst, (int_wasm_dot V128:$lhs, V128:$rhs))],
                   "i32x4.dot_i16x8_s\t$dst, $lhs, $rhs", "i32x4.dot_i16x8_s",
-                  217>;
+                  219>;
 
 //===----------------------------------------------------------------------===//
 // Floating-point unary arithmetic
@@ -761,7 +780,6 @@ defm ABS : SIMDUnaryFP<fabs, "abs", 149>;
 defm NEG : SIMDUnaryFP<fneg, "neg", 150>;
 
 // Square root: sqrt
-let Predicates = [HasUnimplementedSIMD128] in
 defm SQRT : SIMDUnaryFP<fsqrt, "sqrt", 151>;
 
 //===----------------------------------------------------------------------===//
@@ -785,7 +803,6 @@ let isCommutable = 1 in
 defm MUL : SIMDBinaryFP<fmul, "mul", 156>;
 
 // Division: div
-let Predicates = [HasUnimplementedSIMD128] in
 defm DIV : SIMDBinaryFP<fdiv, "div", 157>;
 
 // NaN-propagating minimum: min
@@ -809,14 +826,20 @@ multiclass SIMDConvert<ValueType vec_t, ValueType arg_t, SDNode op,
 // Integer to floating point: convert
 defm "" : SIMDConvert<v4f32, v4i32, sint_to_fp, "f32x4.convert_i32x4_s", 175>;
 defm "" : SIMDConvert<v4f32, v4i32, uint_to_fp, "f32x4.convert_i32x4_u", 176>;
+
+let Predicates = [HasUnimplementedSIMD128] in {
 defm "" : SIMDConvert<v2f64, v2i64, sint_to_fp, "f64x2.convert_i64x2_s", 177>;
 defm "" : SIMDConvert<v2f64, v2i64, uint_to_fp, "f64x2.convert_i64x2_u", 178>;
+}
 
 // Floating point to integer with saturation: trunc_sat
 defm "" : SIMDConvert<v4i32, v4f32, fp_to_sint, "i32x4.trunc_sat_f32x4_s", 171>;
 defm "" : SIMDConvert<v4i32, v4f32, fp_to_uint, "i32x4.trunc_sat_f32x4_u", 172>;
+
+let Predicates = [HasUnimplementedSIMD128] in {
 defm "" : SIMDConvert<v2i64, v2f64, fp_to_sint, "i64x2.trunc_sat_f64x2_s", 173>;
 defm "" : SIMDConvert<v2i64, v2f64, fp_to_uint, "i64x2.trunc_sat_f64x2_u", 174>;
+}
 
 // Widening operations
 multiclass SIMDWiden<ValueType vec_t, string vec, ValueType arg_t, string arg,

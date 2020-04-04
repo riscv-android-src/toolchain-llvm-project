@@ -121,6 +121,11 @@ def GlobalVar : SubsetSubject<Var,
 def InlineFunction : SubsetSubject<Function,
                              [{S->isInlineSpecified()}], "inline functions">;
 
+def FunctionTmpl
+    : SubsetSubject<Function, [{S->getTemplatedKind() ==
+                                 FunctionDecl::TK_FunctionTemplate}],
+                    "function templates">;
+
 // FIXME: this hack is needed because DeclNodes.td defines the base Decl node
 // type to be a class, not a definition. This makes it impossible to create an
 // attribute subject which accepts a Decl. Normally, this is not a problem,
@@ -173,8 +178,8 @@ class FunctionArgument<string name, bit opt = 0, bit fake = 0> : Argument<name,
                                                                           opt,
                                                                           fake>;
 class NamedArgument<string name, bit opt = 0, bit fake = 0> : Argument<name,
-                                                                          opt,
-                                                                          fake>;
+                                                                       opt,
+                                                                       fake>;
 class TypeArgument<string name, bit opt = 0> : Argument<name, opt>;
 class UnsignedArgument<string name, bit opt = 0> : Argument<name, opt>;
 class VariadicUnsignedArgument<string name> : Argument<name, 1>;
@@ -296,6 +301,7 @@ def MicrosoftExt : LangOpt<"MicrosoftExt">;
 def Borland : LangOpt<"Borland">;
 def CUDA : LangOpt<"CUDA">;
 def HIP : LangOpt<"HIP">;
+def SYCL : LangOpt<"SYCLIsDevice">;
 def COnly : LangOpt<"COnly", "!LangOpts.CPlusPlus">;
 def CPlusPlus : LangOpt<"CPlusPlus">;
 def OpenCL : LangOpt<"OpenCL">;
@@ -677,6 +683,15 @@ def XRayLogArgs : InheritableAttr {
   let Documentation = [XRayDocs];
 }
 
+def PatchableFunctionEntry
+    : InheritableAttr,
+      TargetSpecificAttr<TargetArch<["aarch64", "x86", "x86_64"]>> {
+  let Spellings = [GCC<"patchable_function_entry">];
+  let Subjects = SubjectList<[Function, ObjCMethod]>;
+  let Args = [UnsignedArgument<"Count">, DefaultIntArgument<"Offset", 0>];
+  let Documentation = [PatchableFunctionEntryDocs];
+}
+
 def TLSModel : InheritableAttr {
   let Spellings = [GCC<"tls_model">];
   let Subjects = SubjectList<[TLSVar], ErrorDiag>;
@@ -1056,6 +1071,13 @@ def CUDAShared : InheritableAttr {
   let Documentation = [Undocumented];
 }
 
+def SYCLKernel : InheritableAttr {
+  let Spellings = [Clang<"sycl_kernel">];
+  let Subjects = SubjectList<[FunctionTmpl]>;
+  let LangOpts = [SYCL];
+  let Documentation = [SYCLKernelDocs];
+}
+
 def C11NoReturn : InheritableAttr {
   let Spellings = [Keyword<"_Noreturn">];
   let Subjects = SubjectList<[Function], ErrorDiag>;
@@ -1107,27 +1129,27 @@ def OpenCLAccess : Attr {
 }
 
 def OpenCLPrivateAddressSpace : TypeAttr {
-  let Spellings = [Keyword<"__private">, Keyword<"private">];
+  let Spellings = [Keyword<"__private">, Keyword<"private">, Clang<"opencl_private">];
   let Documentation = [OpenCLAddressSpacePrivateDocs];
 }
 
 def OpenCLGlobalAddressSpace : TypeAttr {
-  let Spellings = [Keyword<"__global">, Keyword<"global">];
+  let Spellings = [Keyword<"__global">, Keyword<"global">, Clang<"opencl_global">];
   let Documentation = [OpenCLAddressSpaceGlobalDocs];
 }
 
 def OpenCLLocalAddressSpace : TypeAttr {
-  let Spellings = [Keyword<"__local">, Keyword<"local">];
+  let Spellings = [Keyword<"__local">, Keyword<"local">, Clang<"opencl_local">];
   let Documentation = [OpenCLAddressSpaceLocalDocs];
 }
 
 def OpenCLConstantAddressSpace : TypeAttr {
-  let Spellings = [Keyword<"__constant">, Keyword<"constant">];
+  let Spellings = [Keyword<"__constant">, Keyword<"constant">, Clang<"opencl_constant">];
   let Documentation = [OpenCLAddressSpaceConstantDocs];
 }
 
 def OpenCLGenericAddressSpace : TypeAttr {
-  let Spellings = [Keyword<"__generic">, Keyword<"generic">];
+  let Spellings = [Keyword<"__generic">, Keyword<"generic">, Clang<"opencl_generic">];
   let Documentation = [OpenCLAddressSpaceGenericDocs];
 }
 
@@ -1457,6 +1479,11 @@ def NeonVectorType : TypeAttr {
   let ASTNode = 0;
 }
 
+def ArmMveStrictPolymorphism : TypeAttr, TargetSpecificAttr<TargetARM> {
+  let Spellings = [Clang<"__clang_arm_mve_strict_polymorphism">];
+  let Documentation = [ArmMveStrictPolymorphismDocs];
+}
+
 def NoUniqueAddress : InheritableAttr, TargetSpecificAttr<TargetItaniumCXXABI> {
   let Spellings = [CXX11<"", "no_unique_address", 201803>];
   let Subjects = SubjectList<[NonBitField], ErrorDiag>;
@@ -1585,6 +1612,14 @@ def BPFPreserveAccessIndex : InheritableAttr,
   let Subjects = SubjectList<[Record], ErrorDiag>;
   let Documentation = [BPFPreserveAccessIndexDocs];
   let LangOpts = [COnly];
+}
+
+def WebAssemblyExportName : InheritableAttr,
+                            TargetSpecificAttr<TargetWebAssembly> {
+  let Spellings = [Clang<"export_name">];
+  let Args = [StringArgument<"ExportName">];
+  let Documentation = [WebAssemblyExportNameDocs];
+  let Subjects = SubjectList<[Function], ErrorDiag>;
 }
 
 def WebAssemblyImportModule : InheritableAttr,
@@ -2149,16 +2184,6 @@ def Target : InheritableAttr {
   let Subjects = SubjectList<[Function], ErrorDiag>;
   let Documentation = [TargetDocs];
   let AdditionalMembers = [{
-    struct ParsedTargetAttr {
-      std::vector<std::string> Features;
-      StringRef Architecture;
-      StringRef BranchProtection;
-      bool DuplicateArchitecture = false;
-      bool operator ==(const ParsedTargetAttr &Other) const {
-        return DuplicateArchitecture == Other.DuplicateArchitecture &&
-               Architecture == Other.Architecture && Features == Other.Features;
-      }
-    };
     ParsedTargetAttr parse() const {
       return parse(getFeaturesStr());
     }
@@ -2542,10 +2567,6 @@ def Capability : InheritableAttr {
   let Accessors = [Accessor<"isShared",
                     [Clang<"shared_capability", 0>]>];
   let Documentation = [Undocumented];
-  let AdditionalMembers = [{
-    bool isMutex() const { return getName().equals_lower("mutex"); }
-    bool isRole() const { return getName().equals_lower("role"); }
-  }];
 }
 
 def AssertCapability : InheritableAttr {
@@ -2896,6 +2917,15 @@ def MSAllocator : InheritableAttr {
   let Documentation = [MSAllocatorDocs];
 }
 
+def CFGuard : InheritableAttr {
+  // Currently only the __declspec(guard(nocf)) modifier is supported. In future
+  // we might also want to support __declspec(guard(suppress)).
+  let Spellings = [Declspec<"guard">];
+  let Subjects = SubjectList<[Function]>;
+  let Args = [EnumArgument<"Guard", "GuardArg", ["nocf"], ["nocf"]>];
+  let Documentation = [CFGuardDocs];
+}
+
 def MSStruct : InheritableAttr {
   let Spellings = [GCC<"ms_struct">];
   let Subjects = SubjectList<[Record]>;
@@ -2964,22 +2994,22 @@ def Win64 : IgnoredAttr {
 
 def Ptr32 : TypeAttr {
   let Spellings = [Keyword<"__ptr32">];
-  let Documentation = [Undocumented];
+  let Documentation = [Ptr32Docs];
 }
 
 def Ptr64 : TypeAttr {
   let Spellings = [Keyword<"__ptr64">];
-  let Documentation = [Undocumented];
+  let Documentation = [Ptr64Docs];
 }
 
 def SPtr : TypeAttr {
   let Spellings = [Keyword<"__sptr">];
-  let Documentation = [Undocumented];
+  let Documentation = [SPtrDocs];
 }
 
 def UPtr : TypeAttr {
   let Spellings = [Keyword<"__uptr">];
-  let Documentation = [Undocumented];
+  let Documentation = [UPtrDocs];
 }
 
 def MSInheritance : InheritableAttr {
@@ -2990,25 +3020,9 @@ def MSInheritance : InheritableAttr {
                    Keyword<"__virtual_inheritance">,
                    Keyword<"__unspecified_inheritance">];
   let AdditionalMembers = [{
-  static bool hasVBPtrOffsetField(Spelling Inheritance) {
-    return Inheritance == Keyword_unspecified_inheritance;
-  }
-
-  // Only member pointers to functions need a this adjustment, since it can be
-  // combined with the field offset for data pointers.
-  static bool hasNVOffsetField(bool IsMemberFunction, Spelling Inheritance) {
-    return IsMemberFunction && Inheritance >= Keyword_multiple_inheritance;
-  }
-
-  static bool hasVBTableOffsetField(Spelling Inheritance) {
-    return Inheritance >= Keyword_virtual_inheritance;
-  }
-
-  static bool hasOnlyOneField(bool IsMemberFunction,
-                              Spelling Inheritance) {
-    if (IsMemberFunction)
-      return Inheritance <= Keyword_single_inheritance;
-    return Inheritance <= Keyword_multiple_inheritance;
+  MSInheritanceModel getInheritanceModel() const {
+    // The spelling enum should agree with MSInheritanceModel.
+    return MSInheritanceModel(getSemanticSpelling());
   }
   }];
   let Documentation = [MSInheritanceDocs];
@@ -3021,13 +3035,7 @@ def MSVtorDisp : InheritableAttr {
   let SemaHandler = 0;
 
   let AdditionalMembers = [{
-  enum Mode {
-    Never,
-    ForVBaseOverride,
-    ForVFTable
-  };
-
-  Mode getVtorDispMode() const { return Mode(vdm); }
+  MSVtorDispMode getVtorDispMode() const { return MSVtorDispMode(vdm); }
   }];
   let Documentation = [Undocumented];
 }
@@ -3357,20 +3365,40 @@ def OMPDeclareVariant : InheritableAttr {
       }
       // TODO: add printing of real context selectors.
       OS << " match(";
+      int Used[OMP_CTX_SET_unknown] = {0};
       for (unsigned I = 0, E = ctxSelectorSets_size(); I < E; ++I) {
         auto CtxSet = static_cast<OpenMPContextSelectorSetKind>(
             *std::next(ctxSelectorSets_begin(), I));
-        auto Ctx = static_cast<OpenMPContextSelectorKind>(
-            *std::next(ctxSelectors_begin(), I));
-        assert(CtxSet != OMP_CTX_SET_unknown && Ctx != OMP_CTX_unknown &&
-               "Unknown context selector.");
+        if (Used[CtxSet])
+          continue;
+        if (I > 0)
+          OS << ",";
         switch (CtxSet) {
         case OMP_CTX_SET_implementation:
           OS << "implementation={";
+          break;
+        case OMP_CTX_SET_device:
+          OS << "device={";
+          break;
+        case OMP_CTX_SET_unknown:
+          llvm_unreachable("Unknown context selector set.");
+        }
+        Used[CtxSet] = 1;
+        for (unsigned K = I, EK = ctxSelectors_size(); K < EK; ++K) {
+          auto CtxSetK = static_cast<OpenMPContextSelectorSetKind>(
+              *std::next(ctxSelectorSets_begin(), K));
+          if (CtxSet != CtxSetK)
+            continue;
+          if (K != I)
+            OS << ",";
+          auto Ctx = static_cast<OpenMPContextSelectorKind>(
+              *std::next(ctxSelectors_begin(), K));
           switch (Ctx) {
           case OMP_CTX_vendor:
+            assert(CtxSet == OMP_CTX_SET_implementation &&
+                   "Expected implementation context selector set.");
             OS << "vendor(";
-            printScore(OS, Policy, I);
+            printScore(OS, Policy, K);
             if (implVendors_size() > 0) {
               OS << *implVendors(). begin();
               for (StringRef VendorName : llvm::drop_begin(implVendors(), 1))
@@ -3379,16 +3407,8 @@ def OMPDeclareVariant : InheritableAttr {
             OS << ")";
             break;
           case OMP_CTX_kind:
-            llvm_unreachable("Unexpected context selector in implementation set.");
-          case OMP_CTX_unknown:
-            llvm_unreachable("Unknown context selector.");
-          }
-          OS << "}";
-          break;
-        case OMP_CTX_SET_device:
-          OS << "device={";
-          switch (Ctx) {
-          case OMP_CTX_kind:
+            assert(CtxSet == OMP_CTX_SET_device &&
+                   "Expected device context selector set.");
             OS << "kind(";
             if (deviceKinds_size() > 0) {
               OS << *deviceKinds().begin();
@@ -3397,18 +3417,11 @@ def OMPDeclareVariant : InheritableAttr {
             }
             OS << ")";
             break;
-          case OMP_CTX_vendor:
-            llvm_unreachable("Unexpected context selector in device set.");
           case OMP_CTX_unknown:
             llvm_unreachable("Unknown context selector.");
           }
-          OS << "}";
-          break;
-        case OMP_CTX_SET_unknown:
-          llvm_unreachable("Unknown context selector set.");
         }
-        if (I != E - 1)
-          OS << ",";
+        OS << "}";
       }
       OS << ")";
     }
@@ -3476,4 +3489,28 @@ def NoBuiltin : Attr {
   let Args = [VariadicStringArgument<"BuiltinNames">];
   let Subjects = SubjectList<[Function]>;
   let Documentation = [NoBuiltinDocs];
+}
+
+// FIXME: This attribute is not inheritable, it will not be propagated to
+// redecls. [[clang::lifetimebound]] has the same problems. This should be
+// fixed in TableGen (by probably adding a new inheritable flag).
+def AcquireHandle : DeclOrTypeAttr {
+  let Spellings = [Clang<"acquire_handle">];
+  let Args = [StringArgument<"HandleType">];
+  let Subjects = SubjectList<[Function, TypedefName, ParmVar]>;
+  let Documentation = [AcquireHandleDocs];
+}
+
+def UseHandle : InheritableParamAttr {
+  let Spellings = [Clang<"use_handle">];
+  let Args = [StringArgument<"HandleType">];
+  let Subjects = SubjectList<[ParmVar]>;
+  let Documentation = [UseHandleDocs];
+}
+
+def ReleaseHandle : InheritableParamAttr {
+  let Spellings = [Clang<"release_handle">];
+  let Args = [StringArgument<"HandleType">];
+  let Subjects = SubjectList<[ParmVar]>;
+  let Documentation = [ReleaseHandleDocs];
 }

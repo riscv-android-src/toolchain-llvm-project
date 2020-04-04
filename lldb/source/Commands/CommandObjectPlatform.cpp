@@ -1,4 +1,4 @@
-//===-- CommandObjectPlatform.cpp -------------------------------*- C++ -*-===//
+//===-- CommandObjectPlatform.cpp -----------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -21,11 +21,8 @@
 #include "lldb/Target/Platform.h"
 #include "lldb/Target/Process.h"
 #include "lldb/Utility/Args.h"
-#include "lldb/Utility/DataExtractor.h"
-#include <mutex>
 
 #include "llvm/ADT/SmallString.h"
-#include "llvm/Support/Threading.h"
 
 using namespace lldb;
 using namespace lldb_private;
@@ -712,7 +709,7 @@ protected:
                                          option_arg.str().c_str());
         break;
       case 'd':
-        m_data.assign(option_arg);
+        m_data.assign(std::string(option_arg));
         break;
       default:
         llvm_unreachable("Unimplemented option");

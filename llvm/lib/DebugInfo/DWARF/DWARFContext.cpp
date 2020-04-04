@@ -288,6 +288,7 @@ static void dumpRnglistsSection(
 static void dumpLoclistsSection(raw_ostream &OS, DIDumpOptions DumpOpts,
                                 DWARFDataExtractor Data,
                                 const MCRegisterInfo *MRI,
+                                const DWARFObject &Obj,
                                 Optional<uint64_t> DumpOffset) {
   uint64_t Offset = 0;
 
@@ -306,13 +307,13 @@ static void dumpLoclistsSection(raw_ostream &OS, DIDumpOptions DumpOpts,
     if (DumpOffset) {
       if (DumpOffset >= Offset && DumpOffset < EndOffset) {
         Offset = *DumpOffset;
-        Loc.dumpLocationList(&Offset, OS, /*BaseAddr=*/None, MRI, nullptr,
+        Loc.dumpLocationList(&Offset, OS, /*BaseAddr=*/None, MRI, Obj, nullptr,
                              DumpOpts, /*Indent=*/0);
         OS << "\n";
         return;
       }
     } else {
-      Loc.dumpRange(Offset, EndOffset - Offset, OS, MRI, DumpOpts);
+      Loc.dumpRange(Offset, EndOffset - Offset, OS, MRI, Obj, DumpOpts);
     }
     Offset = EndOffset;
   }
@@ -394,15 +395,23 @@ void DWARFContext::dump(
 
   if (const auto *Off = shouldDump(Explicit, ".debug_loc", DIDT_ID_DebugLoc,
                                    DObj->getLocSection().Data)) {
-    getDebugLoc()->dump(OS, getRegisterInfo(), LLDumpOpts, *Off);
+    getDebugLoc()->dump(OS, getRegisterInfo(), *DObj, LLDumpOpts, *Off);
   }
   if (const auto *Off =
           shouldDump(Explicit, ".debug_loclists", DIDT_ID_DebugLoclists,
                      DObj->getLoclistsSection().Data)) {
     DWARFDataExtractor Data(*DObj, DObj->getLoclistsSection(), isLittleEndian(),
                             0);
-    dumpLoclistsSection(OS, LLDumpOpts, Data, getRegisterInfo(), *Off);
+    dumpLoclistsSection(OS, LLDumpOpts, Data, getRegisterInfo(), *DObj, *Off);
   }
+  if (const auto *Off =
+          shouldDump(ExplicitDWO, ".debug_loclists.dwo", DIDT_ID_DebugLoclists,
+                     DObj->getLoclistsDWOSection().Data)) {
+    DWARFDataExtractor Data(*DObj, DObj->getLoclistsDWOSection(),
+                            isLittleEndian(), 0);
+    dumpLoclistsSection(OS, LLDumpOpts, Data, getRegisterInfo(), *DObj, *Off);
+  }
+
   if (const auto *Off =
           shouldDump(ExplicitDWO, ".debug_loc.dwo", DIDT_ID_DebugLoc,
                      DObj->getLocDWOSection().Data)) {
@@ -412,11 +421,11 @@ void DWARFContext::dump(
     if (*Off) {
       uint64_t Offset = **Off;
       Loc.dumpLocationList(&Offset, OS,
-                           /*BaseAddr=*/None, getRegisterInfo(), nullptr,
+                           /*BaseAddr=*/None, getRegisterInfo(), *DObj, nullptr,
                            LLDumpOpts, /*Indent=*/0);
       OS << "\n";
     } else {
-      Loc.dumpRange(0, Data.getData().size(), OS, getRegisterInfo(),
+      Loc.dumpRange(0, Data.getData().size(), OS, getRegisterInfo(), *DObj,
                     LLDumpOpts);
     }
   }
@@ -429,11 +438,14 @@ void DWARFContext::dump(
                                    DObj->getEHFrameSection().Data))
     getEHFrame()->dump(OS, getRegisterInfo(), *Off);
 
-  if (DumpType & DIDT_DebugMacro) {
-    if (Explicit || !getDebugMacro()->empty()) {
-      OS << "\n.debug_macinfo contents:\n";
-      getDebugMacro()->dump(OS);
-    }
+  if (shouldDump(Explicit, ".debug_macinfo", DIDT_ID_DebugMacro,
+                 DObj->getMacinfoSection())) {
+    getDebugMacro()->dump(OS);
+  }
+
+  if (shouldDump(Explicit, ".debug_macinfo.dwo", DIDT_ID_DebugMacro,
+                 DObj->getMacinfoDWOSection())) {
+    getDebugMacroDWO()->dump(OS);
   }
 
   if (shouldDump(Explicit, ".debug_aranges", DIDT_ID_DebugAranges,
@@ -441,8 +453,13 @@ void DWARFContext::dump(
     uint64_t offset = 0;
     DataExtractor arangesData(DObj->getArangesSection(), isLittleEndian(), 0);
     DWARFDebugArangeSet set;
-    while (set.extract(arangesData, &offset))
+    while (arangesData.isValidOffset(offset)) {
+      if (Error E = set.extract(arangesData, &offset)) {
+        WithColor::error() << toString(std::move(E)) << '\n';
+        break;
+      }
       set.dump(OS);
+    }
   }
 
   auto DumpLineSection = [&](DWARFDebugLine::SectionParser Parser,
@@ -450,7 +467,7 @@ void DWARFContext::dump(
                              Optional<uint64_t> DumpOffset) {
     while (!Parser.done()) {
       if (DumpOffset && Parser.getOffset() != *DumpOffset) {
-        Parser.skip(dumpWarning);
+        Parser.skip(dumpWarning, dumpWarning);
         continue;
       }
       OS << "debug_line[" << format("0x%8.8" PRIx64, Parser.getOffset())
@@ -746,7 +763,6 @@ const DWARFDebugLoc *DWARFContext::getDebugLoc() {
                                getUnitAtIndex(0)->getAddressByteSize())
           : DWARFDataExtractor("", isLittleEndian(), 0);
   Loc.reset(new DWARFDebugLoc(std::move(LocData)));
-  Loc->parse();
   return Loc.get();
 }
 
@@ -788,6 +804,17 @@ const DWARFDebugFrame *DWARFContext::getEHFrame() {
   DebugFrame.reset(new DWARFDebugFrame(getArch(), true /* IsEH */));
   DebugFrame->parse(debugFrameData);
   return DebugFrame.get();
+}
+
+const DWARFDebugMacro *DWARFContext::getDebugMacroDWO() {
+  if (MacroDWO)
+    return MacroDWO.get();
+
+  DataExtractor MacinfoDWOData(DObj->getMacinfoDWOSection(), isLittleEndian(),
+                               0);
+  MacroDWO.reset(new DWARFDebugMacro());
+  MacroDWO->parse(MacinfoDWOData);
+  return MacroDWO.get();
 }
 
 const DWARFDebugMacro *DWARFContext::getDebugMacro() {
@@ -852,7 +879,7 @@ DWARFContext::getLineTableForUnit(DWARFUnit *U) {
 }
 
 Expected<const DWARFDebugLine::LineTable *> DWARFContext::getLineTableForUnit(
-    DWARFUnit *U, std::function<void(Error)> RecoverableErrorCallback) {
+    DWARFUnit *U, function_ref<void(Error)> RecoverableErrorCallback) {
   if (!Line)
     Line.reset(new DWARFDebugLine);
 
@@ -1036,19 +1063,56 @@ static Optional<uint64_t> getTypeSize(DWARFDie Type, uint64_t PointerSize) {
   return Optional<uint64_t>();
 }
 
+static Optional<int64_t>
+getExpressionFrameOffset(ArrayRef<uint8_t> Expr,
+                         Optional<unsigned> FrameBaseReg) {
+  if (!Expr.empty() &&
+      (Expr[0] == DW_OP_fbreg ||
+       (FrameBaseReg && Expr[0] == DW_OP_breg0 + *FrameBaseReg))) {
+    unsigned Count;
+    int64_t Offset = decodeSLEB128(Expr.data() + 1, &Count, Expr.end());
+    // A single DW_OP_fbreg or DW_OP_breg.
+    if (Expr.size() == Count + 1)
+      return Offset;
+    // Same + DW_OP_deref (Fortran arrays look like this).
+    if (Expr.size() == Count + 2 && Expr[Count + 1] == DW_OP_deref)
+      return Offset;
+    // Fallthrough. Do not accept ex. (DW_OP_breg W29, DW_OP_stack_value)
+  }
+  return None;
+}
+
 void DWARFContext::addLocalsForDie(DWARFCompileUnit *CU, DWARFDie Subprogram,
                                    DWARFDie Die, std::vector<DILocal> &Result) {
   if (Die.getTag() == DW_TAG_variable ||
       Die.getTag() == DW_TAG_formal_parameter) {
     DILocal Local;
-    if (auto NameAttr = Subprogram.find(DW_AT_name))
-      if (Optional<const char *> Name = NameAttr->getAsCString())
-        Local.FunctionName = *Name;
-    if (auto LocationAttr = Die.find(DW_AT_location))
-      if (Optional<ArrayRef<uint8_t>> Location = LocationAttr->getAsBlock())
-        if (!Location->empty() && (*Location)[0] == DW_OP_fbreg)
-          Local.FrameOffset =
-              decodeSLEB128(Location->data() + 1, nullptr, Location->end());
+    if (const char *Name = Subprogram.getSubroutineName(DINameKind::ShortName))
+      Local.FunctionName = Name;
+
+    Optional<unsigned> FrameBaseReg;
+    if (auto FrameBase = Subprogram.find(DW_AT_frame_base))
+      if (Optional<ArrayRef<uint8_t>> Expr = FrameBase->getAsBlock())
+        if (!Expr->empty() && (*Expr)[0] >= DW_OP_reg0 &&
+            (*Expr)[0] <= DW_OP_reg31) {
+          FrameBaseReg = (*Expr)[0] - DW_OP_reg0;
+        }
+
+    if (Expected<std::vector<DWARFLocationExpression>> Loc =
+            Die.getLocations(DW_AT_location)) {
+      for (const auto &Entry : *Loc) {
+        if (Optional<int64_t> FrameOffset =
+                getExpressionFrameOffset(Entry.Expr, FrameBaseReg)) {
+          Local.FrameOffset = *FrameOffset;
+          break;
+        }
+      }
+    } else {
+      // FIXME: missing DW_AT_location is OK here, but other errors should be
+      // reported to the user.
+      consumeError(Loc.takeError());
+    }
+
     if (auto TagOffsetAttr = Die.find(DW_AT_LLVM_tag_offset))
       Local.TagOffset = TagOffsetAttr->getAsUnsignedConstant();
 
@@ -1386,6 +1450,7 @@ class DWARFObjInMemory final : public DWARFObject {
 
   DWARFSectionMap LocSection;
   DWARFSectionMap LoclistsSection;
+  DWARFSectionMap LoclistsDWOSection;
   DWARFSectionMap LineSection;
   DWARFSectionMap RangesSection;
   DWARFSectionMap RnglistsSection;
@@ -1412,6 +1477,7 @@ class DWARFObjInMemory final : public DWARFObject {
     return StringSwitch<DWARFSectionMap *>(Name)
         .Case("debug_loc", &LocSection)
         .Case("debug_loclists", &LoclistsSection)
+        .Case("debug_loclists.dwo", &LoclistsDWOSection)
         .Case("debug_line", &LineSection)
         .Case("debug_frame", &FrameSection)
         .Case("eh_frame", &EHFrameSection)
@@ -1440,6 +1506,7 @@ class DWARFObjInMemory final : public DWARFObject {
   StringRef ArangesSection;
   StringRef StrSection;
   StringRef MacinfoSection;
+  StringRef MacinfoDWOSection;
   StringRef AbbrevDWOSection;
   StringRef StrDWOSection;
   StringRef CUIndexSection;
@@ -1459,6 +1526,7 @@ class DWARFObjInMemory final : public DWARFObject {
         .Case("debug_aranges", &ArangesSection)
         .Case("debug_str", &StrSection)
         .Case("debug_macinfo", &MacinfoSection)
+        .Case("debug_macinfo.dwo", &MacinfoDWOSection)
         .Case("debug_abbrev.dwo", &AbbrevDWOSection)
         .Case("debug_str.dwo", &StrDWOSection)
         .Case("debug_cu_index", &CUIndexSection)
@@ -1742,6 +1810,9 @@ public:
   const DWARFSection &getRnglistsDWOSection() const override {
     return RnglistsDWOSection;
   }
+  const DWARFSection &getLoclistsDWOSection() const override {
+    return LoclistsDWOSection;
+  }
   const DWARFSection &getAddrSection() const override { return AddrSection; }
   StringRef getCUIndexSection() const override { return CUIndexSection; }
   StringRef getGdbIndexSection() const override { return GdbIndexSection; }
@@ -1782,6 +1853,7 @@ public:
     return RnglistsSection;
   }
   StringRef getMacinfoSection() const override { return MacinfoSection; }
+  StringRef getMacinfoDWOSection() const override { return MacinfoDWOSection; }
   const DWARFSection &getPubnamesSection() const override { return PubnamesSection; }
   const DWARFSection &getPubtypesSection() const override { return PubtypesSection; }
   const DWARFSection &getGnuPubnamesSection() const override {

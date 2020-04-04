@@ -77,6 +77,8 @@ public:
     assert(InstPrinter);
     if (IsVerboseAsm)
         InstPrinter->setCommentStream(CommentStream);
+    if (Assembler->getBackendPtr())
+      setAllowAutoPadding(Assembler->getBackend().allowAutoPadding());
   }
 
   MCAssembler &getAssembler() { return *Assembler; }
@@ -194,6 +196,7 @@ public:
                      SMLoc Loc = SMLoc()) override;
   void EmitIntValue(uint64_t Value, unsigned Size) override;
   void EmitIntValueInHex(uint64_t Value, unsigned Size) override;
+  void EmitIntValueInHexWithPadding(uint64_t Value, unsigned Size) override;
 
   void EmitULEB128Value(const MCExpr *Value) override;
 
@@ -971,6 +974,11 @@ void MCAsmStreamer::EmitIntValueInHex(uint64_t Value, unsigned Size) {
   EmitValue(MCConstantExpr::create(Value, getContext(), true), Size);
 }
 
+void MCAsmStreamer::EmitIntValueInHexWithPadding(uint64_t Value,
+                                                 unsigned Size) {
+  EmitValue(MCConstantExpr::create(Value, getContext(), true, Size), Size);
+}
+
 void MCAsmStreamer::EmitValueImpl(const MCExpr *Value, unsigned Size,
                                   SMLoc Loc) {
   assert(Size <= 8 && "Invalid size");
@@ -1096,16 +1104,27 @@ void MCAsmStreamer::EmitGPRel32Value(const MCExpr *Value) {
 void MCAsmStreamer::emitFill(const MCExpr &NumBytes, uint64_t FillValue,
                              SMLoc Loc) {
   int64_t IntNumBytes;
-  if (NumBytes.evaluateAsAbsolute(IntNumBytes) && IntNumBytes == 0)
+  const bool IsAbsolute = NumBytes.evaluateAsAbsolute(IntNumBytes);
+  if (IsAbsolute && IntNumBytes == 0)
     return;
 
   if (const char *ZeroDirective = MAI->getZeroDirective()) {
-    // FIXME: Emit location directives
-    OS << ZeroDirective;
-    NumBytes.print(OS, MAI);
-    if (FillValue != 0)
-      OS << ',' << (int)FillValue;
-    EmitEOL();
+    if (MAI->doesZeroDirectiveSupportNonZeroValue() || FillValue == 0) {
+      // FIXME: Emit location directives
+      OS << ZeroDirective;
+      NumBytes.print(OS, MAI);
+      if (FillValue != 0)
+        OS << ',' << (int)FillValue;
+      EmitEOL();
+    } else {
+      if (!IsAbsolute)
+        report_fatal_error(
+            "Cannot emit non-absolute expression lengths of fill.");
+      for (int i = 0; i < IntNumBytes; ++i) {
+        OS << MAI->getData8bitsDirective() << (int)FillValue;
+        EmitEOL();
+      }
+    }
     return;
   }
 
@@ -1944,9 +1963,9 @@ void MCAsmStreamer::EmitInstruction(const MCInst &Inst,
   }
 
   if(getTargetStreamer())
-    getTargetStreamer()->prettyPrintAsm(*InstPrinter, OS, Inst, STI);
+    getTargetStreamer()->prettyPrintAsm(*InstPrinter, 0, Inst, STI, OS);
   else
-    InstPrinter->printInst(&Inst, OS, "", STI);
+    InstPrinter->printInst(&Inst, 0, "", STI, OS);
 
   StringRef Comments = CommentToEmit;
   if (Comments.size() && Comments.back() != '\n')

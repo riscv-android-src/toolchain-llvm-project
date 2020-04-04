@@ -89,6 +89,12 @@ public:
   /// if there is a corresponding unscaled variant available.
   static Optional<unsigned> getUnscaledLdSt(unsigned Opc);
 
+  /// Scaling factor for (scaled or unscaled) load or store.
+  static int getMemScale(unsigned Opc);
+  static int getMemScale(const MachineInstr &MI) {
+    return getMemScale(MI.getOpcode());
+  }
+
 
   /// Returns the index for the immediate for a given instruction.
   static unsigned getLoadStoreImmIdx(unsigned Opc);
@@ -106,10 +112,9 @@ public:
   /// Hint that pairing the given load or store is unprofitable.
   static void suppressLdStPair(MachineInstr &MI);
 
-  bool getMemOperandWithOffset(const MachineInstr &MI,
-                               const MachineOperand *&BaseOp,
-                               int64_t &Offset,
-                               const TargetRegisterInfo *TRI) const override;
+  bool getMemOperandsWithOffset(
+      const MachineInstr &MI, SmallVectorImpl<const MachineOperand *> &BaseOps,
+      int64_t &Offset, const TargetRegisterInfo *TRI) const override;
 
   bool getMemOperandWithOffsetWidth(const MachineInstr &MI,
                                     const MachineOperand *&BaseOp,
@@ -126,8 +131,8 @@ public:
   static bool getMemOpInfo(unsigned Opcode, unsigned &Scale, unsigned &Width,
                            int64_t &MinOffset, int64_t &MaxOffset);
 
-  bool shouldClusterMemOps(const MachineOperand &BaseOp1,
-                           const MachineOperand &BaseOp2,
+  bool shouldClusterMemOps(ArrayRef<const MachineOperand *> BaseOps1,
+                           ArrayRef<const MachineOperand *> BaseOps2,
                            unsigned NumLoads) const override;
 
   void copyPhysRegTuple(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
@@ -143,13 +148,13 @@ public:
                    bool KillSrc) const override;
 
   void storeRegToStackSlot(MachineBasicBlock &MBB,
-                           MachineBasicBlock::iterator MBBI, unsigned SrcReg,
+                           MachineBasicBlock::iterator MBBI, Register SrcReg,
                            bool isKill, int FrameIndex,
                            const TargetRegisterClass *RC,
                            const TargetRegisterInfo *TRI) const override;
 
   void loadRegFromStackSlot(MachineBasicBlock &MBB,
-                            MachineBasicBlock::iterator MBBI, unsigned DestReg,
+                            MachineBasicBlock::iterator MBBI, Register DestReg,
                             int FrameIndex, const TargetRegisterClass *RC,
                             const TargetRegisterInfo *TRI) const override;
 
@@ -185,7 +190,8 @@ public:
   bool
   reverseBranchCondition(SmallVectorImpl<MachineOperand> &Cond) const override;
   bool canInsertSelect(const MachineBasicBlock &, ArrayRef<MachineOperand> Cond,
-                       unsigned, unsigned, int &, int &, int &) const override;
+                       unsigned, unsigned, unsigned, int &, int &,
+                       int &) const override;
   void insertSelect(MachineBasicBlock &MBB, MachineBasicBlock::iterator MI,
                     const DebugLoc &DL, unsigned DstReg,
                     ArrayRef<MachineOperand> Cond, unsigned TrueReg,
@@ -265,11 +271,11 @@ public:
   /// on Windows.
   static bool isSEHInstruction(const MachineInstr &MI);
 
-  Optional<DestSourcePair> isAddImmediate(const MachineInstr &MI,
-                                          int64_t &Offset) const override;
+  Optional<RegImmPair> isAddImmediate(const MachineInstr &MI,
+                                      Register Reg) const override;
 
-  Optional<ParamLoadedValue>
-  describeLoadedValue(const MachineInstr &MI) const override;
+  Optional<ParamLoadedValue> describeLoadedValue(const MachineInstr &MI,
+                                                 Register Reg) const override;
 
 #define GET_INSTRINFO_HELPER_DECLS
 #include "AArch64GenInstrInfo.inc"
@@ -385,7 +391,7 @@ enum ElementSizeType {
 enum DestructiveInstType {
   DestructiveInstTypeMask = TSFLAG_DESTRUCTIVE_INST_TYPE(0x1),
   NotDestructive          = TSFLAG_DESTRUCTIVE_INST_TYPE(0x0),
-  Destructive             = TSFLAG_DESTRUCTIVE_INST_TYPE(0x1),
+  DestructiveOther        = TSFLAG_DESTRUCTIVE_INST_TYPE(0x1),
 };
 
 #undef TSFLAG_ELEMENT_SIZE_TYPE

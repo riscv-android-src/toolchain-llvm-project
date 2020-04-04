@@ -352,6 +352,12 @@ bool CallBase::hasFnAttrOnCalledFunction(StringRef Kind) const {
   return false;
 }
 
+void CallBase::getOperandBundlesAsDefs(
+    SmallVectorImpl<OperandBundleDef> &Defs) const {
+  for (unsigned i = 0, e = getNumOperandBundles(); i != e; ++i)
+    Defs.emplace_back(getOperandBundleAt(i));
+}
+
 CallBase::op_iterator
 CallBase::populateBundleOperandInfos(ArrayRef<OperandBundleDef> Bundles,
                                      const unsigned BeginIndex) {
@@ -1342,11 +1348,7 @@ void LoadInst::setAlignment(MaybeAlign Align) {
          "Alignment is greater than MaximumAlignment!");
   setInstructionSubclassData((getSubclassDataFromInstruction() & ~(31 << 1)) |
                              (encode(Align) << 1));
-  if (Align)
-    assert(getAlignment() == Align->value() &&
-           "Alignment representation error!");
-  else
-    assert(getAlignment() == 0 && "Alignment representation error!");
+  assert(getAlign() == Align && "Alignment representation error!");
 }
 
 //===----------------------------------------------------------------------===//
@@ -1416,16 +1418,12 @@ StoreInst::StoreInst(Value *val, Value *addr, bool isVolatile, MaybeAlign Align,
   AssertOK();
 }
 
-void StoreInst::setAlignment(MaybeAlign Align) {
-  assert((!Align || *Align <= MaximumAlignment) &&
+void StoreInst::setAlignment(MaybeAlign Alignment) {
+  assert((!Alignment || *Alignment <= MaximumAlignment) &&
          "Alignment is greater than MaximumAlignment!");
   setInstructionSubclassData((getSubclassDataFromInstruction() & ~(31 << 1)) |
-                             (encode(Align) << 1));
-  if (Align)
-    assert(getAlignment() == Align->value() &&
-           "Alignment representation error!");
-  else
-    assert(getAlignment() == 0 && "Alignment representation error!");
+                             (encode(Alignment) << 1));
+  assert(getAlign() == Alignment && "Alignment representation error!");
 }
 
 //===----------------------------------------------------------------------===//
@@ -1889,6 +1887,8 @@ bool ShuffleVectorInst::isValidOperands(const Value *V1, const Value *V2,
 
 int ShuffleVectorInst::getMaskValue(const Constant *Mask, unsigned i) {
   assert(i < Mask->getType()->getVectorNumElements() && "Index out of range");
+  assert(!Mask->getType()->getVectorElementCount().Scalable &&
+    "Length of scalable vectors unknown at compile time");
   if (auto *CDS = dyn_cast<ConstantDataSequential>(Mask))
     return CDS->getElementAsInteger(i);
   Constant *C = Mask->getAggregateElement(i);
@@ -1899,6 +1899,8 @@ int ShuffleVectorInst::getMaskValue(const Constant *Mask, unsigned i) {
 
 void ShuffleVectorInst::getShuffleMask(const Constant *Mask,
                                        SmallVectorImpl<int> &Result) {
+  assert(!Mask->getType()->getVectorElementCount().Scalable &&
+    "Length of scalable vectors unknown at compile time");
   unsigned NumElts = Mask->getType()->getVectorNumElements();
 
   if (auto *CDS = dyn_cast<ConstantDataSequential>(Mask)) {

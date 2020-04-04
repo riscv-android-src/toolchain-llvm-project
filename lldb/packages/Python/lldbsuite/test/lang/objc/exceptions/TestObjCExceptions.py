@@ -3,7 +3,6 @@
 Test lldb Obj-C exception support.
 """
 
-from __future__ import print_function
 
 
 import lldb
@@ -26,12 +25,12 @@ class ObjCExceptionsTestCase(TestBase):
         launch_info = lldb.SBLaunchInfo(["a.out", "0"])
         lldbutil.run_to_name_breakpoint(self, "objc_exception_throw", launch_info=launch_info)
 
-        self.expect("thread list", STOPPED_DUE_TO_BREAKPOINT,
-                    substrs=['stopped', 'stop reason = breakpoint'])
+        self.expect("thread list",
+            substrs=['stopped', 'stop reason = hit Objective-C exception'])
 
         self.expect('thread exception', substrs=[
                 '(NSException *) exception = ',
-                'name: "ThrownException" - reason: "SomeReason"',
+                '"SomeReason"',
             ])
 
         target = self.dbg.GetSelectedTarget()
@@ -63,7 +62,7 @@ class ObjCExceptionsTestCase(TestBase):
             'frame variable e1',
             substrs=[
                 '(NSException *) e1 = ',
-                'name: "ExceptionName" - reason: "SomeReason"'
+                '"SomeReason"'
             ])
 
         self.expect(
@@ -79,7 +78,7 @@ class ObjCExceptionsTestCase(TestBase):
         e1 = frame.FindVariable("e1")
         self.assertTrue(e1)
         self.assertEqual(e1.type.name, "NSException *")
-        self.assertEqual(e1.GetSummary(), 'name: "ExceptionName" - reason: "SomeReason"')
+        self.assertEqual(e1.GetSummary(), '"SomeReason"')
         self.assertEqual(e1.GetChildMemberWithName("name").description, "ExceptionName")
         self.assertEqual(e1.GetChildMemberWithName("reason").description, "SomeReason")
         userInfo = e1.GetChildMemberWithName("userInfo").dynamic
@@ -92,7 +91,7 @@ class ObjCExceptionsTestCase(TestBase):
             'frame variable e2',
             substrs=[
                 '(NSException *) e2 = ',
-                'name: "ThrownException" - reason: "SomeReason"'
+                '"SomeReason"'
             ])
 
         self.expect(
@@ -108,7 +107,7 @@ class ObjCExceptionsTestCase(TestBase):
         e2 = frame.FindVariable("e2")
         self.assertTrue(e2)
         self.assertEqual(e2.type.name, "NSException *")
-        self.assertEqual(e2.GetSummary(), 'name: "ThrownException" - reason: "SomeReason"')
+        self.assertEqual(e2.GetSummary(), '"SomeReason"')
         self.assertEqual(e2.GetChildMemberWithName("name").description, "ThrownException")
         self.assertEqual(e2.GetChildMemberWithName("reason").description, "SomeReason")
         userInfo = e2.GetChildMemberWithName("userInfo").dynamic
@@ -141,7 +140,7 @@ class ObjCExceptionsTestCase(TestBase):
 
         self.expect('thread exception', substrs=[
                 '(NSException *) exception = ',
-                'name: "ThrownException" - reason: "SomeReason"',
+                '"SomeReason"',
                 'libobjc.A.dylib`objc_exception_throw',
                 'a.out`foo', 'at main.mm:24',
                 'a.out`rethrow', 'at main.mm:35',

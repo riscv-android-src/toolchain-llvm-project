@@ -46,8 +46,25 @@ void MCExpr::print(raw_ostream &OS, const MCAsmInfo *MAI, bool InParens) const {
   case MCExpr::Constant: {
     auto Value = cast<MCConstantExpr>(*this).getValue();
     auto PrintInHex = cast<MCConstantExpr>(*this).useHexFormat();
+    auto SizeInBytes = cast<MCConstantExpr>(*this).getSizeInBytes();
     if (PrintInHex)
-      OS << "0x" << Twine::utohexstr(Value);
+      switch (SizeInBytes) {
+      default:
+        OS << "0x" << Twine::utohexstr(Value);
+        break;
+      case 1:
+        OS << format("0x%02" PRIx64, Value);
+        break;
+      case 2:
+        OS << format("0x%04" PRIx64, Value);
+        break;
+      case 4:
+        OS << format("0x%08" PRIx64, Value);
+        break;
+      case 8:
+        OS << format("0x%016" PRIx64, Value);
+        break;
+      }
     else
       OS << Value;
     return;
@@ -167,8 +184,9 @@ const MCUnaryExpr *MCUnaryExpr::create(Opcode Opc, const MCExpr *Expr,
 }
 
 const MCConstantExpr *MCConstantExpr::create(int64_t Value, MCContext &Ctx,
-                                             bool PrintInHex) {
-  return new (Ctx) MCConstantExpr(Value, PrintInHex);
+                                             bool PrintInHex,
+                                             unsigned SizeInBytes) {
+  return new (Ctx) MCConstantExpr(Value, PrintInHex, SizeInBytes);
 }
 
 /* *** */
@@ -601,7 +619,7 @@ static bool canFold(const MCAssembler *Asm, const MCSymbolRefExpr *A,
 /// and
 ///   Result = (LHS_A - LHS_B + LHS_Cst) + (RHS_A - RHS_B + RHS_Cst).
 ///
-/// This routine attempts to aggresively fold the operands such that the result
+/// This routine attempts to aggressively fold the operands such that the result
 /// is representable in an MCValue, but may not always succeed.
 ///
 /// \returns True on success, false if the result is not representable in an

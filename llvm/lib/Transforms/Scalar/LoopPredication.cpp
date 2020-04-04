@@ -342,7 +342,7 @@ public:
 };
 
 char LoopPredicationLegacyPass::ID = 0;
-} // end namespace llvm
+} // end namespace
 
 INITIALIZE_PASS_BEGIN(LoopPredicationLegacyPass, "loop-predication",
                       "Loop predication", false, false)
@@ -1020,17 +1020,6 @@ static const SCEV *getMinAnalyzeableBackedgeTakenCount(ScalarEvolution &SE,
   return SE.getUMinFromMismatchedTypes(ExitCounts);
 }
 
-/// Return true if we can be fairly sure that executing block BB will probably
-/// lead to executing an __llvm_deoptimize.  This is a profitability heuristic,
-/// not a legality constraint.
-static bool isVeryLikelyToDeopt(BasicBlock *BB) {
-  while (BB->getUniqueSuccessor())
-    // Will skip side effects, that's okay
-    BB = BB->getUniqueSuccessor();
-
-  return BB->getTerminatingDeoptimizeCall();
-}
-
 /// This implements an analogous, but entirely distinct transform from the main
 /// loop predication transform.  This one is phrased in terms of using a
 /// widenable branch *outside* the loop to allow us to simplify loop exits in a
@@ -1073,6 +1062,35 @@ bool LoopPredication::predicateLoopExits(Loop *L, SCEVExpander &Rewriter) {
   const SCEV *LatchEC = SE->getExitCount(L, Latch);
   if (isa<SCEVCouldNotCompute>(LatchEC))
     return false; // profitability - want hot exit in analyzeable set
+
+  // At this point, we have found an analyzeable latch, and a widenable
+  // condition above the loop.  If we have a widenable exit within the loop
+  // (for which we can't compute exit counts), drop the ability to further
+  // widen so that we gain ability to analyze it's exit count and perform this
+  // transform.  TODO: It'd be nice to know for sure the exit became
+  // analyzeable after dropping widenability.
+  {
+    bool Invalidate = false;
+    
+    for (auto *ExitingBB : ExitingBlocks) {
+      if (LI->getLoopFor(ExitingBB) != L)
+        continue;
+
+      auto *BI = dyn_cast<BranchInst>(ExitingBB->getTerminator());
+      if (!BI)
+        continue;
+
+      Use *Cond, *WC;
+      BasicBlock *IfTrueBB, *IfFalseBB;
+      if (parseWidenableBranch(BI, Cond, WC, IfTrueBB, IfFalseBB) &&
+          L->contains(IfTrueBB)) {
+        WC->set(ConstantInt::getTrue(IfTrueBB->getContext()));
+        Invalidate = true;
+      }
+    }
+    if (Invalidate)
+      SE->forgetLoop(L);
+  }
 
   // The use of umin(all analyzeable exits) instead of latch is subtle, but
   // important for profitability.  We may have a loop which hasn't been fully
@@ -1121,9 +1139,12 @@ bool LoopPredication::predicateLoopExits(Loop *L, SCEVExpander &Rewriter) {
 
     const bool ExitIfTrue = !L->contains(*succ_begin(ExitingBB));
     BasicBlock *ExitBB = BI->getSuccessor(ExitIfTrue ? 0 : 1);
-    if (!isVeryLikelyToDeopt(ExitBB))
-      // Profitability: indicator of rarely/never taken exit
+    if (!ExitBB->getPostdominatingDeoptimizeCall())
       continue;
+
+    /// Here we can be fairly sure that executing this exit will most likely
+    /// lead to executing llvm.experimental.deoptimize.
+    /// This is a profitability heuristic, not a legality constraint.
 
     // If we found a widenable exit condition, do two things:
     // 1) fold the widened exit test into the widenable condition

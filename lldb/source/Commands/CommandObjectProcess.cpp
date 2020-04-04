@@ -1,4 +1,4 @@
-//===-- CommandObjectProcess.cpp --------------------------------*- C++ -*-===//
+//===-- CommandObjectProcess.cpp ------------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -12,7 +12,6 @@
 #include "lldb/Breakpoint/BreakpointSite.h"
 #include "lldb/Core/Module.h"
 #include "lldb/Core/PluginManager.h"
-#include "lldb/Host/Host.h"
 #include "lldb/Host/OptionParser.h"
 #include "lldb/Host/StringConvert.h"
 #include "lldb/Interpreter/CommandInterpreter.h"
@@ -760,7 +759,7 @@ public:
 
       switch (short_option) {
       case 'p':
-        plugin_name.assign(option_arg);
+        plugin_name.assign(std::string(option_arg));
         break;
 
       default:
@@ -1253,13 +1252,13 @@ public:
 
       switch (short_option) {
       case 's':
-        stop = option_arg;
+        stop = std::string(option_arg);
         break;
       case 'n':
-        notify = option_arg;
+        notify = std::string(option_arg);
         break;
       case 'p':
-        pass = option_arg;
+        pass = std::string(option_arg);
         break;
       default:
         llvm_unreachable("Unimplemented option");
