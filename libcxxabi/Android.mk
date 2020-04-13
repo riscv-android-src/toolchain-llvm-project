@@ -43,7 +43,7 @@ libcxxabi_includes := \
     $(LOCAL_PATH)/../../../external/libcxx/include \
 
 libcxxabi_cflags := -D__STDC_FORMAT_MACROS
-libcxxabi_cppflags := -std=c++11 -Wno-unknown-attributes
+libcxxabi_cppflags := -std=c++11 -Wno-unknown-attributes -DHAS_THREAD_LOCAL
 
 ifneq (,$(filter armeabi%,$(TARGET_ARCH_ABI)))
     use_llvm_unwinder := true
