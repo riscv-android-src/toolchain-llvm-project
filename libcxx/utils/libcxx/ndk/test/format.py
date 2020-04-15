@@ -25,7 +25,7 @@ class TestFormat(LibcxxTestFormat):
                  build_dir,
                  target_info):
         super(TestFormat, self).__init__(cxx,
-                                         use_verify_for_fail=False,
+                                         use_verify_for_fail=True,
                                          executor=NoopExecutor(target_info),
                                          exec_env={})
         self.libcxx_src_root = libcxx_src_root
