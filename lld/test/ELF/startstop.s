@@ -1,13 +1,13 @@
 // REQUIRES: x86
 // RUN: llvm-mc -filetype=obj -triple=x86_64-unknown-linux %s -o %t
 // RUN: ld.lld %t -o %t.so -shared
-// RUN: llvm-objdump -d --no-show-raw-insn %t.so | FileCheck -check-prefix=DISASM %s
+// RUN: llvm-objdump -d --no-show-raw-insn %t.so | FileCheck --check-prefix=DISASM %s
 // RUN: llvm-readobj --symbols -r %t.so | FileCheck -check-prefix=SYMBOL %s
 
 // DISASM: <_start>:
-// DISASM:    1330:       callq   10 <__start_foo>
-// DISASM:    1335:       callq   8 <__start_bar>
-// DISASM:    133a:       callq   3 <__start_bar>
+// DISASM:    1330:       callq   0x133f <__start_foo>
+// DISASM:    1335:       callq   0x1342 <__start_bar>
+// DISASM:    133a:       callq   0x1342 <__start_bar>
 // DISASM: Disassembly of section foo:
 // DISASM-EMPTY:
 // DISASM: <__start_foo>:

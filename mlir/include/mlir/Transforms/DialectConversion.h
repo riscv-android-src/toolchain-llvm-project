@@ -108,7 +108,7 @@ public:
   /// Note: When attempting to convert a type, e.g. via 'convertType', the
   ///       mostly recently added conversions will be invoked first.
   template <typename FnT,
-            typename T = typename FunctionTraits<FnT>::template arg_t<0>>
+            typename T = typename llvm::function_traits<FnT>::template arg_t<0>>
   void addConversion(FnT &&callback) {
     registerConversion(wrapCallback<T>(std::forward<FnT>(callback)));
   }
@@ -172,7 +172,7 @@ private:
   /// different callback forms, that all compose into a single version.
   /// With callback of form: `Optional<Type>(T)`
   template <typename T, typename FnT>
-  std::enable_if_t<is_invocable<FnT, T>::value, ConversionCallbackFn>
+  std::enable_if_t<llvm::is_invocable<FnT, T>::value, ConversionCallbackFn>
   wrapCallback(FnT &&callback) {
     return wrapCallback<T>([callback = std::forward<FnT>(callback)](
                                T type, SmallVectorImpl<Type> &results) {
@@ -187,7 +187,7 @@ private:
   }
   /// With callback of form: `Optional<LogicalResult>(T, SmallVectorImpl<> &)`
   template <typename T, typename FnT>
-  std::enable_if_t<!is_invocable<FnT, T>::value, ConversionCallbackFn>
+  std::enable_if_t<!llvm::is_invocable<FnT, T>::value, ConversionCallbackFn>
   wrapCallback(FnT &&callback) {
     return [callback = std::forward<FnT>(callback)](
                Type type,
@@ -235,18 +235,18 @@ public:
   }
 
   /// Hook for derived classes to implement combined matching and rewriting.
-  virtual PatternMatchResult
+  virtual LogicalResult
   matchAndRewrite(Operation *op, ArrayRef<Value> operands,
                   ConversionPatternRewriter &rewriter) const {
-    if (!match(op))
-      return matchFailure();
+    if (failed(match(op)))
+      return failure();
     rewrite(op, operands, rewriter);
-    return matchSuccess();
+    return success();
   }
 
   /// Attempt to match and rewrite the IR root at the specified operation.
-  PatternMatchResult matchAndRewrite(Operation *op,
-                                     PatternRewriter &rewriter) const final;
+  LogicalResult matchAndRewrite(Operation *op,
+                                PatternRewriter &rewriter) const final;
 
 private:
   using RewritePattern::rewrite;
@@ -266,7 +266,7 @@ struct OpConversionPattern : public ConversionPattern {
                ConversionPatternRewriter &rewriter) const final {
     rewrite(cast<SourceOp>(op), operands, rewriter);
   }
-  PatternMatchResult
+  LogicalResult
   matchAndRewrite(Operation *op, ArrayRef<Value> operands,
                   ConversionPatternRewriter &rewriter) const final {
     return matchAndRewrite(cast<SourceOp>(op), operands, rewriter);
@@ -282,13 +282,13 @@ struct OpConversionPattern : public ConversionPattern {
     llvm_unreachable("must override matchAndRewrite or a rewrite method");
   }
 
-  virtual PatternMatchResult
+  virtual LogicalResult
   matchAndRewrite(SourceOp op, ArrayRef<Value> operands,
                   ConversionPatternRewriter &rewriter) const {
-    if (!match(op))
-      return matchFailure();
+    if (failed(match(op)))
+      return failure();
     rewrite(op, operands, rewriter);
-    return matchSuccess();
+    return success();
   }
 
 private:
@@ -344,6 +344,14 @@ public:
   /// otherwise an assert will be issued.
   void eraseOp(Operation *op) override;
 
+  /// PatternRewriter hook for erase all operations in a block. This is not yet
+  /// implemented for dialect conversion.
+  void eraseBlock(Block *block) override;
+
+  /// PatternRewriter hook for creating a new block with the given arguments.
+  Block *createBlock(Region *parent, Region::iterator insertPt = {},
+                     TypeRange argTypes = llvm::None) override;
+
   /// PatternRewriter hook for splitting a block into two parts.
   Block *splitBlock(Block *block, Block::iterator before) override;
 
@@ -378,6 +386,12 @@ public:
 
   /// PatternRewriter hook for updating the root operation in-place.
   void cancelRootUpdate(Operation *op) override;
+
+  /// PatternRewriter hook for notifying match failure reasons.
+  LogicalResult
+  notifyMatchFailure(Operation *op,
+                     function_ref<void(Diagnostic &)> reasonCallback) override;
+  using PatternRewriter::notifyMatchFailure;
 
   /// Return a reference to the internal implementation.
   detail::ConversionPatternRewriterImpl &getImpl();
@@ -468,7 +482,8 @@ public:
     addDynamicallyLegalOp<OpT2, OpTs...>(callback);
   }
   template <typename OpT, class Callable>
-  typename std::enable_if<!is_invocable<Callable, Operation *>::value>::type
+  typename std::enable_if<
+      !llvm::is_invocable<Callable, Operation *>::value>::type
   addDynamicallyLegalOp(Callable &&callback) {
     addDynamicallyLegalOp<OpT>(
         [=](Operation *op) { return callback(cast<OpT>(op)); });
@@ -500,7 +515,8 @@ public:
     markOpRecursivelyLegal<OpT2, OpTs...>(callback);
   }
   template <typename OpT, class Callable>
-  typename std::enable_if<!is_invocable<Callable, Operation *>::value>::type
+  typename std::enable_if<
+      !llvm::is_invocable<Callable, Operation *>::value>::type
   markOpRecursivelyLegal(Callable &&callback) {
     markOpRecursivelyLegal<OpT>(
         [=](Operation *op) { return callback(cast<OpT>(op)); });

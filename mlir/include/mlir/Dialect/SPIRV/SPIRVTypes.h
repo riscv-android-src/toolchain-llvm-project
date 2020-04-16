@@ -78,6 +78,8 @@ public:
 
   static bool classof(Type type);
 
+  bool isScalarOrVector();
+
   /// The extension requirements for each type are following the
   /// ((Extension::A OR Extension::B) AND (Extension::C OR Extension::D))
   /// convention.
@@ -109,6 +111,11 @@ public:
 
   static bool classof(Type type);
 
+  /// Returns true if the given integer type is valid for the SPIR-V dialect.
+  static bool isValid(FloatType);
+  /// Returns true if the given float type is valid for the SPIR-V dialect.
+  static bool isValid(IntegerType);
+
   void getExtensions(SPIRVType::ExtensionArrayRefVector &extensions,
                      Optional<spirv::StorageClass> storage = llvm::None);
   void getCapabilities(SPIRVType::CapabilityArrayRefVector &capabilities,
@@ -121,6 +128,9 @@ public:
   using SPIRVType::SPIRVType;
 
   static bool classof(Type type);
+
+  /// Returns true if the given vector type is valid for the SPIR-V dialect.
+  static bool isValid(VectorType);
 
   unsigned getNumElements() const;
 
@@ -137,23 +147,22 @@ class ArrayType : public Type::TypeBase<ArrayType, CompositeType,
                                         detail::ArrayTypeStorage> {
 public:
   using Base::Base;
-  // Zero layout specifies that is no layout
-  using LayoutInfo = uint64_t;
 
   static bool kindof(unsigned kind) { return kind == TypeKind::Array; }
 
   static ArrayType get(Type elementType, unsigned elementCount);
 
+  /// Returns an array type with the given stride in bytes.
   static ArrayType get(Type elementType, unsigned elementCount,
-                       LayoutInfo layoutInfo);
+                       unsigned stride);
 
   unsigned getNumElements() const;
 
   Type getElementType() const;
 
-  bool hasLayout() const;
-
-  uint64_t getArrayStride() const;
+  /// Returns the array stride in bytes. 0 means no stride decorated on this
+  /// type.
+  unsigned getArrayStride() const;
 
   void getExtensions(SPIRVType::ExtensionArrayRefVector &extensions,
                      Optional<spirv::StorageClass> storage = llvm::None);
@@ -233,7 +242,14 @@ public:
 
   static RuntimeArrayType get(Type elementType);
 
+  /// Returns a runtime array type with the given stride in bytes.
+  static RuntimeArrayType get(Type elementType, unsigned stride);
+
   Type getElementType() const;
+
+  /// Returns the array stride in bytes. 0 means no stride decorated on this
+  /// type.
+  unsigned getArrayStride() const;
 
   void getExtensions(SPIRVType::ExtensionArrayRefVector &extensions,
                      Optional<spirv::StorageClass> storage = llvm::None);
@@ -274,16 +290,16 @@ public:
 
   /// Range class for element types.
   class ElementTypeRange
-      : public ::mlir::detail::indexed_accessor_range_base<
+      : public ::llvm::detail::indexed_accessor_range_base<
             ElementTypeRange, const Type *, Type, Type, Type> {
   private:
     using RangeBaseT::RangeBaseT;
 
-    /// See `mlir::detail::indexed_accessor_range_base` for details.
+    /// See `llvm::detail::indexed_accessor_range_base` for details.
     static const Type *offset_base(const Type *object, ptrdiff_t index) {
       return object + index;
     }
-    /// See `mlir::detail::indexed_accessor_range_base` for details.
+    /// See `llvm::detail::indexed_accessor_range_base` for details.
     static Type dereference_iterator(const Type *object, ptrdiff_t index) {
       return object[index];
     }

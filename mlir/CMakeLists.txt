@@ -1,10 +1,10 @@
 # MLIR project.
-set(MLIR_MAIN_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include ) # --src-root
-set(MLIR_INCLUDE_DIR ${CMAKE_CURRENT_BINARY_DIR}/include ) # --includedir
-set(MLIR_TABLEGEN_EXE mlir-tblgen)
+set(MLIR_MAIN_SRC_DIR     ${CMAKE_CURRENT_SOURCE_DIR}  )
+set(MLIR_MAIN_INCLUDE_DIR ${MLIR_MAIN_SRC_DIR}/include )
 
-set(MLIR_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR})
-set(MLIR_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR})
+set(MLIR_SOURCE_DIR  ${CMAKE_CURRENT_SOURCE_DIR})
+set(MLIR_BINARY_DIR  ${CMAKE_CURRENT_BINARY_DIR})
+set(MLIR_INCLUDE_DIR ${CMAKE_CURRENT_BINARY_DIR}/include)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules")
 
@@ -31,6 +31,11 @@ set(MLIR_VULKAN_RUNNER_ENABLED 0 CACHE BOOL "Enable building the mlir Vulkan run
 
 include_directories( "include")
 include_directories( ${MLIR_INCLUDE_DIR})
+
+# Adding tools/mlir-tblgen here as calling add_tablegen sets some variables like
+# MLIR_TABLEGEN_EXE in PARENT_SCOPE which gets lost if that folder is included
+# from another directory like tools
+add_subdirectory(tools/mlir-tblgen)
 
 add_subdirectory(include/mlir)
 add_subdirectory(lib)

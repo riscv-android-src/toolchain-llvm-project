@@ -64,6 +64,8 @@ public:
     }
     if (static_cast<int>(Indent) + Offset >= 0)
       Indent += Offset;
+    if (Line.First->is(TT_CSharpGenericTypeConstraint))
+      Indent = Line.Level * Style.IndentWidth + Style.ContinuationIndentWidth;
   }
 
   /// Update the indent state given that \p Line indent should be
@@ -886,7 +888,8 @@ protected:
     if (!DryRun) {
       Whitespaces->replaceWhitespace(
           *Child->First, /*Newlines=*/0, /*Spaces=*/1,
-          /*StartOfTokenColumn=*/State.Column, State.Line->InPPDirective);
+          /*StartOfTokenColumn=*/State.Column, /*IsAligned=*/false,
+          State.Line->InPPDirective);
     }
     Penalty +=
         formatLine(*Child, State.Column + 1, /*FirstStartColumn=*/0, DryRun);
@@ -1318,6 +1321,7 @@ void UnwrappedLineFormatter::formatFirstToken(
     Indent = 0;
 
   Whitespaces->replaceWhitespace(RootToken, Newlines, Indent, Indent,
+                                 /*IsAligned=*/false,
                                  Line.InPPDirective &&
                                      !RootToken.HasUnescapedNewline);
 }

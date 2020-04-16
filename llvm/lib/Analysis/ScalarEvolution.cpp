@@ -86,7 +86,6 @@
 #include "llvm/IR/Argument.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/CFG.h"
-#include "llvm/IR/CallSite.h"
 #include "llvm/IR/Constant.h"
 #include "llvm/IR/ConstantRange.h"
 #include "llvm/IR/Constants.h"
@@ -3532,9 +3531,8 @@ ScalarEvolution::getGEPExpr(GEPOperator *GEP,
                                              : SCEV::FlagAnyWrap;
 
   const SCEV *TotalOffset = getZero(IntIdxTy);
-  // The array size is unimportant. The first thing we do on CurTy is getting
-  // its element type.
-  Type *CurTy = ArrayType::get(GEP->getSourceElementType(), 0);
+  Type *CurTy = GEP->getType();
+  bool FirstIter = true;
   for (const SCEV *IndexExpr : IndexExprs) {
     // Compute the (potentially symbolic) offset in bytes for this index.
     if (StructType *STy = dyn_cast<StructType>(CurTy)) {
@@ -3550,7 +3548,14 @@ ScalarEvolution::getGEPExpr(GEPOperator *GEP,
       CurTy = STy->getTypeAtIndex(Index);
     } else {
       // Update CurTy to its element type.
-      CurTy = cast<SequentialType>(CurTy)->getElementType();
+      if (FirstIter) {
+        assert(isa<PointerType>(CurTy) &&
+               "The first index of a GEP indexes a pointer");
+        CurTy = GEP->getSourceElementType();
+        FirstIter = false;
+      } else {
+        CurTy = GetElementPtrInst::getTypeAtIndex(CurTy, (uint64_t)0);
+      }
       // For an array, add the element offset, explicitly scaled.
       const SCEV *ElementSize = getSizeOfExpr(IntIdxTy, CurTy);
       // Getelementptr indices are signed.
@@ -3754,6 +3759,14 @@ const SCEV *ScalarEvolution::getSizeOfExpr(Type *IntTy, Type *AllocTy) {
   // We can bypass creating a target-independent
   // constant expression and then folding it back into a ConstantInt.
   // This is just a compile-time optimization.
+  if (auto *VecTy = dyn_cast<VectorType>(AllocTy)) {
+    if (VecTy->isScalable()) {
+      Constant *NullPtr = Constant::getNullValue(AllocTy->getPointerTo());
+      Constant *One = ConstantInt::get(IntTy, 1);
+      Constant *GEP = ConstantExpr::getGetElementPtr(AllocTy, NullPtr, One);
+      return getSCEV(ConstantExpr::getPtrToInt(GEP, IntTy));
+    }
+  }
   return getConstant(IntTy, getDataLayout().getTypeAllocSize(AllocTy));
 }
 
@@ -6565,7 +6578,7 @@ const SCEV *ScalarEvolution::createSCEV(Value *V) {
 
   case Instruction::Call:
   case Instruction::Invoke:
-    if (Value *RV = CallSite(U).getReturnedArgOperand())
+    if (Value *RV = cast<CallBase>(U)->getReturnedArgOperand())
       return getSCEV(RV);
     break;
   }
@@ -8271,10 +8284,11 @@ const SCEV *ScalarEvolution::computeSCEVAtScope(const SCEV *V, const Loop *L) {
           if (!isa<SCEVCouldNotCompute>(BackedgeTakenCount) &&
               isKnownPositive(BackedgeTakenCount) &&
               PN->getNumIncomingValues() == 2) {
+
             unsigned InLoopPred = LI->contains(PN->getIncomingBlock(0)) ? 0 : 1;
-            const SCEV *OnBackedge = getSCEV(PN->getIncomingValue(InLoopPred));
-            if (IsAvailableOnEntry(LI, DT, OnBackedge, PN->getParent()))
-              return OnBackedge;
+            Value *BackedgeVal = PN->getIncomingValue(InLoopPred);
+            if (LI->isLoopInvariant(BackedgeVal))
+              return getSCEV(BackedgeVal);
           }
           if (auto *BTCC = dyn_cast<SCEVConstant>(BackedgeTakenCount)) {
             // Okay, we know how many times the containing loop executes.  If

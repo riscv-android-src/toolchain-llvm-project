@@ -117,7 +117,7 @@ define i1 @nonnullReturnTest(i8* nonnull %x) {
 define i1 @unknownReturnTest(i8* %x) {
 ; CHECK-LABEL: @unknownReturnTest(
 ; CHECK-NEXT:    [[X2:%.*]] = call i8* @returningPtr(i8* [[X:%.*]])
-; CHECK-NEXT:    [[NULL_CHECK:%.*]] = icmp eq i8* [[X]], null
+; CHECK-NEXT:    [[NULL_CHECK:%.*]] = icmp eq i8* [[X2]], null
 ; CHECK-NEXT:    ret i1 [[NULL_CHECK]]
 ;
   %x2 = call i8* @returningPtr(i8* %x)
@@ -170,7 +170,6 @@ define i32 @test_null_after_load_addrspace(i32 addrspace(1)* %0) {
 ; CHECK-NEXT:    [[TMP4:%.*]] = select i1 [[TMP3]], i32 [[TMP2]], i32 1
 ; CHECK-NEXT:    ret i32 [[TMP4]]
 ;
-; CHECK-NEXT     ret i32 %4
   %2 = load i32, i32 addrspace(1)* %0, align 4
   %3 = icmp eq i32 addrspace(1)* %0, null
   %4 = select i1 %3, i32 %2, i32 1

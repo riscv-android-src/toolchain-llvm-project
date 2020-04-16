@@ -534,8 +534,8 @@ private:
   bool TraverseOMPExecutableDirective(OMPExecutableDirective *S);
   bool TraverseOMPLoopDirective(OMPLoopDirective *S);
   bool TraverseOMPClause(OMPClause *C);
-#define OPENMP_CLAUSE(Name, Class) bool Visit##Class(Class *C);
-#include "clang/Basic/OpenMPKinds.def"
+#define OMP_CLAUSE_CLASS(Enum, Str, Class) bool Visit##Class(Class *C);
+#include "llvm/Frontend/OpenMP/OMPKinds.def"
   /// Process clauses with list of variables.
   template <typename T> bool VisitOMPClauseList(T *Node);
   /// Process clauses with pre-initis.
@@ -1993,6 +1993,8 @@ DEF_TRAVERSE_DECL(BindingDecl, {
 
 DEF_TRAVERSE_DECL(MSPropertyDecl, { TRY_TO(TraverseDeclaratorHelper(D)); })
 
+DEF_TRAVERSE_DECL(MSGuidDecl, {})
+
 DEF_TRAVERSE_DECL(FieldDecl, {
   TRY_TO(TraverseDeclaratorHelper(D));
   if (D->isBitField())
@@ -2551,6 +2553,8 @@ DEF_TRAVERSE_STMT(CXXMemberCallExpr, {})
 DEF_TRAVERSE_STMT(AddrLabelExpr, {})
 DEF_TRAVERSE_STMT(ArraySubscriptExpr, {})
 DEF_TRAVERSE_STMT(OMPArraySectionExpr, {})
+DEF_TRAVERSE_STMT(OMPArrayShapingExpr, {})
+DEF_TRAVERSE_STMT(OMPIteratorExpr, {})
 
 DEF_TRAVERSE_STMT(BlockExpr, {
   TRY_TO(TraverseDecl(S->getBlockDecl()));
@@ -2668,6 +2672,7 @@ DEF_TRAVERSE_STMT(CXXRewrittenBinaryOperator, {
 })
 DEF_TRAVERSE_STMT(OpaqueValueExpr, {})
 DEF_TRAVERSE_STMT(TypoExpr, {})
+DEF_TRAVERSE_STMT(RecoveryExpr, {})
 DEF_TRAVERSE_STMT(CUDAKernelCallExpr, {})
 
 // These operators (all of them) do not need any action except
@@ -2852,6 +2857,9 @@ DEF_TRAVERSE_STMT(OMPFlushDirective,
 DEF_TRAVERSE_STMT(OMPDepobjDirective,
                   { TRY_TO(TraverseOMPExecutableDirective(S)); })
 
+DEF_TRAVERSE_STMT(OMPScanDirective,
+                  { TRY_TO(TraverseOMPExecutableDirective(S)); })
+
 DEF_TRAVERSE_STMT(OMPOrderedDirective,
                   { TRY_TO(TraverseOMPExecutableDirective(S)); })
 
@@ -2951,17 +2959,14 @@ bool RecursiveASTVisitor<Derived>::TraverseOMPClause(OMPClause *C) {
   if (!C)
     return true;
   switch (C->getClauseKind()) {
-#define OPENMP_CLAUSE(Name, Class)                                             \
-  case OMPC_##Name:                                                            \
+#define OMP_CLAUSE_CLASS(Enum, Str, Class)                                     \
+  case llvm::omp::Clause::Enum:                                                \
     TRY_TO(Visit##Class(static_cast<Class *>(C)));                             \
     break;
-#include "clang/Basic/OpenMPKinds.def"
-  case OMPC_threadprivate:
-  case OMPC_uniform:
-  case OMPC_device_type:
-  case OMPC_match:
-  case OMPC_unknown:
+#define OMP_CLAUSE_NO_CLASS(Enum, Str)                                         \
+  case llvm::omp::Clause::Enum:                                                \
     break;
+#include "llvm/Frontend/OpenMP/OMPKinds.def"
   }
   return true;
 }
@@ -3177,6 +3182,20 @@ bool RecursiveASTVisitor<Derived>::VisitOMPClauseList(T *Node) {
   for (auto *E : Node->varlists()) {
     TRY_TO(TraverseStmt(E));
   }
+  return true;
+}
+
+template <typename Derived>
+bool RecursiveASTVisitor<Derived>::VisitOMPInclusiveClause(
+    OMPInclusiveClause *C) {
+  TRY_TO(VisitOMPClauseList(C));
+  return true;
+}
+
+template <typename Derived>
+bool RecursiveASTVisitor<Derived>::VisitOMPExclusiveClause(
+    OMPExclusiveClause *C) {
+  TRY_TO(VisitOMPClauseList(C));
   return true;
 }
 
@@ -3485,6 +3504,12 @@ bool RecursiveASTVisitor<Derived>::VisitOMPNontemporalClause(
 
 template <typename Derived>
 bool RecursiveASTVisitor<Derived>::VisitOMPOrderClause(OMPOrderClause *) {
+  return true;
+}
+
+template <typename Derived>
+bool RecursiveASTVisitor<Derived>::VisitOMPDetachClause(OMPDetachClause *C) {
+  TRY_TO(TraverseStmt(C->getEventHandler()));
   return true;
 }
 

@@ -12,7 +12,6 @@
 #include "mlir/IR/AffineMap.h"
 #include "mlir/IR/IntegerSet.h"
 #include "mlir/Support/MathExtras.h"
-#include "mlir/Support/STLExtras.h"
 #include "llvm/ADT/STLExtras.h"
 
 using namespace mlir;
@@ -314,6 +313,39 @@ static AffineExpr simplifyAdd(AffineExpr lhs, AffineExpr rhs) {
       return lBin.getLHS() + (lrhs.getValue() + rhsConst.getValue());
   }
 
+  // Detect "c1 * expr + c_2 * expr" as "(c1 + c2) * expr".
+  // c1 is rRhsConst, c2 is rLhsConst; firstExpr, secondExpr are their
+  // respective multiplicands.
+  Optional<int64_t> rLhsConst, rRhsConst;
+  AffineExpr firstExpr, secondExpr;
+  AffineConstantExpr rLhsConstExpr;
+  auto lBinOpExpr = lhs.dyn_cast<AffineBinaryOpExpr>();
+  if (lBinOpExpr && lBinOpExpr.getKind() == AffineExprKind::Mul &&
+      (rLhsConstExpr = lBinOpExpr.getRHS().dyn_cast<AffineConstantExpr>())) {
+    rLhsConst = rLhsConstExpr.getValue();
+    firstExpr = lBinOpExpr.getLHS();
+  } else {
+    rLhsConst = 1;
+    firstExpr = lhs;
+  }
+
+  auto rBinOpExpr = rhs.dyn_cast<AffineBinaryOpExpr>();
+  AffineConstantExpr rRhsConstExpr;
+  if (rBinOpExpr && rBinOpExpr.getKind() == AffineExprKind::Mul &&
+      (rRhsConstExpr = rBinOpExpr.getRHS().dyn_cast<AffineConstantExpr>())) {
+    rRhsConst = rRhsConstExpr.getValue();
+    secondExpr = rBinOpExpr.getLHS();
+  } else {
+    rRhsConst = 1;
+    secondExpr = rhs;
+  }
+
+  if (rLhsConst && rRhsConst && firstExpr == secondExpr)
+    return getAffineBinaryOpExpr(
+        AffineExprKind::Mul, firstExpr,
+        getAffineConstantExpr(rLhsConst.getValue() + rRhsConst.getValue(),
+                              lhs.getContext()));
+
   // When doing successive additions, bring constant to the right: turn (d0 + 2)
   // + d1 into (d0 + d1) + 2.
   if (lBin && lBin.getKind() == AffineExprKind::Add) {
@@ -327,7 +359,6 @@ static AffineExpr simplifyAdd(AffineExpr lhs, AffineExpr rhs) {
   // general a more compact and readable form.
 
   // Process '(expr floordiv c) * (-c)'.
-  AffineBinaryOpExpr rBinOpExpr = rhs.dyn_cast<AffineBinaryOpExpr>();
   if (!rBinOpExpr)
     return nullptr;
 
@@ -581,7 +612,7 @@ AffineExpr AffineExpr::compose(AffineMap map) const {
                                              map.getResults().end());
   return replaceDimsAndSymbols(dimReplacements, {});
 }
-raw_ostream &mlir::operator<<(raw_ostream &os, AffineExpr &expr) {
+raw_ostream &mlir::operator<<(raw_ostream &os, AffineExpr expr) {
   expr.print(os);
   return os;
 }

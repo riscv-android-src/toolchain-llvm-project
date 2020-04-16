@@ -404,8 +404,10 @@ void VPInstruction::print(raw_ostream &O) const {
 }
 
 void VPInstruction::print(raw_ostream &O, VPSlotTracker &SlotTracker) const {
-  printAsOperand(O, SlotTracker);
-  O << " = ";
+  if (hasResult()) {
+    printAsOperand(O, SlotTracker);
+    O << " = ";
+  }
 
   switch (getOpcode()) {
   case VPInstruction::Not:
@@ -578,19 +580,10 @@ void VPlanPrinter::dump() {
   OS << "graph [labelloc=t, fontsize=30; label=\"Vectorization Plan";
   if (!Plan.getName().empty())
     OS << "\\n" << DOT::EscapeString(Plan.getName());
-  if (!Plan.Value2VPValue.empty() || Plan.BackedgeTakenCount) {
-    OS << ", where:";
-    if (Plan.BackedgeTakenCount) {
-      OS << "\\n";
-      Plan.BackedgeTakenCount->print(OS, SlotTracker);
-      OS << " := BackedgeTakenCount";
-    }
-    for (auto Entry : Plan.Value2VPValue) {
-      OS << "\\n";
-      Entry.second->print(OS, SlotTracker);
-      OS << DOT::EscapeString(" := ");
-      Entry.first->printAsOperand(OS, false);
-    }
+  if (Plan.BackedgeTakenCount) {
+    OS << ", where:\\n";
+    Plan.BackedgeTakenCount->print(OS, SlotTracker);
+    OS << " := BackedgeTakenCount";
   }
   OS << "\"]\n";
   OS << "node [shape=rect, fontname=Courier, fontsize=30]\n";
@@ -719,11 +712,23 @@ void VPlanPrinter::printAsIngredient(raw_ostream &O, Value *V) {
   O << DOT::EscapeString(IngredientString);
 }
 
+void VPWidenCallRecipe::print(raw_ostream &O, const Twine &Indent,
+                              VPSlotTracker &SlotTracker) const {
+  O << " +\n"
+    << Indent << "\"WIDEN-CALL " << VPlanIngredient(&Ingredient) << "\\l\"";
+}
+
+void VPWidenSelectRecipe::print(raw_ostream &O, const Twine &Indent,
+                                VPSlotTracker &SlotTracker) const {
+  O << " +\n"
+    << Indent << "\"WIDEN-SELECT" << VPlanIngredient(&Ingredient)
+    << (InvariantCond ? " (condition is loop invariant)" : "") << "\\l\"";
+}
+
 void VPWidenRecipe::print(raw_ostream &O, const Twine &Indent,
                           VPSlotTracker &SlotTracker) const {
   O << " +\n" << Indent << "\"WIDEN\\l\"";
-  for (auto &Instr : make_range(Begin, End))
-    O << " +\n" << Indent << "\"  " << VPlanIngredient(&Instr) << "\\l\"";
+  O << "\"  " << VPlanIngredient(&Ingredient) << "\\l\"";
 }
 
 void VPWidenIntOrFpInductionRecipe::print(raw_ostream &O, const Twine &Indent,
@@ -758,17 +763,17 @@ void VPBlendRecipe::print(raw_ostream &O, const Twine &Indent,
   O << " +\n" << Indent << "\"BLEND ";
   Phi->printAsOperand(O, false);
   O << " =";
-  if (!User) {
+  if (getNumIncomingValues() == 1) {
     // Not a User of any mask: not really blending, this is a
     // single-predecessor phi.
     O << " ";
-    Phi->getIncomingValue(0)->printAsOperand(O, false);
+    getIncomingValue(0)->printAsOperand(O, SlotTracker);
   } else {
-    for (unsigned I = 0, E = User->getNumOperands(); I < E; ++I) {
+    for (unsigned I = 0, E = getNumIncomingValues(); I < E; ++I) {
       O << " ";
-      Phi->getIncomingValue(I)->printAsOperand(O, false);
+      getIncomingValue(I)->printAsOperand(O, SlotTracker);
       O << "/";
-      User->getOperand(I)->printAsOperand(O, SlotTracker);
+      getMask(I)->printAsOperand(O, SlotTracker);
     }
   }
   O << "\\l\"";
@@ -804,6 +809,29 @@ void VPWidenMemoryInstructionRecipe::print(raw_ostream &O, const Twine &Indent,
   O << "\\l\"";
 }
 
+void VPWidenCanonicalIVRecipe::execute(VPTransformState &State) {
+  Value *CanonicalIV = State.CanonicalIV;
+  Type *STy = CanonicalIV->getType();
+  IRBuilder<> Builder(State.CFG.PrevBB->getTerminator());
+  Value *VStart = Builder.CreateVectorSplat(State.VF, CanonicalIV, "broadcast");
+  for (unsigned Part = 0, UF = State.UF; Part < UF; ++Part) {
+    SmallVector<Constant *, 8> Indices;
+    for (unsigned Lane = 0, VF = State.VF; Lane < VF; ++Lane)
+      Indices.push_back(ConstantInt::get(STy, Part * VF + Lane));
+    Constant *VStep = ConstantVector::get(Indices);
+    // Add the consecutive indices to the vector value.
+    Value *CanonicalVectorIV = Builder.CreateAdd(VStart, VStep, "vec.iv");
+    State.set(getVPValue(), CanonicalVectorIV, Part);
+  }
+}
+
+void VPWidenCanonicalIVRecipe::print(raw_ostream &O, const Twine &Indent,
+                                     VPSlotTracker &SlotTracker) const {
+  O << " +\n" << Indent << "\"EMIT ";
+  getVPValue()->printAsOperand(O, SlotTracker);
+  O << " = WIDEN-CANONICAL-INDUCTION \\l\"";
+}
+
 template void DomTreeBuilder::Calculate<VPDominatorTree>(VPDominatorTree &DT);
 
 void VPValue::replaceAllUsesWith(VPValue *New) {
@@ -814,11 +842,18 @@ void VPValue::replaceAllUsesWith(VPValue *New) {
 }
 
 void VPValue::printAsOperand(raw_ostream &OS, VPSlotTracker &Tracker) const {
+  if (const Value *UV = getUnderlyingValue()) {
+    OS << "ir<";
+    UV->printAsOperand(OS, false);
+    OS << ">";
+    return;
+  }
+
   unsigned Slot = Tracker.getSlot(this);
   if (Slot == unsigned(-1))
     OS << "<badref>";
   else
-    OS << "%vp" << Tracker.getSlot(this);
+    OS << "vp<%" << Tracker.getSlot(this) << ">";
 }
 
 void VPInterleavedAccessInfo::visitRegion(VPRegionBlock *Region,
@@ -844,7 +879,7 @@ void VPInterleavedAccessInfo::visitBlock(VPBlockBase *Block, Old2NewTy &Old2New,
       auto NewIGIter = Old2New.find(IG);
       if (NewIGIter == Old2New.end())
         Old2New[IG] = new InterleaveGroup<VPInstruction>(
-            IG->getFactor(), IG->isReverse(), Align(IG->getAlignment()));
+            IG->getFactor(), IG->isReverse(), IG->getAlign());
 
       if (Inst == IG->getInsertPos())
         Old2New[IG]->setInsertPos(VPInst);
@@ -869,6 +904,13 @@ VPInterleavedAccessInfo::VPInterleavedAccessInfo(VPlan &Plan,
 
 void VPSlotTracker::assignSlot(const VPValue *V) {
   assert(Slots.find(V) == Slots.end() && "VPValue already has a slot!");
+  const Value *UV = V->getUnderlyingValue();
+  if (UV)
+    return;
+  const auto *VPI = dyn_cast<VPInstruction>(V);
+  if (VPI && !VPI->hasResult())
+    return;
+
   Slots[V] = NextSlot++;
 }
 
@@ -889,6 +931,8 @@ void VPSlotTracker::assignSlots(const VPBasicBlock *VPBB) {
   for (const VPRecipeBase &Recipe : *VPBB) {
     if (const auto *VPI = dyn_cast<VPInstruction>(&Recipe))
       assignSlot(VPI);
+    else if (const auto *VPIV = dyn_cast<VPWidenCanonicalIVRecipe>(&Recipe))
+      assignSlot(VPIV->getVPValue());
   }
 }
 

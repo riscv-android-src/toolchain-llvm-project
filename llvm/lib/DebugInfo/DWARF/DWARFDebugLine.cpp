@@ -219,20 +219,26 @@ parseV2DirFileTables(const DWARFDataExtractor &DebugLineData,
 static llvm::Expected<ContentDescriptors>
 parseV5EntryFormat(const DWARFDataExtractor &DebugLineData, uint64_t *OffsetPtr,
                    DWARFDebugLine::ContentTypeTracker *ContentTypes) {
+  Error Err = Error::success();
   ContentDescriptors Descriptors;
-  int FormatCount = DebugLineData.getU8(OffsetPtr);
+  int FormatCount = DebugLineData.getU8(OffsetPtr, &Err);
   bool HasPath = false;
-  for (int I = 0; I != FormatCount; ++I) {
+  for (int I = 0; I != FormatCount && !Err; ++I) {
     ContentDescriptor Descriptor;
     Descriptor.Type =
-      dwarf::LineNumberEntryFormat(DebugLineData.getULEB128(OffsetPtr));
-    Descriptor.Form = dwarf::Form(DebugLineData.getULEB128(OffsetPtr));
+        dwarf::LineNumberEntryFormat(DebugLineData.getULEB128(OffsetPtr, &Err));
+    Descriptor.Form = dwarf::Form(DebugLineData.getULEB128(OffsetPtr, &Err));
     if (Descriptor.Type == dwarf::DW_LNCT_path)
       HasPath = true;
     if (ContentTypes)
       ContentTypes->trackContentType(Descriptor.Type);
     Descriptors.push_back(Descriptor);
   }
+
+  if (Err)
+    return createStringError(errc::invalid_argument,
+                             "failed to parse entry content descriptors: %s",
+                             toString(std::move(Err)).c_str());
 
   if (!HasPath)
     return createStringError(errc::invalid_argument,
@@ -255,8 +261,8 @@ parseV5DirFileTables(const DWARFDataExtractor &DebugLineData,
     return DirDescriptors.takeError();
 
   // Get the directory entries, according to the format described above.
-  int DirEntryCount = DebugLineData.getU8(OffsetPtr);
-  for (int I = 0; I != DirEntryCount; ++I) {
+  uint64_t DirEntryCount = DebugLineData.getULEB128(OffsetPtr);
+  for (uint64_t I = 0; I != DirEntryCount; ++I) {
     for (auto Descriptor : *DirDescriptors) {
       DWARFFormValue Value(Descriptor.Form);
       switch (Descriptor.Type) {
@@ -283,8 +289,8 @@ parseV5DirFileTables(const DWARFDataExtractor &DebugLineData,
     return FileDescriptors.takeError();
 
   // Get the file entries, according to the format described above.
-  int FileEntryCount = DebugLineData.getU8(OffsetPtr);
-  for (int I = 0; I != FileEntryCount; ++I) {
+  uint64_t FileEntryCount = DebugLineData.getULEB128(OffsetPtr);
+  for (uint64_t I = 0; I != FileEntryCount; ++I) {
     DWARFDebugLine::FileNameEntry FileEntry;
     for (auto Descriptor : *FileDescriptors) {
       DWARFFormValue Value(Descriptor.Form);
@@ -1209,9 +1215,13 @@ bool DWARFDebugLine::Prologue::getFileNameByIndex(
   if (!Name)
     return false;
   StringRef FileName = *Name;
-  if (Kind == FileLineInfoKind::Default ||
+  if (Kind == FileLineInfoKind::RawValue ||
       isPathAbsoluteOnWindowsOrPosix(FileName)) {
     Result = std::string(FileName);
+    return true;
+  }
+  if (Kind == FileLineInfoKind::BaseNameOnly) {
+    Result = std::string(llvm::sys::path::filename(FileName));
     return true;
   }
 

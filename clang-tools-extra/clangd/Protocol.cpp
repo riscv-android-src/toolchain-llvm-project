@@ -295,8 +295,10 @@ bool fromJSON(const llvm::json::Value &Params, ClientCapabilities &R) {
             TextDocument->getObject("semanticHighlightingCapabilities")) {
       if (auto SemanticHighlightingSupport =
               SemanticHighlighting->getBoolean("semanticHighlighting"))
-        R.SemanticHighlighting = *SemanticHighlightingSupport;
+        R.TheiaSemanticHighlighting = *SemanticHighlightingSupport;
     }
+    if (TextDocument->getObject("semanticTokens"))
+      R.SemanticTokens = true;
     if (auto *Diagnostics = TextDocument->getObject("publishDiagnostics")) {
       if (auto CategorySupport = Diagnostics->getBoolean("categorySupport"))
         R.DiagnosticCategory = *CategorySupport;
@@ -407,7 +409,9 @@ llvm::json::Value toJSON(const WorkDoneProgressBegin &P) {
     Result["cancellable"] = true;
   if (P.percentage)
     Result["percentage"] = 0;
-  return Result;
+
+  // FIXME: workaround for older gcc/clang
+  return std::move(Result);
 }
 
 llvm::json::Value toJSON(const WorkDoneProgressReport &P) {
@@ -418,14 +422,16 @@ llvm::json::Value toJSON(const WorkDoneProgressReport &P) {
     Result["message"] = *P.message;
   if (P.percentage)
     Result["percentage"] = *P.percentage;
-  return Result;
+  // FIXME: workaround for older gcc/clang
+  return std::move(Result);
 }
 
 llvm::json::Value toJSON(const WorkDoneProgressEnd &P) {
   llvm::json::Object Result{{"kind", "end"}};
   if (P.message)
     Result["message"] = *P.message;
-  return Result;
+  // FIXME: workaround for older gcc/clang
+  return std::move(Result);
 }
 
 llvm::json::Value toJSON(const MessageType &R) {
@@ -442,6 +448,11 @@ bool fromJSON(const llvm::json::Value &Params, DidOpenTextDocumentParams &R) {
 }
 
 bool fromJSON(const llvm::json::Value &Params, DidCloseTextDocumentParams &R) {
+  llvm::json::ObjectMapper O(Params);
+  return O && O.map("textDocument", R.textDocument);
+}
+
+bool fromJSON(const llvm::json::Value &Params, DidSaveTextDocumentParams &R) {
   llvm::json::ObjectMapper O(Params);
   return O && O.map("textDocument", R.textDocument);
 }
@@ -530,6 +541,7 @@ llvm::json::Value toJSON(const Diagnostic &D) {
     Diag["source"] = D.source;
   if (D.relatedInformation)
     Diag["relatedInformation"] = *D.relatedInformation;
+  // FIXME: workaround for older gcc/clang
   return std::move(Diag);
 }
 
@@ -648,8 +660,8 @@ llvm::json::Value toJSON(const SymbolDetails &P) {
   if (P.ID.hasValue())
     Result["id"] = P.ID.getValue().str();
 
-  // Older clang cannot compile 'return Result', even though it is legal.
-  return llvm::json::Value(std::move(Result));
+  // FIXME: workaround for older gcc/clang
+  return std::move(Result);
 }
 
 llvm::raw_ostream &operator<<(llvm::raw_ostream &O, const SymbolDetails &S) {
@@ -711,8 +723,8 @@ llvm::json::Value toJSON(const DocumentSymbol &S) {
     Result["children"] = S.children;
   if (S.deprecated)
     Result["deprecated"] = true;
-  // Older gcc cannot compile 'return Result', even though it is legal.
-  return llvm::json::Value(std::move(Result));
+  // FIXME: workaround for older gcc/clang
+  return std::move(Result);
 }
 
 llvm::json::Value toJSON(const WorkspaceEdit &WE) {
@@ -979,6 +991,59 @@ llvm::json::Value toJSON(const FileStatus &FStatus) {
   };
 }
 
+constexpr unsigned SemanticTokenEncodingSize = 5;
+static llvm::json::Value encodeTokens(llvm::ArrayRef<SemanticToken> Toks) {
+  llvm::json::Array Result;
+  for (const auto &Tok : Toks) {
+    Result.push_back(Tok.deltaLine);
+    Result.push_back(Tok.deltaStart);
+    Result.push_back(Tok.length);
+    Result.push_back(Tok.tokenType);
+    Result.push_back(Tok.tokenModifiers);
+  }
+  assert(Result.size() == SemanticTokenEncodingSize * Toks.size());
+  return Result;
+}
+
+bool operator==(const SemanticToken &L, const SemanticToken &R) {
+  return std::tie(L.deltaLine, L.deltaStart, L.length, L.tokenType,
+                  L.tokenModifiers) == std::tie(R.deltaLine, R.deltaStart,
+                                                R.length, R.tokenType,
+                                                R.tokenModifiers);
+}
+
+llvm::json::Value toJSON(const SemanticTokens &Tokens) {
+  return llvm::json::Object{{"resultId", Tokens.resultId},
+                            {"data", encodeTokens(Tokens.tokens)}};
+}
+
+llvm::json::Value toJSON(const SemanticTokensEdit &Edit) {
+  return llvm::json::Object{
+      {"start", SemanticTokenEncodingSize * Edit.startToken},
+      {"deleteCount", SemanticTokenEncodingSize * Edit.deleteTokens},
+      {"data", encodeTokens(Edit.tokens)}};
+}
+
+llvm::json::Value toJSON(const SemanticTokensOrEdits &TE) {
+  llvm::json::Object Result{{"resultId", TE.resultId}};
+  if (TE.edits)
+    Result["edits"] = *TE.edits;
+  if (TE.tokens)
+    Result["data"] = encodeTokens(*TE.tokens);
+  return Result;
+}
+
+bool fromJSON(const llvm::json::Value &Params, SemanticTokensParams &R) {
+  llvm::json::ObjectMapper O(Params);
+  return O && O.map("textDocument", R.textDocument);
+}
+
+bool fromJSON(const llvm::json::Value &Params, SemanticTokensEditsParams &R) {
+  llvm::json::ObjectMapper O(Params);
+  return O && O.map("textDocument", R.textDocument) &&
+         O.map("previousResultId", R.previousResultId);
+}
+
 llvm::raw_ostream &operator<<(llvm::raw_ostream &O,
                               const DocumentHighlight &V) {
   O << V.range;
@@ -1126,18 +1191,19 @@ llvm::raw_ostream &operator<<(llvm::raw_ostream &OS, OffsetEncoding Enc) {
   return OS << toString(Enc);
 }
 
-bool operator==(const SemanticHighlightingInformation &Lhs,
-                const SemanticHighlightingInformation &Rhs) {
+bool operator==(const TheiaSemanticHighlightingInformation &Lhs,
+                const TheiaSemanticHighlightingInformation &Rhs) {
   return Lhs.Line == Rhs.Line && Lhs.Tokens == Rhs.Tokens;
 }
 
-llvm::json::Value toJSON(const SemanticHighlightingInformation &Highlighting) {
+llvm::json::Value
+toJSON(const TheiaSemanticHighlightingInformation &Highlighting) {
   return llvm::json::Object{{"line", Highlighting.Line},
                             {"tokens", Highlighting.Tokens},
                             {"isInactive", Highlighting.IsInactive}};
 }
 
-llvm::json::Value toJSON(const SemanticHighlightingParams &Highlighting) {
+llvm::json::Value toJSON(const TheiaSemanticHighlightingParams &Highlighting) {
   return llvm::json::Object{
       {"textDocument", Highlighting.TextDocument},
       {"lines", std::move(Highlighting.Lines)},

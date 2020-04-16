@@ -70,6 +70,11 @@ enum ActionType {
   GenArmMveBuiltinSema,
   GenArmMveBuiltinCG,
   GenArmMveBuiltinAliases,
+  GenArmSveHeader,
+  GenArmSveBuiltins,
+  GenArmSveBuiltinCG,
+  GenArmSveTypeFlags,
+  GenArmSveRangeChecks,
   GenArmCdeHeader,
   GenArmCdeBuiltinDef,
   GenArmCdeBuiltinSema,
@@ -185,6 +190,16 @@ cl::opt<ActionType> Action(
                    "Generate ARM NEON sema support for clang"),
         clEnumValN(GenArmNeonTest, "gen-arm-neon-test",
                    "Generate ARM NEON tests for clang"),
+        clEnumValN(GenArmSveHeader, "gen-arm-sve-header",
+                   "Generate arm_sve.h for clang"),
+        clEnumValN(GenArmSveBuiltins, "gen-arm-sve-builtins",
+                   "Generate arm_sve_builtins.inc for clang"),
+        clEnumValN(GenArmSveBuiltinCG, "gen-arm-sve-builtin-codegen",
+                   "Generate arm_sve_builtin_cg_map.inc for clang"),
+        clEnumValN(GenArmSveTypeFlags, "gen-arm-sve-typeflags",
+                   "Generate arm_sve_typeflags.inc for clang"),
+        clEnumValN(GenArmSveRangeChecks, "gen-arm-sve-sema-rangechecks",
+                   "Generate arm_sve_sema_rangechecks.inc for clang"),
         clEnumValN(GenArmMveHeader, "gen-arm-mve-header",
                    "Generate arm_mve.h for clang"),
         clEnumValN(GenArmMveBuiltinDef, "gen-arm-mve-builtin-def",
@@ -365,6 +380,21 @@ bool ClangTableGenMain(raw_ostream &OS, RecordKeeper &Records) {
     break;
   case GenArmMveBuiltinAliases:
     EmitMveBuiltinAliases(Records, OS);
+    break;
+  case GenArmSveHeader:
+    EmitSveHeader(Records, OS);
+    break;
+  case GenArmSveBuiltins:
+    EmitSveBuiltins(Records, OS);
+    break;
+  case GenArmSveBuiltinCG:
+    EmitSveBuiltinCG(Records, OS);
+    break;
+  case GenArmSveTypeFlags:
+    EmitSveTypeFlags(Records, OS);
+    break;
+  case GenArmSveRangeChecks:
+    EmitSveRangeChecks(Records, OS);
     break;
   case GenArmCdeHeader:
     EmitCdeHeader(Records, OS);

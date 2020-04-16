@@ -11,7 +11,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "mlir/Dialect/Linalg/Utils/Utils.h"
-#include "mlir/Dialect/AffineOps/AffineOps.h"
+#include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/Linalg/IR/LinalgOps.h"
 #include "mlir/Dialect/Linalg/IR/LinalgTypes.h"
 #include "mlir/Dialect/LoopOps/LoopOps.h"
@@ -21,7 +21,6 @@
 #include "mlir/IR/Matchers.h"
 #include "mlir/IR/OpImplementation.h"
 #include "mlir/Pass/Pass.h"
-#include "mlir/Support/STLExtras.h"
 #include "mlir/Transforms/FoldUtils.h"
 
 using namespace mlir;
@@ -31,7 +30,7 @@ using namespace mlir::loop;
 Optional<RegionMatcher::BinaryOpKind>
 RegionMatcher::matchAsScalarBinaryOp(GenericOp op) {
   auto &region = op.region();
-  if (!has_single_element(region))
+  if (!llvm::hasSingleElement(region))
     return llvm::None;
 
   Block &block = region.front();
@@ -41,7 +40,7 @@ RegionMatcher::matchAsScalarBinaryOp(GenericOp op) {
     return llvm::None;
 
   auto &ops = block.getOperations();
-  if (!has_single_element(block.without_terminator()))
+  if (!llvm::hasSingleElement(block.without_terminator()))
     return llvm::None;
 
   using mlir::matchers::m_Val;

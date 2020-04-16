@@ -387,9 +387,7 @@ HexagonTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   MachineFrameInfo &MFI = MF.getFrameInfo();
   auto PtrVT = getPointerTy(MF.getDataLayout());
 
-  unsigned NumParams = CLI.CS.getInstruction()
-                        ? CLI.CS.getFunctionType()->getNumParams()
-                        : 0;
+  unsigned NumParams = CLI.CB ? CLI.CB->getFunctionType()->getNumParams() : 0;
   if (GlobalAddressSDNode *GAN = dyn_cast<GlobalAddressSDNode>(Callee))
     Callee = DAG.getTargetGlobalAddress(GAN->getGlobal(), dl, MVT::i32);
 
@@ -432,7 +430,7 @@ HexagonTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
       DAG.getCopyFromReg(Chain, dl, HRI.getStackRegister(), PtrVT);
 
   bool NeedsArgAlign = false;
-  unsigned LargestAlignSeen = 0;
+  Align LargestAlignSeen;
   // Walk the register/memloc assignments, inserting copies/loads.
   for (unsigned i = 0, e = ArgLocs.size(); i != e; ++i) {
     CCValAssign &VA = ArgLocs[i];
@@ -469,8 +467,8 @@ HexagonTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
                                         StackPtr.getValueType());
       MemAddr = DAG.getNode(ISD::ADD, dl, MVT::i32, StackPtr, MemAddr);
       if (ArgAlign)
-        LargestAlignSeen = std::max(LargestAlignSeen,
-                             (unsigned)VA.getLocVT().getStoreSizeInBits() >> 3);
+        LargestAlignSeen = std::max(
+            LargestAlignSeen, Align(VA.getLocVT().getStoreSizeInBits() / 8));
       if (Flags.isByVal()) {
         // The argument is a struct passed by value. According to LLVM, "Arg"
         // is a pointer.
@@ -493,7 +491,7 @@ HexagonTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
 
   if (NeedsArgAlign && Subtarget.hasV60Ops()) {
     LLVM_DEBUG(dbgs() << "Function needs byte stack align due to call args\n");
-    unsigned VecAlign = HRI.getSpillAlignment(Hexagon::HvxVRRegClass);
+    Align VecAlign(HRI.getSpillAlignment(Hexagon::HvxVRRegClass));
     LargestAlignSeen = std::max(LargestAlignSeen, VecAlign);
     MFI.ensureMaxAlignment(LargestAlignSeen);
   }
@@ -729,7 +727,7 @@ HexagonTargetLowering::LowerDYNAMIC_STACKALLOC(SDValue Op,
   auto &HFI = *Subtarget.getFrameLowering();
   // "Zero" means natural stack alignment.
   if (A == 0)
-    A = HFI.getStackAlignment();
+    A = HFI.getStackAlign().value();
 
   LLVM_DEBUG({
     dbgs () << __func__ << " Align: " << A << " Size: ";
@@ -1087,7 +1085,7 @@ HexagonTargetLowering::LowerConstantPool(SDValue Op, SelectionDAG &DAG) const {
   Constant *CVal = nullptr;
   bool isVTi1Type = false;
   if (auto *CV = dyn_cast<ConstantVector>(CPN->getConstVal())) {
-    if (CV->getType()->getVectorElementType()->isIntegerTy(1)) {
+    if (cast<VectorType>(CV->getType())->getElementType()->isIntegerTy(1)) {
       IRBuilder<> IRB(CV->getContext());
       SmallVector<Constant*, 128> NewConst;
       unsigned VecLen = CV->getNumOperands();
@@ -2909,10 +2907,10 @@ HexagonTargetLowering::LowerUnalignedLoad(SDValue Op, SelectionDAG &DAG)
   MachineMemOperand *WideMMO = nullptr;
   if (MachineMemOperand *MMO = LN->getMemOperand()) {
     MachineFunction &MF = DAG.getMachineFunction();
-    WideMMO = MF.getMachineMemOperand(MMO->getPointerInfo(), MMO->getFlags(),
-                    2*LoadLen, LoadLen, MMO->getAAInfo(), MMO->getRanges(),
-                    MMO->getSyncScopeID(), MMO->getOrdering(),
-                    MMO->getFailureOrdering());
+    WideMMO = MF.getMachineMemOperand(
+        MMO->getPointerInfo(), MMO->getFlags(), 2 * LoadLen, Align(LoadLen),
+        MMO->getAAInfo(), MMO->getRanges(), MMO->getSyncScopeID(),
+        MMO->getOrdering(), MMO->getFailureOrdering());
   }
 
   SDValue Load0 = DAG.getLoad(LoadTy, dl, Chain, Base0, WideMMO);

@@ -650,7 +650,10 @@ namespace serialization {
       PP_CONDITIONAL_STACK = 62,
 
       /// A table of skipped ranges within the preprocessing record.
-      PPD_SKIPPED_RANGES = 63
+      PPD_SKIPPED_RANGES = 63,
+
+      /// Record code for the Decls to be checked for deferred diags.
+      DECLS_TO_CHECK_FOR_DEFERRED_DIAGS = 64,
     };
 
     /// Record types used within a source manager block.
@@ -1013,6 +1016,12 @@ namespace serialization {
       /// \brief The '_Sat unsigned long _Fract' type
       PREDEF_TYPE_SAT_ULONG_FRACT_ID = 69,
 
+      /// The placeholder type for OpenMP array shaping operation.
+      PREDEF_TYPE_OMP_ARRAY_SHAPING = 70,
+
+      /// The placeholder type for OpenMP iterator expression.
+      PREDEF_TYPE_OMP_ITERATOR = 71,
+
       /// OpenCL image types with auto numeration
 #define IMAGE_TYPE(ImgType, Id, SingletonId, Access, Suffix) \
       PREDEF_TYPE_##Id##_ID,
@@ -1125,27 +1134,30 @@ namespace serialization {
       /// The internal '__builtin_ms_va_list' typedef.
       PREDEF_DECL_BUILTIN_MS_VA_LIST_ID = 11,
 
+      /// The predeclared '_GUID' struct.
+      PREDEF_DECL_BUILTIN_MS_GUID_ID = 12,
+
       /// The extern "C" context.
-      PREDEF_DECL_EXTERN_C_CONTEXT_ID = 12,
+      PREDEF_DECL_EXTERN_C_CONTEXT_ID = 13,
 
       /// The internal '__make_integer_seq' template.
-      PREDEF_DECL_MAKE_INTEGER_SEQ_ID = 13,
+      PREDEF_DECL_MAKE_INTEGER_SEQ_ID = 14,
 
       /// The internal '__NSConstantString' typedef.
-      PREDEF_DECL_CF_CONSTANT_STRING_ID = 14,
+      PREDEF_DECL_CF_CONSTANT_STRING_ID = 15,
 
       /// The internal '__NSConstantString' tag type.
-      PREDEF_DECL_CF_CONSTANT_STRING_TAG_ID = 15,
+      PREDEF_DECL_CF_CONSTANT_STRING_TAG_ID = 16,
 
       /// The internal '__type_pack_element' template.
-      PREDEF_DECL_TYPE_PACK_ELEMENT_ID = 16,
+      PREDEF_DECL_TYPE_PACK_ELEMENT_ID = 17,
     };
 
     /// The number of declaration IDs that are predefined.
     ///
     /// For more information about predefined declarations, see the
     /// \c PredefinedDeclIDs type and the PREDEF_DECL_*_ID constants.
-    const unsigned int NUM_PREDEF_DECL_IDS = 17;
+    const unsigned int NUM_PREDEF_DECL_IDS = 18;
 
     /// Record of updates for a declaration that was modified after
     /// being deserialized. This can occur within DECLTYPES_BLOCK_ID.
@@ -1218,6 +1230,9 @@ namespace serialization {
 
       /// A MSPropertyDecl record.
       DECL_MS_PROPERTY,
+
+      /// A MSGuidDecl record.
+      DECL_MS_GUID,
 
       /// A VarDecl record.
       DECL_VAR,
@@ -1631,6 +1646,9 @@ namespace serialization {
       /// An AtomicExpr record.
       EXPR_ATOMIC,
 
+      /// A RecoveryExpr record.
+      EXPR_RECOVERY,
+
       // Objective-C
 
       /// An ObjCStringLiteral record.
@@ -1826,6 +1844,7 @@ namespace serialization {
       STMT_OMP_TASKWAIT_DIRECTIVE,
       STMT_OMP_FLUSH_DIRECTIVE,
       STMT_OMP_DEPOBJ_DIRECTIVE,
+      STMT_OMP_SCAN_DIRECTIVE,
       STMT_OMP_ORDERED_DIRECTIVE,
       STMT_OMP_ATOMIC_DIRECTIVE,
       STMT_OMP_TARGET_DIRECTIVE,
@@ -1861,6 +1880,8 @@ namespace serialization {
       STMT_OMP_TARGET_TEAMS_DISTRIBUTE_PARALLEL_FOR_SIMD_DIRECTIVE,
       STMT_OMP_TARGET_TEAMS_DISTRIBUTE_SIMD_DIRECTIVE,
       EXPR_OMP_ARRAY_SECTION,
+      EXPR_OMP_ARRAY_SHAPING,
+      EXPR_OMP_ITERATOR,
 
       // ARC
       EXPR_OBJC_BRIDGED_CAST,     // ObjCBridgedCastExpr
@@ -1872,6 +1893,9 @@ namespace serialization {
       EXPR_COAWAIT,
       EXPR_COYIELD,
       EXPR_DEPENDENT_COAWAIT,
+
+      // FixedPointLiteral
+      EXPR_FIXEDPOINT_LITERAL,
     };
 
     /// The kinds of designators that can occur in a

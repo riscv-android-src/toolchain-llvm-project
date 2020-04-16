@@ -207,12 +207,16 @@ class VectorType;
       VMULLu,       // ...unsigned
 
       // MVE reductions
-      VADDVs,
-      VADDVu,
-      VADDLVs,
-      VADDLVu,
-      VADDLVAs,
-      VADDLVAu,
+      VADDVs,       // sign- or zero-extend the elements of a vector to i32,
+      VADDVu,       //   add them all together, and return an i32 of their sum
+      VADDLVs,      // sign- or zero-extend elements to i64 and sum, returning
+      VADDLVu,      //   the low and high 32-bit halves of the sum
+      VADDLVAs,     // same as VADDLV[su] but also add an input accumulator
+      VADDLVAu,     //   provided as low and high halves
+      VADDLVps,     // same as VADDLVs but with a v4i1 predicate mask
+      VADDLVpu,     // same as VADDLVu but with a v4i1 predicate mask
+      VADDLVAps,    // same as VADDLVps but with a v4i1 predicate mask
+      VADDLVApu,    // same as VADDLVpu but with a v4i1 predicate mask
       VMLAVs,
       VMLAVu,
       VMLALVs,
@@ -352,6 +356,7 @@ class VectorType;
     SDValue PerformCMOVCombine(SDNode *N, SelectionDAG &DAG) const;
     SDValue PerformBRCONDCombine(SDNode *N, SelectionDAG &DAG) const;
     SDValue PerformCMOVToBFICombine(SDNode *N, SelectionDAG &DAG) const;
+    SDValue PerformIntrinsicCombine(SDNode *N, DAGCombinerInfo &DCI) const;
     SDValue PerformDAGCombine(SDNode *N, DAGCombinerInfo &DCI) const override;
 
     bool SimplifyDemandedBitsForTargetNode(SDValue Op,
@@ -558,12 +563,12 @@ class VectorType;
 
     /// If a physical register, this returns the register that receives the
     /// exception address on entry to an EH pad.
-    unsigned
+    Register
     getExceptionPointerRegister(const Constant *PersonalityFn) const override;
 
     /// If a physical register, this returns the register that receives the
     /// exception typeid on entry to a landing pad.
-    unsigned
+    Register
     getExceptionSelectorRegister(const Constant *PersonalityFn) const override;
 
     Instruction *makeDMB(IRBuilder<> &Builder, ARM_MB::MemBOpt Domain) const;

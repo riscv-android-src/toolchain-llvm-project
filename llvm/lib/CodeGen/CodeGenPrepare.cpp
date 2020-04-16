@@ -43,7 +43,6 @@
 #include "llvm/IR/Argument.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/BasicBlock.h"
-#include "llvm/IR/CallSite.h"
 #include "llvm/IR/Constant.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DataLayout.h"
@@ -494,6 +493,9 @@ bool CodeGenPrepare::runOnFunction(Function &F) {
       MadeChange |= mergeSExts(F);
     if (!LargeOffsetGEPMap.empty())
       MadeChange |= splitLargeGEPOffsets();
+
+    if (MadeChange)
+      eliminateFallThrough(F);
 
     // Really free removed instructions during promotion.
     for (Instruction *I : RemovedInsts)
@@ -1964,6 +1966,11 @@ bool CodeGenPrepare::optimizeCallInst(CallInst *CI, bool &ModifiedDT) {
   if (II) {
     switch (II->getIntrinsicID()) {
     default: break;
+    case Intrinsic::assume: {
+      II->eraseFromParent();
+      return true;
+    }
+
     case Intrinsic::experimental_widenable_condition: {
       // Give up on future widening oppurtunties so that we can fold away dead
       // paths and merge blocks before going into block-local instruction
@@ -4534,8 +4541,7 @@ static bool IsOperandAMemoryOperand(CallInst *CI, InlineAsm *IA, Value *OpVal,
                                     const TargetRegisterInfo &TRI) {
   const Function *F = CI->getFunction();
   TargetLowering::AsmOperandInfoVector TargetConstraints =
-      TLI.ParseConstraints(F->getParent()->getDataLayout(), &TRI,
-                            ImmutableCallSite(CI));
+      TLI.ParseConstraints(F->getParent()->getDataLayout(), &TRI, *CI);
 
   for (unsigned i = 0, e = TargetConstraints.size(); i != e; ++i) {
     TargetLowering::AsmOperandInfo &OpInfo = TargetConstraints[i];
@@ -5184,7 +5190,7 @@ bool CodeGenPrepare::optimizeInlineAsmInst(CallInst *CS) {
   const TargetRegisterInfo *TRI =
       TM->getSubtargetImpl(*CS->getFunction())->getRegisterInfo();
   TargetLowering::AsmOperandInfoVector TargetConstraints =
-      TLI->ParseConstraints(*DL, TRI, CS);
+      TLI->ParseConstraints(*DL, TRI, *CS);
   unsigned ArgNo = 0;
   for (unsigned i = 0, e = TargetConstraints.size(); i != e; ++i) {
     TargetLowering::AsmOperandInfo &OpInfo = TargetConstraints[i];
@@ -6131,7 +6137,8 @@ bool CodeGenPrepare::optimizeSelectInst(SelectInst *SI) {
   // Into:
   //    start:
   //       %cmp = cmp uge i32 %a, %b
-  //       br i1 %cmp, label %select.true, label %select.false
+  //       %cmp.frozen = freeze %cmp
+  //       br i1 %cmp.frozen, label %select.true, label %select.false
   //    select.true:
   //       br label %select.end
   //    select.false:
@@ -6139,6 +6146,7 @@ bool CodeGenPrepare::optimizeSelectInst(SelectInst *SI) {
   //    select.end:
   //       %sel = phi i32 [ %c, %select.true ], [ %d, %select.false ]
   //
+  // %cmp should be frozen, otherwise it may introduce undefined behavior.
   // In addition, we may sink instructions that produce %c or %d from
   // the entry block into the destination(s) of the new branch.
   // If the true or false blocks do not contain a sunken instruction, that
@@ -6217,7 +6225,9 @@ bool CodeGenPrepare::optimizeSelectInst(SelectInst *SI) {
     TT = TrueBlock;
     FT = FalseBlock;
   }
-  IRBuilder<>(SI).CreateCondBr(SI->getCondition(), TT, FT, SI);
+  IRBuilder<> IB(SI);
+  auto CondFr = IB.CreateFreeze(SI->getCondition(), SI->getName() + ".frozen");
+  IB.CreateCondBr(CondFr, TT, FT, SI);
 
   SmallPtrSet<const Instruction *, 2> INS;
   INS.insert(ASI.begin(), ASI.end());
@@ -6245,7 +6255,7 @@ bool CodeGenPrepare::optimizeSelectInst(SelectInst *SI) {
 }
 
 static bool isBroadcastShuffle(ShuffleVectorInst *SVI) {
-  SmallVector<int, 16> Mask(SVI->getShuffleMask());
+  ArrayRef<int> Mask(SVI->getShuffleMask());
   int SplatElem = -1;
   for (unsigned i = 0; i < Mask.size(); ++i) {
     if (SplatElem != -1 && Mask[i] != -1 && Mask[i] != SplatElem)
@@ -6295,7 +6305,7 @@ bool CodeGenPrepare::optimizeShuffleVectorInst(ShuffleVectorInst *SVI) {
       assert(InsertPt != UserBB->end());
       InsertedShuffle =
           new ShuffleVectorInst(SVI->getOperand(0), SVI->getOperand(1),
-                                SVI->getOperand(2), "", &*InsertPt);
+                                SVI->getShuffleMask(), "", &*InsertPt);
       InsertedShuffle->setDebugLoc(SVI->getDebugLoc());
     }
 
@@ -6565,7 +6575,7 @@ class VectorPromoteHelper {
         UseSplat = true;
     }
 
-    ElementCount EC = getTransitionType()->getVectorElementCount();
+    ElementCount EC = cast<VectorType>(getTransitionType())->getElementCount();
     if (UseSplat)
       return ConstantVector::getSplat(EC, Val);
 
@@ -6828,7 +6838,7 @@ static bool splitMergedValStore(StoreInst &SI, const DataLayout &DL,
   // whereas scalable vectors would have to be shifted by
   // <2log(vscale) + number of bits> in order to store the
   // low/high parts. Bailing out for now.
-  if (StoreType->isVectorTy() && StoreType->getVectorIsScalable())
+  if (StoreType->isVectorTy() && cast<VectorType>(StoreType)->isScalable())
     return false;
 
   if (!DL.typeSizeEqualsStoreSize(StoreType) ||
@@ -7196,7 +7206,7 @@ bool CodeGenPrepare::optimizeInst(Instruction *I, bool &ModifiedDT) {
   }
 
   if (FreezeInst *FI = dyn_cast<FreezeInst>(I)) {
-    // br(freeze(icmp a, const)) -> br(icmp (freeze a), const)
+    // freeze(icmp a, const)) -> icmp (freeze a), const
     // This helps generate efficient conditional jumps.
     Instruction *CmpI = nullptr;
     if (ICmpInst *II = dyn_cast<ICmpInst>(FI->getOperand(0)))

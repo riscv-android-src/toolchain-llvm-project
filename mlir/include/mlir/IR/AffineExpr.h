@@ -187,7 +187,7 @@ public:
 class AffineConstantExpr : public AffineExpr {
 public:
   using ImplType = detail::AffineConstantExprStorage;
-  /* implicit */ AffineConstantExpr(AffineExpr::ImplType *ptr);
+  /* implicit */ AffineConstantExpr(AffineExpr::ImplType *ptr = nullptr);
   int64_t getValue() const;
 };
 
@@ -219,7 +219,7 @@ AffineExpr getAffineExprFromFlatForm(ArrayRef<int64_t> flatExprs,
                                      ArrayRef<AffineExpr> localExprs,
                                      MLIRContext *context);
 
-raw_ostream &operator<<(raw_ostream &os, AffineExpr &expr);
+raw_ostream &operator<<(raw_ostream &os, AffineExpr expr);
 
 template <typename U> bool AffineExpr::isa() const {
   if (std::is_same<U, AffineBinaryOpExpr>::value)

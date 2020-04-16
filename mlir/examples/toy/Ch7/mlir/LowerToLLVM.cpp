@@ -19,7 +19,7 @@
 #include "mlir/Conversion/LoopToStandard/ConvertLoopToStandard.h"
 #include "mlir/Conversion/StandardToLLVM/ConvertStandardToLLVM.h"
 #include "mlir/Conversion/StandardToLLVM/ConvertStandardToLLVMPass.h"
-#include "mlir/Dialect/AffineOps/AffineOps.h"
+#include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/LoopOps/LoopOps.h"
 #include "mlir/Dialect/StandardOps/IR/Ops.h"
@@ -41,7 +41,7 @@ public:
   explicit PrintOpLowering(MLIRContext *context)
       : ConversionPattern(toy::PrintOp::getOperationName(), 1, context) {}
 
-  PatternMatchResult
+  LogicalResult
   matchAndRewrite(Operation *op, ArrayRef<Value> operands,
                   ConversionPatternRewriter &rewriter) const override {
     auto memRefType = (*op->operand_type_begin()).cast<MemRefType>();
@@ -91,7 +91,7 @@ public:
 
     // Notify the rewriter that this operation has been removed.
     rewriter.eraseOp(op);
-    return matchSuccess();
+    return success();
   }
 
 private:
@@ -153,12 +153,13 @@ private:
 //===----------------------------------------------------------------------===//
 
 namespace {
-struct ToyToLLVMLoweringPass : public ModulePass<ToyToLLVMLoweringPass> {
-  void runOnModule() final;
+struct ToyToLLVMLoweringPass
+    : public PassWrapper<ToyToLLVMLoweringPass, OperationPass<ModuleOp>> {
+  void runOnOperation() final;
 };
 } // end anonymous namespace
 
-void ToyToLLVMLoweringPass::runOnModule() {
+void ToyToLLVMLoweringPass::runOnOperation() {
   // The first thing to define is the conversion target. This will define the
   // final target for this lowering. For this lowering, we are only targeting
   // the LLVM dialect.
@@ -166,7 +167,7 @@ void ToyToLLVMLoweringPass::runOnModule() {
   target.addLegalOp<ModuleOp, ModuleTerminatorOp>();
 
   // During this lowering, we will also be lowering the MemRef types, that are
-  // currently being operated on, to a representation in LLVM. Do perform this
+  // currently being operated on, to a representation in LLVM. To perform this
   // conversion we use a TypeConverter as part of the lowering. This converter
   // details how one type maps to another. This is necessary now that we will be
   // doing more complicated lowerings, involving loop region arguments.
@@ -191,7 +192,7 @@ void ToyToLLVMLoweringPass::runOnModule() {
 
   // We want to completely lower to LLVM, so we use a `FullConversion`. This
   // ensures that only legal operations will remain after the conversion.
-  auto module = getModule();
+  auto module = getOperation();
   if (failed(applyFullConversion(module, target, patterns, &typeConverter)))
     signalPassFailure();
 }

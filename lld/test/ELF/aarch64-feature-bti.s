@@ -9,7 +9,7 @@
 ## field.
 
 # RUN: ld.lld %tno.o %t3.o --shared -o %tno.so
-# RUN: llvm-objdump -d -mattr=+bti --no-show-raw-insn %tno.so | FileCheck --check-prefix=NOBTI %s
+# RUN: llvm-objdump -d --mattr=+bti --no-show-raw-insn %tno.so | FileCheck --check-prefix=NOBTI %s
 # RUN: llvm-readelf -x .got.plt %tno.so | FileCheck --check-prefix SOGOTPLT %s
 # RUN: llvm-readelf --dynamic-table %tno.so | FileCheck --check-prefix NOBTIDYN %s
 
@@ -17,7 +17,7 @@
 # NOBTIDYN-NOT:   0x0000000070000003 (AARCH64_PAC_PLT)
 
 # NOBTI: 00000000000102b8 <func2>:
-# NOBTI-NEXT:    102b8: bl      #56 <func3@plt>
+# NOBTI-NEXT:    102b8: bl      0x102f0 <func3@plt>
 # NOBTI-NEXT:    102bc: ret
 # NOBTI: Disassembly of section .plt:
 # NOBTI: 00000000000102d0 <.plt>:
@@ -46,7 +46,7 @@
 
 # RUN: ld.lld %t1.o %t3.o --shared --soname=t.so -o %t.so
 # RUN: llvm-readelf -n %t.so | FileCheck --check-prefix BTIPROP %s
-# RUN: llvm-objdump -d -mattr=+bti --no-show-raw-insn %t.so | FileCheck --check-prefix BTISO %s
+# RUN: llvm-objdump -d --mattr=+bti --no-show-raw-insn %t.so | FileCheck --check-prefix BTISO %s
 # RUN: llvm-readelf -x .got.plt %t.so | FileCheck --check-prefix SOGOTPLT2 %s
 # RUN: llvm-readelf --dynamic-table %t.so | FileCheck --check-prefix BTIDYN %s
 
@@ -56,7 +56,7 @@
 # BTIDYN-NOT:  0x0000000070000003 (AARCH64_PAC_PLT)
 
 # BTISO: 0000000000010348 <func2>:
-# BTISO-NEXT:    10348: bl      #56 <func3@plt>
+# BTISO-NEXT:    10348: bl      0x10380 <func3@plt>
 # BTISO-NEXT:           ret
 # BTISO: 0000000000010350 <func3>:
 # BTISO-NEXT:    10350: ret
@@ -88,11 +88,11 @@
 
 # RUN: ld.lld %t.o %t.so %t2.so -o %t.exe
 # RUN: llvm-readelf --dynamic-table -n %t.exe | FileCheck --check-prefix=BTIPROP %s
-# RUN: llvm-objdump -d -mattr=+bti --no-show-raw-insn %t.exe | FileCheck --check-prefix=EXECBTI %s
+# RUN: llvm-objdump -d --mattr=+bti --no-show-raw-insn %t.exe | FileCheck --check-prefix=EXECBTI %s
 
 # EXECBTI: Disassembly of section .text:
 # EXECBTI: 0000000000210348 <func1>:
-# EXECBTI-NEXT:   210348: bl    #40 <func2@plt>
+# EXECBTI-NEXT:   210348: bl    0x210370 <func2@plt>
 # EXECBTI-NEXT:           ret
 # EXECBTI: Disassembly of section .plt:
 # EXECBTI: 0000000000210350 <.plt>:
@@ -116,11 +116,11 @@
 # RUN: ld.lld --pie %t.o %t.so %t2.so -o %tpie.exe
 # RUN: llvm-readelf -n %tpie.exe | FileCheck --check-prefix=BTIPROP %s
 # RUN: llvm-readelf --dynamic-table -n %tpie.exe | FileCheck --check-prefix=BTIPROP %s
-# RUN: llvm-objdump -d -mattr=+bti --no-show-raw-insn %tpie.exe | FileCheck --check-prefix=PIE %s
+# RUN: llvm-objdump -d --mattr=+bti --no-show-raw-insn %tpie.exe | FileCheck --check-prefix=PIE %s
 
 # PIE: Disassembly of section .text:
 # PIE: 0000000000010348 <func1>:
-# PIE-NEXT:    10348: bl     #40 <func2@plt>
+# PIE-NEXT:    10348: bl     0x10370 <func2@plt>
 # PIE-NEXT:           ret
 # PIE: Disassembly of section .plt:
 # PIE: 0000000000010350 <.plt>:
@@ -145,11 +145,11 @@
 
 # RUN: ld.lld %t.o %t2.o %t.so -o %tnobti.exe
 # RUN: llvm-readelf --dynamic-table %tnobti.exe | FileCheck --check-prefix NOBTIDYN %s
-# RUN: llvm-objdump -d -mattr=+bti --no-show-raw-insn %tnobti.exe | FileCheck --check-prefix=NOEX %s
+# RUN: llvm-objdump -d --mattr=+bti --no-show-raw-insn %tnobti.exe | FileCheck --check-prefix=NOEX %s
 
 # NOEX: Disassembly of section .text:
 # NOEX: 00000000002102e0 <func1>:
-# NOEX-NEXT:   2102e0: bl      #48 <func2@plt>
+# NOEX-NEXT:   2102e0: bl      0x210310 <func2@plt>
 # NOEX-NEXT:           ret
 # NOEX: 00000000002102e8 <func3>:
 # NOEX-NEXT:   2102e8: ret
@@ -179,11 +179,11 @@
 
 # RUN: llvm-readelf -n %tforcebti.exe | FileCheck --check-prefix=BTIPROP %s
 # RUN: llvm-readelf --dynamic-table %tforcebti.exe | FileCheck --check-prefix BTIDYN %s
-# RUN: llvm-objdump -d -mattr=+bti --no-show-raw-insn %tforcebti.exe | FileCheck --check-prefix=FORCE %s
+# RUN: llvm-objdump -d --mattr=+bti --no-show-raw-insn %tforcebti.exe | FileCheck --check-prefix=FORCE %s
 
 # FORCE: Disassembly of section .text:
 # FORCE: 0000000000210370 <func1>:
-# FORCE-NEXT:   210370: bl      #48 <func2@plt>
+# FORCE-NEXT:   210370: bl      0x2103a0 <func2@plt>
 # FORCE-NEXT:           ret
 # FORCE: 0000000000210378 <func3>:
 # FORCE-NEXT:   210378: ret

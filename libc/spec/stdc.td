@@ -16,6 +16,12 @@ def StdC : StandardSpec<"stdc"> {
 
   PtrType IntPtr = PtrType<IntType>;
 
+  NamedType SigHandlerT = NamedType<"__sighandler_t">;
+
+  NamedType FILE = NamedType<"FILE">;
+  PtrType FILEPtr = PtrType<FILE>;
+  RestrictedPtrType FILERestrictedPtr = RestrictedPtrType<FILE>;
+
   HeaderSpec Assert = HeaderSpec<
       "assert.h",
       [
@@ -158,15 +164,28 @@ def StdC : StandardSpec<"stdc"> {
 
   HeaderSpec Math = HeaderSpec<
       "math.h",
-      [], // Macros
+      [
+          Macro<"MATH_ERRNO">,
+          Macro<"MATH_ERREXCEPT">,
+          Macro<"math_errhandling">,
+
+          Macro<"INFINITY">,
+          Macro<"NAN">,
+
+          Macro<"isfinite">,
+          Macro<"isinf">,
+          Macro<"isnan">,
+      ],
       [
           NamedType<"float_t">,
           NamedType<"double_t">,
       ],
       [], // Enumerations
       [
-          FunctionSpec<"acos", RetValSpec<DoubleType>, [ArgSpec<DoubleType>]>,
-          FunctionSpec<"acosl", RetValSpec<LongDoubleType>, [ArgSpec<LongDoubleType>]>,
+          FunctionSpec<"cosf", RetValSpec<FloatType>, [ArgSpec<FloatType>]>,
+          FunctionSpec<"sinf", RetValSpec<FloatType>, [ArgSpec<FloatType>]>,
+
+          FunctionSpec<"round", RetValSpec<DoubleType>, [ArgSpec<DoubleType>]>,
       ]
   >;
 
@@ -175,16 +194,17 @@ def StdC : StandardSpec<"stdc"> {
       [], // Macros
       [ // Types
           SizeTType,
+          FILE,
       ],
       [], // Enumerations
       [
           FunctionSpec<
-              "snprintf",
-              RetValSpec<IntType>,
-              [ArgSpec<CharPtr>,
-               ArgSpec<SizeTType>,
-               ArgSpec<ConstCharRestrictedPtr>,
-               ArgSpec<VarArgType>]
+              "fwrite",
+              RetValSpec<SizeTType>,
+              [ArgSpec<ConstVoidRestrictedPtr>,
+              ArgSpec<SizeTType>,
+              ArgSpec<SizeTType>,
+              ArgSpec<FILERestrictedPtr>]
           >,
       ]
   >;
@@ -225,12 +245,17 @@ def StdC : StandardSpec<"stdc"> {
         Macro<"SIGTERM">
       ],
       [
-        NamedType<"sigset_t">,
         SizeTType,
+        SigHandlerT,
       ],
       [], // Enumerations
       [
         FunctionSpec<"raise", RetValSpec<IntType>, [ArgSpec<IntType>]>,
+        FunctionSpec<
+          "signal",
+          RetValSpec<SigHandlerT>,
+          [ArgSpec<IntType>, ArgSpec<SigHandlerT>]
+        >,
       ]
   >;
 

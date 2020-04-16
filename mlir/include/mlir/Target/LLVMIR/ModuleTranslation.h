@@ -15,6 +15,7 @@
 #define MLIR_TARGET_LLVMIR_MODULETRANSLATION_H
 
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
+#include "mlir/Dialect/LLVMIR/Transforms/LegalizeForExport.h"
 #include "mlir/IR/Block.h"
 #include "mlir/IR/Module.h"
 #include "mlir/IR/Value.h"
@@ -57,6 +58,8 @@ public:
     if (!llvmModule)
       return nullptr;
 
+    LLVM::ensureDistinctSuccessors(m);
+
     T translator(m, std::move(llvmModule));
     if (failed(translator.convertGlobals()))
       return nullptr;
@@ -80,6 +83,8 @@ protected:
 
   virtual LogicalResult convertOperation(Operation &op,
                                          llvm::IRBuilder<> &builder);
+  virtual LogicalResult convertOmpOperation(Operation &op,
+                                            llvm::IRBuilder<> &builder);
   static std::unique_ptr<llvm::Module> prepareLLVMModule(Operation *m);
 
   /// A helper to look up remapped operands in the value remapping table.
@@ -101,7 +106,6 @@ private:
   /// Original and translated module.
   Operation *mlirModule;
   std::unique_ptr<llvm::Module> llvmModule;
-
   /// A converter for translating debug information.
   std::unique_ptr<detail::DebugTranslation> debugTranslation;
 
@@ -109,6 +113,8 @@ private:
   std::unique_ptr<llvm::OpenMPIRBuilder> ompBuilder;
   /// Precomputed pointer to OpenMP dialect.
   const Dialect *ompDialect;
+  /// Pointer to the llvmDialect;
+  LLVMDialect *llvmDialect;
 
   /// Mappings between llvm.mlir.global definitions and corresponding globals.
   DenseMap<Operation *, llvm::GlobalValue *> globalsMapping;

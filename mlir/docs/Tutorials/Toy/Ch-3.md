@@ -86,7 +86,7 @@ struct SimplifyRedundantTranspose : public mlir::OpRewritePattern<TransposeOp> {
   /// This method is attempting to match a pattern and rewrite it. The rewriter
   /// argument is the orchestrator of the sequence of rewrites. It is expected
   /// to interact with it to perform any changes to the IR from here.
-  mlir::PatternMatchResult
+  mlir::LogicalResult
   matchAndRewrite(TransposeOp op,
                   mlir::PatternRewriter &rewriter) const override {
     // Look through the input of the current transpose.
@@ -96,11 +96,11 @@ struct SimplifyRedundantTranspose : public mlir::OpRewritePattern<TransposeOp> {
 
     // Input defined by another transpose? If not, no match.
     if (!transposeInputOp)
-      return matchFailure();
+      return failure();
 
     // Otherwise, we have a redundant transpose. Use the rewriter.
     rewriter.replaceOp(op, {transposeInputOp.getOperand()}, {transposeInputOp});
-    return matchSuccess();
+    return success();
   }
 };
 ```
@@ -187,7 +187,7 @@ def ReshapeReshapeOptPattern : Pat<(ReshapeOp(ReshapeOp $arg)),
 ```
 
 The automatically generated C++ code corresponding to each of the DRR patterns
-can be found under path/to/BUILD/projects/mlir/examples/toy/Ch3/ToyCombine.inc.
+can be found under `path/to/BUILD/tools/mlir/examples/toy/Ch3/ToyCombine.inc`.
 
 DRR also provides a method for adding argument constraints when the
 transformation is conditional on some properties of the arguments and results.

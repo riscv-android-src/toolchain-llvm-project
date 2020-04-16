@@ -61,6 +61,8 @@ void unused() {
 
 struct incomplete_struct *incomplete_ptr;
 
+typedef svint8_t sizeless_array[1]; // expected-error {{array has sizeless element type}}
+
 void func(int sel) {
   static svint8_t static_int8; // expected-error {{non-local variable with sizeless type 'svint8_t'}}
 
@@ -106,6 +108,9 @@ void func(int sel) {
 
   _Atomic svint8_t atomic_int8;      // expected-error {{_Atomic cannot be applied to sizeless type 'svint8_t'}}
   __restrict svint8_t restrict_int8; // expected-error {{requires a pointer or reference}}
+
+  svint8_t array_int8[1];          // expected-error {{array has sizeless element type}}
+  svint8_t array_int8_init[] = {}; // expected-error {{array has sizeless element type}}
 
   bool test_int8 = init_int8; // expected-error {{cannot initialize a variable of type 'bool' with an lvalue of type 'svint8_t'}}
 
@@ -153,10 +158,16 @@ void func(int sel) {
   dump(&volatile_int8);
   dump(&const_volatile_int8);
 
+  dump(&local_int8 + 1); // expected-error {{arithmetic on a pointer to sizeless type}}
+
   *&local_int8 = local_int8;
   *&const_int8 = local_int8; // expected-error {{read-only variable is not assignable}}
   *&volatile_int8 = local_int8;
   *&const_volatile_int8 = local_int8; // expected-error {{read-only variable is not assignable}}
+
+  global_int8_ptr[0] = local_int8;       // expected-error {{subscript of pointer to sizeless type 'svint8_t'}}
+  global_int8_ptr[1] = local_int8;       // expected-error {{subscript of pointer to sizeless type 'svint8_t'}}
+  global_int8_ptr = &global_int8_ptr[2]; // expected-error {{subscript of pointer to sizeless type 'svint8_t'}}
 
   overf(local_int8);
   overf(local_int16);
@@ -168,6 +179,16 @@ void func(int sel) {
   overf16(local_int16);
 
   varargs(1, local_int8, local_int16);
+
+  global_int8_ptr++;                 // expected-error {{arithmetic on a pointer to sizeless type}}
+  global_int8_ptr--;                 // expected-error {{arithmetic on a pointer to sizeless type}}
+  ++global_int8_ptr;                 // expected-error {{arithmetic on a pointer to sizeless type}}
+  --global_int8_ptr;                 // expected-error {{arithmetic on a pointer to sizeless type}}
+  global_int8_ptr + 1;               // expected-error {{arithmetic on a pointer to sizeless type}}
+  global_int8_ptr - 1;               // expected-error {{arithmetic on a pointer to sizeless type}}
+  global_int8_ptr += 1;              // expected-error {{arithmetic on a pointer to sizeless type}}
+  global_int8_ptr -= 1;              // expected-error {{arithmetic on a pointer to sizeless type}}
+  global_int8_ptr - global_int8_ptr; // expected-error {{arithmetic on a pointer to sizeless type}}
 
   +init_int8;       // expected-error {{invalid argument type 'svint8_t'}}
   ++init_int8;      // expected-error {{cannot increment value of type 'svint8_t'}}
@@ -245,9 +266,24 @@ int vararg_receiver(int count, svint8_t first, ...) {
   __builtin_va_list va;
 
   __builtin_va_start(va, first);
+  __builtin_va_arg(va, svint8_t);
   __builtin_va_end(va);
   return count;
 }
+
+struct sized_struct {
+  int f1;
+  svint8_t f2;     // expected-error {{field has sizeless type 'svint8_t'}}
+  svint8_t f3 : 2; // expected-error {{field has sizeless type 'svint8_t'}}
+  svint8_t : 3;    // expected-error {{field has sizeless type 'svint8_t'}}
+};
+
+union sized_union {
+  int f1;
+  svint8_t f2;     // expected-error {{field has sizeless type 'svint8_t'}}
+  svint8_t f3 : 2; // expected-error {{field has sizeless type 'svint8_t'}}
+  svint8_t : 3;    // expected-error {{field has sizeless type 'svint8_t'}}
+};
 
 void pass_int8_ref(svint8_t &); // expected-note {{not viable}}
 
@@ -257,11 +293,21 @@ svint8_t &&return_int8_rvalue_ref();
 #endif
 
 template <typename T>
+struct s_template {
+  T y; // expected-error {{field has sizeless type '__SVInt8_t'}}
+};
+
+template <typename T>
 struct s_ptr_template {
   s_ptr_template();
   s_ptr_template(T, svint8_t = svint8_t());
   s_ptr_template(const s_ptr_template &, svint8_t = svint8_t());
   T *y;
+};
+
+template <typename T>
+struct s_array_template {
+  T y[1]; // expected-error {{array has sizeless element type}}
 };
 
 struct widget {
@@ -300,6 +346,12 @@ void with_default(svint8_t = svint8_t());
 constexpr int ce_taking_int8(svint8_t) { return 1; } // expected-error {{constexpr function's 1st parameter type 'svint8_t' (aka '__SVInt8_t') is not a literal type}}
 #endif
 
+#if __cplusplus < 201703L
+void throwing_func() throw(svint8_t); // expected-error {{sizeless type 'svint8_t' (aka '__SVInt8_t') is not allowed in exception specification}}
+void throwing_pointer_func() throw(svint8_t *);
+void throwing_reference_func() throw(svint8_t &); // expected-error {{reference to sizeless type 'svint8_t' (aka '__SVInt8_t') is not allowed in exception specification}}
+#endif
+
 template <typename T>
 void template_fn_direct(T) {}
 template <typename T>
@@ -309,6 +361,13 @@ void template_fn_const_ref(const T &) {}
 #if __cplusplus >= 201103L
 template <typename T>
 void template_fn_rvalue_ref(T &&) {}
+#endif
+
+#if __cplusplus >= 201103L
+template <typename T>
+using array_alias = T[1]; // expected-error {{array has sizeless element type '__SVInt8_t'}}
+extern array_alias<int> *array_alias_int_ptr;
+extern array_alias<svint8_t> *array_alias_int8_ptr; // expected-note {{in instantiation of template type alias 'array_alias' requested here}}
 #endif
 
 void cxx_only(int sel) {
@@ -337,6 +396,34 @@ void cxx_only(int sel) {
   local_int16 = static_cast<svint16_t>(local_int8); // expected-error {{static_cast from 'svint8_t' (aka '__SVInt8_t') to 'svint16_t' (aka '__SVInt16_t') is not allowed}}
   sel = static_cast<int>(local_int8);               // expected-error {{static_cast from 'svint8_t' (aka '__SVInt8_t') to 'int' is not allowed}}
 
+  throw local_int8; // expected-error {{cannot throw object of sizeless type 'svint8_t'}}
+  throw global_int8_ptr;
+
+  try {
+  } catch (int) {
+  }
+  try {
+  } catch (svint8_t) { // expected-error {{cannot catch sizeless type 'svint8_t'}}
+  }
+  try {
+  } catch (svint8_t *) {
+  }
+  try {
+  } catch (svint8_t &) { // expected-error {{cannot catch reference to sizeless type 'svint8_t'}}
+  }
+
+  new svint8_t;     // expected-error {{allocation of sizeless type 'svint8_t'}}
+  new svint8_t();   // expected-error {{allocation of sizeless type 'svint8_t'}}
+  new svint8_t[10]; // expected-error {{allocation of sizeless type 'svint8_t'}}
+  new svint8_t *;
+
+  new (global_int8_ptr) svint8_t;     // expected-error {{allocation of sizeless type 'svint8_t'}}
+  new (global_int8_ptr) svint8_t();   // expected-error {{allocation of sizeless type 'svint8_t'}}
+  new (global_int8_ptr) svint8_t[10]; // expected-error {{allocation of sizeless type 'svint8_t'}}
+
+  delete global_int8_ptr;   // expected-error {{cannot delete expression of type 'svint8_t *'}}
+  delete[] global_int8_ptr; // expected-error {{cannot delete expression of type 'svint8_t *'}}
+
   local_int8.~__SVInt8_t(); // expected-error {{object expression of non-scalar type 'svint8_t' (aka '__SVInt8_t') cannot be used in a pseudo-destructor expression}}
 
   (void)svint8_t();
@@ -344,11 +431,17 @@ void cxx_only(int sel) {
   local_int8 = svint8_t();
   local_int8 = svint16_t(); // expected-error {{assigning to 'svint8_t' (aka '__SVInt8_t') from incompatible type 'svint16_t'}}
 
+  s_template<int> st_int;
+  s_template<svint8_t> st_svint8; // expected-note {{in instantiation}}
+
   s_ptr_template<int> st_ptr_int;
   s_ptr_template<svint8_t> st_ptr_svint8;
 
   widget w(1);
   local_int8 = w[1];
+
+  s_array_template<int> st_array_int;
+  s_array_template<svint8_t> st_array_svint8; // expected-note {{in instantiation}}
 
   local_int8 = static_cast<svint8_t>(wrapper<svint8_t>());
   local_int16 = static_cast<svint8_t>(wrapper<svint8_t>()); // expected-error {{assigning to 'svint16_t' (aka '__SVInt16_t') from incompatible type 'svint8_t'}}
@@ -385,6 +478,7 @@ void cxx_only(int sel) {
   (void)typeid(ref_int8);
   (void)typeid(static_int8_ptr);
 
+  _Static_assert(__is_trivially_copyable(svint8_t), "");
   _Static_assert(__is_trivially_destructible(svint8_t), "");
   _Static_assert(!__is_nothrow_assignable(svint8_t, svint8_t), "");
   _Static_assert(__is_nothrow_assignable(svint8_t &, svint8_t), "");
@@ -399,6 +493,16 @@ void cxx_only(int sel) {
   _Static_assert(!__is_assignable(svint8_t, svint8_t), "");
   _Static_assert(__is_assignable(svint8_t &, svint8_t), "");
   _Static_assert(!__is_assignable(svint8_t &, svint16_t), "");
+  _Static_assert(__has_nothrow_assign(svint8_t), "");
+  _Static_assert(__has_nothrow_move_assign(svint8_t), "");
+  _Static_assert(__has_nothrow_copy(svint8_t), "");
+  _Static_assert(__has_nothrow_constructor(svint8_t), "");
+  _Static_assert(__has_trivial_assign(svint8_t), "");
+  _Static_assert(__has_trivial_move_assign(svint8_t), "");
+  _Static_assert(__has_trivial_copy(svint8_t), "");
+  _Static_assert(__has_trivial_constructor(svint8_t), "");
+  _Static_assert(__has_trivial_move_constructor(svint8_t), "");
+  _Static_assert(__has_trivial_destructor(svint8_t), "");
   _Static_assert(!__has_virtual_destructor(svint8_t), "");
   _Static_assert(!__is_abstract(svint8_t), "");
   _Static_assert(!__is_aggregate(svint8_t), "");
@@ -410,7 +514,9 @@ void cxx_only(int sel) {
   _Static_assert(!__is_enum(svint8_t), "");
   _Static_assert(!__is_final(svint8_t), "");
   _Static_assert(!__is_literal(svint8_t), "");
+  _Static_assert(__is_pod(svint8_t), "");
   _Static_assert(!__is_polymorphic(svint8_t), "");
+  _Static_assert(__is_trivial(svint8_t), "");
   _Static_assert(__is_object(svint8_t), "");
   _Static_assert(!__is_arithmetic(svint8_t), "");
   _Static_assert(!__is_floating_point(svint8_t), "");
@@ -474,6 +580,10 @@ void cxx_only(int sel) {
   local_int8 = ([]() -> svint8_t { return svint8_t(); })();
   auto fn1 = [&local_int8](svint8_t x) { local_int8 = x; };
   auto fn2 = [&local_int8](svint8_t *ptr) { *ptr = local_int8; };
+#if __cplusplus >= 201703L
+  auto fn3 = [a(return_int8())] {}; // expected-error {{field has sizeless type '__SVInt8_t'}}
+#endif
+  auto fn4 = [local_int8](svint8_t *ptr) { *ptr = local_int8; }; // expected-error {{by-copy capture of variable 'local_int8' with sizeless type 'svint8_t'}}
 
   for (auto x : local_int8) { // expected-error {{no viable 'begin' function available}}
   }
@@ -483,9 +593,7 @@ void cxx_only(int sel) {
   for (const svint8_t &x : wrapper<svint8_t>()) { // expected-warning {{loop variable 'x' binds to a temporary value produced by a range of type 'wrapper<svint8_t>'}} expected-note {{use non-reference type}}
     (void)x;
   }
-  // This warning is bogus and will be removed by a later patch.
-  // The point is to show that it's being removed for the right reasons.
-  for (const svint8_t x : wrapper<const svint8_t &>()) { // expected-warning {{loop variable 'x' creates a copy from type 'const svint8_t'}} expected-note {{use reference type}}
+  for (const svint8_t x : wrapper<const svint8_t &>()) {
     (void)x;
   }
 #endif

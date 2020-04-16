@@ -26,7 +26,6 @@ class AffineValueMap;
 class IntegerSet;
 class MLIRContext;
 class Value;
-class HyperRectangularSet;
 class MemRefType;
 struct MutableAffineMap;
 
@@ -96,8 +95,6 @@ public:
     else
       ids.append(idArgs.begin(), idArgs.end());
   }
-
-  explicit FlatAffineConstraints(const HyperRectangularSet &set);
 
   /// Create a flat affine constraint system from an AffineValueMap or a list of
   /// these. The constructed system will only include equalities.
@@ -210,8 +207,23 @@ public:
   /// operands. If `eq` is true, add a single equality equal to the bound map's
   /// first result expr.
   LogicalResult addLowerOrUpperBound(unsigned pos, AffineMap boundMap,
-                                     ArrayRef<Value> operands, bool eq,
+                                     ValueRange operands, bool eq,
                                      bool lower = true);
+
+  /// Returns the bound for the identifier at `pos` from the inequality at
+  /// `ineqPos` as a 1-d affine value map (affine map + operands). The returned
+  /// affine value map can either be a lower bound or an upper bound depending
+  /// on the sign of atIneq(ineqPos, pos). Asserts if the row at `ineqPos` does
+  /// not involve the `pos`th identifier.
+  void getIneqAsAffineValueMap(unsigned pos, unsigned ineqPos,
+                               AffineValueMap &vmap,
+                               MLIRContext *context) const;
+
+  /// Returns the constraint system as an integer set. Returns a null integer
+  /// set if the system has no constraints, or if an integer set couldn't be
+  /// constructed as a result of a local variable's explicit representation not
+  /// being known and such a local variable appearing in any of the constraints.
+  IntegerSet getAsIntegerSet(MLIRContext *context) const;
 
   /// Computes the lower and upper bounds of the first 'num' dimensional
   /// identifiers (starting at 'offset') as an affine map of the remaining
@@ -317,10 +329,8 @@ public:
   /// Projects out the identifier that is associate with Value .
   void projectOut(Value id);
 
-  void removeId(IdKind idKind, unsigned pos);
+  /// Removes the specified identifier from the system.
   void removeId(unsigned pos);
-
-  void removeDim(unsigned pos);
 
   void removeEquality(unsigned pos);
   void removeInequality(unsigned pos);
@@ -448,17 +458,20 @@ public:
   /// identifier. Returns None if it's not a constant. This method employs
   /// trivial (low complexity / cost) checks and detection. Symbolic identifiers
   /// are treated specially, i.e., it looks for constant differences between
-  /// affine expressions involving only the symbolic identifiers. See comments
-  /// at function definition for examples. 'lb' and 'lbDivisor', if provided,
-  /// are used to express the lower bound associated with the constant
-  /// difference: 'lb' has the coefficients and lbDivisor, the divisor. For eg.,
-  /// if the lower bound is [(s0 + s2 - 1) floordiv 32] for a system with three
-  /// symbolic identifiers, *lb = [1, 0, 1], lbDivisor = 32.
-  Optional<int64_t>
-  getConstantBoundOnDimSize(unsigned pos,
-                            SmallVectorImpl<int64_t> *lb = nullptr,
-                            int64_t *lbFloorDivisor = nullptr,
-                            SmallVectorImpl<int64_t> *ub = nullptr) const;
+  /// affine expressions involving only the symbolic identifiers. `lb` and
+  /// `ub` (along with the `boundFloorDivisor`) are set to represent the lower
+  /// and upper bound associated with the constant difference: `lb`, `ub` have
+  /// the coefficients, and boundFloorDivisor, their divisor. `minLbPos` and
+  /// `minUbPos` if non-null are set to the position of the constant lower bound
+  /// and upper bound respectively (to the same if they are from an equality).
+  /// Ex: if the lower bound is [(s0 + s2 - 1) floordiv 32] for a system with
+  /// three symbolic identifiers, *lb = [1, 0, 1], lbDivisor = 32. See comments
+  /// at function definition for examples.
+  Optional<int64_t> getConstantBoundOnDimSize(
+      unsigned pos, SmallVectorImpl<int64_t> *lb = nullptr,
+      int64_t *boundFloorDivisor = nullptr,
+      SmallVectorImpl<int64_t> *ub = nullptr, unsigned *minLbPos = nullptr,
+      unsigned *minUbPos = nullptr) const;
 
   /// Returns the constant lower bound for the pos^th identifier if there is
   /// one; None otherwise.
@@ -468,17 +481,31 @@ public:
   /// one; None otherwise.
   Optional<int64_t> getConstantUpperBound(unsigned pos) const;
 
-  /// Gets the lower and upper bound of the pos^th identifier treating
-  /// [0, offset) U [offset + num, symStartPos) as dimensions and
-  /// [symStartPos, getNumDimAndSymbolIds) as symbols. The returned
-  /// multi-dimensional maps in the pair represent the max and min of
-  /// potentially multiple affine expressions. The upper bound is exclusive.
-  /// 'localExprs' holds pre-computed AffineExpr's for all local identifiers in
-  /// the system.
+  /// Gets the lower and upper bound of the `offset` + `pos`th identifier
+  /// treating [0, offset) U [offset + num, symStartPos) as dimensions and
+  /// [symStartPos, getNumDimAndSymbolIds) as symbols, and `pos` lies in
+  /// [0, num). The multi-dimensional maps in the returned pair represent the
+  /// max and min of potentially multiple affine expressions. The upper bound is
+  /// exclusive. `localExprs` holds pre-computed AffineExpr's for all local
+  /// identifiers in the system.
   std::pair<AffineMap, AffineMap>
   getLowerAndUpperBound(unsigned pos, unsigned offset, unsigned num,
                         unsigned symStartPos, ArrayRef<AffineExpr> localExprs,
                         MLIRContext *context) const;
+
+  /// Gather positions of all lower and upper bounds of the identifier at `pos`,
+  /// and optionally any equalities on it. In addition, the bounds are to be
+  /// independent of identifiers in position range [`offset`, `offset` + `num`).
+  void
+  getLowerAndUpperBoundIndices(unsigned pos,
+                               SmallVectorImpl<unsigned> *lbIndices,
+                               SmallVectorImpl<unsigned> *ubIndices,
+                               SmallVectorImpl<unsigned> *eqIndices = nullptr,
+                               unsigned offset = 0, unsigned num = 0) const;
+
+  /// Removes constraints that are independent of (i.e., do not have a
+  /// coefficient for) for identifiers in the range [pos, pos + num).
+  void removeIndependentConstraints(unsigned pos, unsigned num);
 
   /// Returns true if the set can be trivially detected as being
   /// hyper-rectangular on the specified contiguous set of identifiers.
@@ -488,7 +515,8 @@ public:
   /// that can be detected as redundant as a result of differing only in their
   /// constant term part. A constraint of the form <non-negative constant> >= 0
   /// is considered trivially true. This method is a linear time method on the
-  /// constraints, does a single scan, and updates in place.
+  /// constraints, does a single scan, and updates in place. It also normalizes
+  /// constraints by their GCD and performs GCD tightening on inequalities.
   void removeTrivialRedundancy();
 
   /// A more expensive check to detect redundant inequalities thatn
@@ -551,7 +579,7 @@ private:
   /// Normalized each constraints by the GCD of its coefficients.
   void normalizeConstraintsByGCD();
 
-  /// Removes identifiers in column range [idStart, idLimit), and copies any
+  /// Removes identifiers in the column range [idStart, idLimit), and copies any
   /// remaining valid data into place, updates member variables, and resizes
   /// arrays as needed.
   void removeIdRange(unsigned idStart, unsigned idLimit);

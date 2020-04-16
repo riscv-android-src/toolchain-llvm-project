@@ -25,7 +25,7 @@ config.name = 'Clang'
 config.test_format = lit.formats.ShTest(not llvm_config.use_lit_shell)
 
 # suffixes: A list of file extensions to treat as test files.
-config.suffixes = ['.c', '.cpp', '.cppm', '.m', '.mm', '.cu',
+config.suffixes = ['.c', '.cpp', '.i', '.cppm', '.m', '.mm', '.cu',
                    '.ll', '.cl', '.s', '.S', '.modulemap', '.test', '.rs', '.ifs']
 
 # excludes: A list of directories to exclude from the testsuite. The 'Inputs'
@@ -171,7 +171,7 @@ def calculate_arch_features(arch_string):
 llvm_config.feature_config(
     [('--assertion-mode', {'ON': 'asserts'}),
      ('--cxxflags', {r'-D_GLIBCXX_DEBUG\b': 'libstdcxx-safe-mode'}),
-        ('--targets-built', calculate_arch_features)
+     ('--targets-built', calculate_arch_features),
      ])
 
 if lit.util.which('xmllint'):

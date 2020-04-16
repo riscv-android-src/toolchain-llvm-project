@@ -9,12 +9,12 @@
 ## field.
 
 # RUN: ld.lld %tno.o %t3.o --shared -o %tno.so
-# RUN: llvm-objdump -d -mattr=+v8.3a --no-show-raw-insn %tno.so | FileCheck --check-prefix=NOPAC %s
+# RUN: llvm-objdump -d --mattr=+v8.3a --no-show-raw-insn %tno.so | FileCheck --check-prefix=NOPAC %s
 # RUN: llvm-readelf -x .got.plt %tno.so | FileCheck --check-prefix SOGOTPLT %s
 # RUN: llvm-readelf --dynamic-table %tno.so | FileCheck --check-prefix NOPACDYN %s
 
 # NOPAC: 00000000000102b8 <func2>:
-# NOPAC-NEXT:    102b8: bl      #56 <func3@plt>
+# NOPAC-NEXT:    102b8: bl      0x102f0 <func3@plt>
 # NOPAC-NEXT:           ret
 # NOPAC: Disassembly of section .plt:
 # NOPAC: 00000000000102d0 <.plt>:
@@ -41,13 +41,13 @@
 
 # RUN: ld.lld %t1.o %t3.o --shared --soname=t.so -o %t.so
 # RUN: llvm-readelf -n %t.so | FileCheck --check-prefix PACPROP %s
-# RUN: llvm-objdump -d -mattr=+v8.3a --no-show-raw-insn %t.so | FileCheck --check-prefix PACSO %s
+# RUN: llvm-objdump -d --mattr=+v8.3a --no-show-raw-insn %t.so | FileCheck --check-prefix PACSO %s
 # RUN: llvm-readelf -x .got.plt %t.so | FileCheck --check-prefix SOGOTPLT2 %s
 # RUN: llvm-readelf --dynamic-table %t.so |  FileCheck --check-prefix PACDYN %s
 
 ## PAC has no effect on PLT[0], for PLT[N].
 # PACSO: 0000000000010348 <func2>:
-# PACSO-NEXT:    10348:         bl      #56 <func3@plt>
+# PACSO-NEXT:    10348:         bl      0x10380 <func3@plt>
 # PACSO-NEXT:                   ret
 # PACSO: 0000000000010350 <func3>:
 # PACSO-NEXT:    10350:         ret
@@ -84,11 +84,11 @@
 # RUN: ld.lld %t.o %t2.o -z pac-plt %t.so -o %tpacplt.exe
 # RUN: llvm-readelf -n %tpacplt.exe | FileCheck --check-prefix=PACPROP %s
 # RUN: llvm-readelf --dynamic-table %tpacplt.exe | FileCheck --check-prefix PACDYN2 %s
-# RUN: llvm-objdump -d -mattr=+v8.3a --no-show-raw-insn %tpacplt.exe | FileCheck --check-prefix PACPLT %s
+# RUN: llvm-objdump -d --mattr=+v8.3a --no-show-raw-insn %tpacplt.exe | FileCheck --check-prefix PACPLT %s
 
 # PACPLT: Disassembly of section .text:
 # PACPLT: 0000000000210370 <func1>:
-# PACPLT-NEXT:   210370:        bl      #48 <func2@plt>
+# PACPLT-NEXT:   210370:        bl      0x2103a0 <func2@plt>
 # PACPLT-NEXT:                  ret
 # PACPLT: 0000000000210378 <func3>:
 # PACPLT-NEXT:   210378:        ret

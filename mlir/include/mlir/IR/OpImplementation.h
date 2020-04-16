@@ -37,6 +37,7 @@ public:
 
   /// Print implementations for various things an operation contains.
   virtual void printOperand(Value value) = 0;
+  virtual void printOperand(Value value, raw_ostream &os) = 0;
 
   /// Print a comma separated list of operands.
   template <typename ContainerType>
@@ -112,11 +113,11 @@ public:
   void printArrowTypeList(TypeRange &&types) {
     auto &os = getStream() << " -> ";
 
-    bool wrapped = !has_single_element(types) ||
+    bool wrapped = !llvm::hasSingleElement(types) ||
                    (*types.begin()).template isa<FunctionType>();
     if (wrapped)
       os << '(';
-    interleaveComma(types, *this);
+    llvm::interleaveComma(types, *this);
     if (wrapped)
       os << ')';
   }
@@ -130,7 +131,7 @@ public:
   void printFunctionalType(InputRangeT &&inputs, ResultRangeT &&results) {
     auto &os = getStream();
     os << "(";
-    interleaveComma(inputs, *this);
+    llvm::interleaveComma(inputs, *this);
     os << ")";
     printArrowTypeList(results);
   }
@@ -198,11 +199,11 @@ inline OpAsmPrinter &operator<<(OpAsmPrinter &p, Block *value) {
 template <typename ValueRangeT>
 inline OpAsmPrinter &operator<<(OpAsmPrinter &p,
                                 const ValueTypeRange<ValueRangeT> &types) {
-  interleaveComma(types, p);
+  llvm::interleaveComma(types, p);
   return p;
 }
 inline OpAsmPrinter &operator<<(OpAsmPrinter &p, ArrayRef<Type> types) {
-  interleaveComma(types, p);
+  llvm::interleaveComma(types, p);
   return p;
 }
 
@@ -244,6 +245,24 @@ public:
     *loc = getCurrentLocation();
     return success();
   }
+
+  /// Return the name of the specified result in the specified syntax, as well
+  /// as the sub-element in the name.  It returns an empty string and ~0U for
+  /// invalid result numbers.  For example, in this operation:
+  ///
+  ///  %x, %y:2, %z = foo.op
+  ///
+  ///    getResultName(0) == {"x", 0 }
+  ///    getResultName(1) == {"y", 0 }
+  ///    getResultName(2) == {"y", 1 }
+  ///    getResultName(3) == {"z", 0 }
+  ///    getResultName(4) == {"", ~0U }
+  virtual std::pair<StringRef, unsigned>
+  getResultName(unsigned resultNo) const = 0;
+
+  /// Return the number of declared SSA results.  This returns 4 for the foo.op
+  /// example in the comment for `getResultName`.
+  virtual size_t getNumResults() const = 0;
 
   /// Return the location of the original name token.
   virtual llvm::SMLoc getNameLoc() const = 0;
@@ -433,6 +452,9 @@ public:
   /// Parse a single operand.
   virtual ParseResult parseOperand(OperandType &result) = 0;
 
+  /// Parse a single operand if present.
+  virtual OptionalParseResult parseOptionalOperand(OperandType &result) = 0;
+
   /// These are the supported delimiters around operand lists and region
   /// argument lists, used by parseOperandList and parseRegionArgumentList.
   enum class Delimiter {
@@ -510,8 +532,9 @@ public:
                            ArrayRef<Type>(type), loc, result);
   }
   template <typename Operands, typename Types>
-  ParseResult resolveOperands(Operands &&operands, Types &&types,
-                              llvm::SMLoc loc, SmallVectorImpl<Value> &result) {
+  std::enable_if_t<!std::is_convertible<Types, Type>::value, ParseResult>
+  resolveOperands(Operands &&operands, Types &&types, llvm::SMLoc loc,
+                  SmallVectorImpl<Value> &result) {
     size_t operandSize = std::distance(operands.begin(), operands.end());
     size_t typeSize = std::distance(types.begin(), types.end());
     if (operandSize != typeSize)
@@ -597,6 +620,9 @@ public:
 
   /// Parse a type.
   virtual ParseResult parseType(Type &result) = 0;
+
+  /// Parse an optional type.
+  virtual OptionalParseResult parseOptionalType(Type &result) = 0;
 
   /// Parse a type of a specific type.
   template <typename TypeT>

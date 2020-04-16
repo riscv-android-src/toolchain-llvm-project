@@ -83,7 +83,7 @@ bool TargetLowering::parametersInCSRMatch(const MachineRegisterInfo &MRI,
     const CCValAssign &ArgLoc = ArgLocs[I];
     if (!ArgLoc.isRegLoc())
       continue;
-    Register Reg = ArgLoc.getLocReg();
+    MCRegister Reg = ArgLoc.getLocReg();
     // Only look at callee saved registers.
     if (MachineOperand::clobbersPhysReg(CallerPreservedMask, Reg))
       continue;
@@ -93,7 +93,7 @@ bool TargetLowering::parametersInCSRMatch(const MachineRegisterInfo &MRI,
     SDValue Value = OutVals[I];
     if (Value->getOpcode() != ISD::CopyFromReg)
       return false;
-    unsigned ArgReg = cast<RegisterSDNode>(Value->getOperand(1))->getReg();
+    MCRegister ArgReg = cast<RegisterSDNode>(Value->getOperand(1))->getReg();
     if (MRI.getLiveInPhysReg(ArgReg) != Reg)
       return false;
   }
@@ -114,7 +114,7 @@ void TargetLoweringBase::ArgListEntry::setAttributes(const CallBase *Call,
   IsReturned = Call->paramHasAttr(ArgIdx, Attribute::Returned);
   IsSwiftSelf = Call->paramHasAttr(ArgIdx, Attribute::SwiftSelf);
   IsSwiftError = Call->paramHasAttr(ArgIdx, Attribute::SwiftError);
-  Alignment = Call->getParamAlignment(ArgIdx);
+  Alignment = Call->getParamAlign(ArgIdx);
   ByValType = nullptr;
   if (Call->paramHasAttr(ArgIdx, Attribute::ByVal))
     ByValType = Call->getParamByValType(ArgIdx);
@@ -861,7 +861,7 @@ bool TargetLowering::SimplifyDemandedBits(
     return false;
   }
 
-  KnownBits Known2, KnownOut;
+  KnownBits Known2;
   switch (Op.getOpcode()) {
   case ISD::TargetConstant:
     llvm_unreachable("Can't simplify this node");
@@ -1171,10 +1171,7 @@ bool TargetLowering::SimplifyDemandedBits(
     if (ShrinkDemandedOp(Op, BitWidth, DemandedBits, TLO))
       return true;
 
-    // Output known-1 bits are only known if set in both the LHS & RHS.
-    Known.One &= Known2.One;
-    // Output known-0 are known to be clear if zero in either the LHS | RHS.
-    Known.Zero |= Known2.Zero;
+    Known &= Known2;
     break;
   }
   case ISD::OR: {
@@ -1217,10 +1214,7 @@ bool TargetLowering::SimplifyDemandedBits(
     if (ShrinkDemandedOp(Op, BitWidth, DemandedBits, TLO))
       return true;
 
-    // Output known-0 bits are only known if clear in both the LHS & RHS.
-    Known.Zero &= Known2.Zero;
-    // Output known-1 are known to be set if set in either the LHS | RHS.
-    Known.One |= Known2.One;
+    Known |= Known2;
     break;
   }
   case ISD::XOR: {
@@ -1266,11 +1260,6 @@ bool TargetLowering::SimplifyDemandedBits(
     if (DemandedBits.isSubsetOf(Known.Zero | Known2.Zero))
       return TLO.CombineTo(Op, TLO.DAG.getNode(ISD::OR, dl, VT, Op0, Op1));
 
-    // Output known-0 bits are known if clear or set in both the LHS & RHS.
-    KnownOut.Zero = (Known.Zero & Known2.Zero) | (Known.One & Known2.One);
-    // Output known-1 are known to be set if set in only one of the LHS, RHS.
-    KnownOut.One = (Known.Zero & Known2.One) | (Known.One & Known2.Zero);
-
     if (ConstantSDNode *C = isConstOrConstSplat(Op1)) {
       // If one side is a constant, and all of the known set bits on the other
       // side are also set in the constant, turn this into an AND, as we know
@@ -1298,7 +1287,7 @@ bool TargetLowering::SimplifyDemandedBits(
       }
     }
 
-    Known = std::move(KnownOut);
+    Known ^= Known2;
     break;
   }
   case ISD::SELECT:
@@ -1634,15 +1623,32 @@ bool TargetLowering::SimplifyDemandedBits(
       Known.One |= Known2.One;
       Known.Zero |= Known2.Zero;
     }
+
+    // For pow-2 bitwidths we only demand the bottom modulo amt bits.
+    if (isPowerOf2_32(BitWidth)) {
+      APInt DemandedAmtBits(Op2.getScalarValueSizeInBits(), BitWidth - 1);
+      if (SimplifyDemandedBits(Op2, DemandedAmtBits, DemandedElts,
+                               Known2, TLO, Depth + 1))
+        return true;
+    }
     break;
   }
   case ISD::ROTL:
   case ISD::ROTR: {
     SDValue Op0 = Op.getOperand(0);
+    SDValue Op1 = Op.getOperand(1);
 
     // If we're rotating an 0/-1 value, then it stays an 0/-1 value.
     if (BitWidth == TLO.DAG.ComputeNumSignBits(Op0, DemandedElts, Depth + 1))
       return TLO.CombineTo(Op, Op0);
+
+    // For pow-2 bitwidths we only demand the bottom modulo amt bits.
+    if (isPowerOf2_32(BitWidth)) {
+      APInt DemandedAmtBits(Op1.getScalarValueSizeInBits(), BitWidth - 1);
+      if (SimplifyDemandedBits(Op1, DemandedAmtBits, DemandedElts, Known2, TLO,
+                               Depth + 1))
+        return true;
+    }
     break;
   }
   case ISD::BITREVERSE: {
@@ -1710,8 +1716,7 @@ bool TargetLowering::SimplifyDemandedBits(
 
     // If the input sign bit is known zero, convert this into a zero extension.
     if (Known.Zero[ExVTBits - 1])
-      return TLO.CombineTo(
-          Op, TLO.DAG.getZeroExtendInReg(Op0, dl, ExVT.getScalarType()));
+      return TLO.CombineTo(Op, TLO.DAG.getZeroExtendInReg(Op0, dl, ExVT));
 
     APInt Mask = APInt::getLowBitsSet(BitWidth, ExVTBits);
     if (Known.One[ExVTBits - 1]) { // Input sign bit known set
@@ -2745,9 +2750,9 @@ void TargetLowering::computeKnownBitsForFrameIndex(const SDValue Op,
                                                    unsigned Depth) const {
   assert(isa<FrameIndexSDNode>(Op) && "expected FrameIndex");
 
-  if (unsigned Align = DAG.InferPtrAlignment(Op)) {
+  if (MaybeAlign Alignment = DAG.InferPtrAlign(Op)) {
     // The low bits are known zero if the pointer is aligned.
-    Known.Zero.setLowBits(Log2_32(Align));
+    Known.Zero.setLowBits(Log2(*Alignment));
   }
 }
 
@@ -2763,6 +2768,12 @@ unsigned TargetLowering::ComputeNumSignBitsForTargetNode(SDValue Op,
           Op.getOpcode() == ISD::INTRINSIC_VOID) &&
          "Should use ComputeNumSignBits if you don't know whether Op"
          " is a target node!");
+  return 1;
+}
+
+unsigned TargetLowering::computeNumSignBitsForTargetInstr(
+  GISelKnownBits &Analysis, Register R, const APInt &DemandedElts,
+  const MachineRegisterInfo &MRI, unsigned Depth) const {
   return 1;
 }
 
@@ -4307,10 +4318,10 @@ unsigned TargetLowering::AsmOperandInfo::getMatchedOperand() const {
 TargetLowering::AsmOperandInfoVector
 TargetLowering::ParseConstraints(const DataLayout &DL,
                                  const TargetRegisterInfo *TRI,
-                                 ImmutableCallSite CS) const {
+                                 const CallBase &Call) const {
   /// Information about all of the constraints.
   AsmOperandInfoVector ConstraintOperands;
-  const InlineAsm *IA = cast<InlineAsm>(CS.getCalledValue());
+  const InlineAsm *IA = cast<InlineAsm>(Call.getCalledValue());
   unsigned maCount = 0; // Largest number of multiple alternative constraints.
 
   // Do a prepass over the constraints, canonicalizing them, and building up the
@@ -4333,25 +4344,24 @@ TargetLowering::ParseConstraints(const DataLayout &DL,
     case InlineAsm::isOutput:
       // Indirect outputs just consume an argument.
       if (OpInfo.isIndirect) {
-        OpInfo.CallOperandVal = const_cast<Value *>(CS.getArgument(ArgNo++));
+        OpInfo.CallOperandVal = Call.getArgOperand(ArgNo++);
         break;
       }
 
       // The return value of the call is this value.  As such, there is no
       // corresponding argument.
-      assert(!CS.getType()->isVoidTy() &&
-             "Bad inline asm!");
-      if (StructType *STy = dyn_cast<StructType>(CS.getType())) {
+      assert(!Call.getType()->isVoidTy() && "Bad inline asm!");
+      if (StructType *STy = dyn_cast<StructType>(Call.getType())) {
         OpInfo.ConstraintVT =
             getSimpleValueType(DL, STy->getElementType(ResNo));
       } else {
         assert(ResNo == 0 && "Asm only has one result!");
-        OpInfo.ConstraintVT = getSimpleValueType(DL, CS.getType());
+        OpInfo.ConstraintVT = getSimpleValueType(DL, Call.getType());
       }
       ++ResNo;
       break;
     case InlineAsm::isInput:
-      OpInfo.CallOperandVal = const_cast<Value *>(CS.getArgument(ArgNo++));
+      OpInfo.CallOperandVal = Call.getArgOperand(ArgNo++);
       break;
     case InlineAsm::isClobber:
       // Nothing to do.
@@ -5661,10 +5671,10 @@ TargetLowering::getNegatibleCost(SDValue Op, SelectionDAG &DAG,
                                         ForCodeSize, Depth + 1);
     NegatibleCost V1 = getNegatibleCost(Op.getOperand(1), DAG, LegalOperations,
                                         ForCodeSize, Depth + 1);
-    NegatibleCost V01 = std::max(V0, V1);
+    NegatibleCost V01 = std::min(V0, V1);
     if (V01 == NegatibleCost::Expensive)
       return NegatibleCost::Expensive;
-    return std::max(V01, V2);
+    return std::min(V01, V2);
   }
 
   case ISD::FP_EXTEND:
@@ -5678,8 +5688,7 @@ TargetLowering::getNegatibleCost(SDValue Op, SelectionDAG &DAG,
 }
 
 SDValue TargetLowering::getNegatedExpression(SDValue Op, SelectionDAG &DAG,
-                                             bool LegalOperations,
-                                             bool ForCodeSize,
+                                             bool LegalOps, bool OptForSize,
                                              unsigned Depth) const {
   // fneg is removable even if it has multiple uses.
   if (Op.getOpcode() == ISD::FNEG)
@@ -5687,13 +5696,19 @@ SDValue TargetLowering::getNegatedExpression(SDValue Op, SelectionDAG &DAG,
 
   assert(Depth <= SelectionDAG::MaxRecursionDepth &&
          "getNegatedExpression doesn't match getNegatibleCost");
-  const SDNodeFlags Flags = Op->getFlags();
 
-  switch (Op.getOpcode()) {
+  // Pre-increment recursion depth for use in recursive calls.
+  ++Depth;
+  const SDNodeFlags Flags = Op->getFlags();
+  EVT VT = Op.getValueType();
+  unsigned Opcode = Op.getOpcode();
+  SDLoc DL(Op);
+
+  switch (Opcode) {
   case ISD::ConstantFP: {
     APFloat V = cast<ConstantFPSDNode>(Op)->getValueAPF();
     V.changeSign();
-    return DAG.getConstantFP(V, SDLoc(Op), Op.getValueType());
+    return DAG.getConstantFP(V, DL, VT);
   }
   case ISD::BUILD_VECTOR: {
     SmallVector<SDValue, 4> Ops;
@@ -5704,60 +5719,52 @@ SDValue TargetLowering::getNegatedExpression(SDValue Op, SelectionDAG &DAG,
       }
       APFloat V = cast<ConstantFPSDNode>(C)->getValueAPF();
       V.changeSign();
-      Ops.push_back(DAG.getConstantFP(V, SDLoc(Op), C.getValueType()));
+      Ops.push_back(DAG.getConstantFP(V, DL, C.getValueType()));
     }
-    return DAG.getBuildVector(Op.getValueType(), SDLoc(Op), Ops);
+    return DAG.getBuildVector(VT, DL, Ops);
   }
   case ISD::FADD: {
+    SDValue X = Op.getOperand(0), Y = Op.getOperand(1);
     assert((DAG.getTarget().Options.NoSignedZerosFPMath ||
             Flags.hasNoSignedZeros()) &&
            "Expected NSZ fp-flag");
 
-    // fold (fneg (fadd A, B)) -> (fsub (fneg A), B)
-    NegatibleCost V0 = getNegatibleCost(Op.getOperand(0), DAG, LegalOperations,
-                                        ForCodeSize, Depth + 1);
-    if (V0 != NegatibleCost::Expensive)
-      return DAG.getNode(ISD::FSUB, SDLoc(Op), Op.getValueType(),
-                         getNegatedExpression(Op.getOperand(0), DAG,
-                                              LegalOperations, ForCodeSize,
-                                              Depth + 1),
-                         Op.getOperand(1), Flags);
-    // fold (fneg (fadd A, B)) -> (fsub (fneg B), A)
-    return DAG.getNode(ISD::FSUB, SDLoc(Op), Op.getValueType(),
-                       getNegatedExpression(Op.getOperand(1), DAG,
-                                            LegalOperations, ForCodeSize,
-                                            Depth + 1),
-                       Op.getOperand(0), Flags);
+    // fold (fneg (fadd X, Y)) -> (fsub (fneg X), Y)
+    NegatibleCost CostX = getNegatibleCost(X, DAG, LegalOps, OptForSize, Depth);
+    if (CostX != NegatibleCost::Expensive)
+      return DAG.getNode(
+          ISD::FSUB, DL, VT,
+          getNegatedExpression(X, DAG, LegalOps, OptForSize, Depth), Y, Flags);
+
+    // fold (fneg (fadd X, Y)) -> (fsub (fneg Y), X)
+    return DAG.getNode(
+        ISD::FSUB, DL, VT,
+        getNegatedExpression(Y, DAG, LegalOps, OptForSize, Depth), X, Flags);
   }
-  case ISD::FSUB:
-    // fold (fneg (fsub 0, B)) -> B
-    if (ConstantFPSDNode *N0CFP =
-            isConstOrConstSplatFP(Op.getOperand(0), /*AllowUndefs*/ true))
-      if (N0CFP->isZero())
-        return Op.getOperand(1);
+  case ISD::FSUB: {
+    SDValue X = Op.getOperand(0), Y = Op.getOperand(1);
+    // fold (fneg (fsub 0, Y)) -> Y
+    if (ConstantFPSDNode *C = isConstOrConstSplatFP(X, /*AllowUndefs*/ true))
+      if (C->isZero())
+        return Y;
 
-    // fold (fneg (fsub A, B)) -> (fsub B, A)
-    return DAG.getNode(ISD::FSUB, SDLoc(Op), Op.getValueType(),
-                       Op.getOperand(1), Op.getOperand(0), Flags);
-
+    // fold (fneg (fsub X, Y)) -> (fsub Y, X)
+    return DAG.getNode(ISD::FSUB, DL, VT, Y, X, Flags);
+  }
   case ISD::FMUL:
   case ISD::FDIV: {
+    SDValue X = Op.getOperand(0), Y = Op.getOperand(1);
     // fold (fneg (fmul X, Y)) -> (fmul (fneg X), Y)
-    NegatibleCost V0 = getNegatibleCost(Op.getOperand(0), DAG, LegalOperations,
-                                        ForCodeSize, Depth + 1);
-    if (V0 != NegatibleCost::Expensive)
-      return DAG.getNode(Op.getOpcode(), SDLoc(Op), Op.getValueType(),
-                         getNegatedExpression(Op.getOperand(0), DAG,
-                                              LegalOperations, ForCodeSize,
-                                              Depth + 1),
-                         Op.getOperand(1), Flags);
+    NegatibleCost CostX = getNegatibleCost(X, DAG, LegalOps, OptForSize, Depth);
+    if (CostX != NegatibleCost::Expensive)
+      return DAG.getNode(
+          Opcode, DL, VT,
+          getNegatedExpression(X, DAG, LegalOps, OptForSize, Depth), Y, Flags);
 
     // fold (fneg (fmul X, Y)) -> (fmul X, (fneg Y))
     return DAG.getNode(
-        Op.getOpcode(), SDLoc(Op), Op.getValueType(), Op.getOperand(0),
-        getNegatedExpression(Op.getOperand(1), DAG, LegalOperations,
-                             ForCodeSize, Depth + 1),
-        Flags);
+        Opcode, DL, VT, X,
+        getNegatedExpression(Y, DAG, LegalOps, OptForSize, Depth), Flags);
   }
   case ISD::FMA:
   case ISD::FMAD: {
@@ -5765,39 +5772,30 @@ SDValue TargetLowering::getNegatedExpression(SDValue Op, SelectionDAG &DAG,
             Flags.hasNoSignedZeros()) &&
            "Expected NSZ fp-flag");
 
-    SDValue Neg2 = getNegatedExpression(Op.getOperand(2), DAG, LegalOperations,
-                                        ForCodeSize, Depth + 1);
-
-    NegatibleCost V0 = getNegatibleCost(Op.getOperand(0), DAG, LegalOperations,
-                                        ForCodeSize, Depth + 1);
-    NegatibleCost V1 = getNegatibleCost(Op.getOperand(1), DAG, LegalOperations,
-                                        ForCodeSize, Depth + 1);
-    if (V0 > V1) {
+    SDValue X = Op.getOperand(0), Y = Op.getOperand(1), Z = Op.getOperand(2);
+    SDValue NegZ = getNegatedExpression(Z, DAG, LegalOps, OptForSize, Depth);
+    NegatibleCost CostX = getNegatibleCost(X, DAG, LegalOps, OptForSize, Depth);
+    NegatibleCost CostY = getNegatibleCost(Y, DAG, LegalOps, OptForSize, Depth);
+    if (CostX <= CostY) {
       // fold (fneg (fma X, Y, Z)) -> (fma (fneg X), Y, (fneg Z))
-      SDValue Neg0 = getNegatedExpression(
-          Op.getOperand(0), DAG, LegalOperations, ForCodeSize, Depth + 1);
-      return DAG.getNode(Op.getOpcode(), SDLoc(Op), Op.getValueType(), Neg0,
-                         Op.getOperand(1), Neg2, Flags);
+      SDValue NegX = getNegatedExpression(X, DAG, LegalOps, OptForSize, Depth);
+      return DAG.getNode(Opcode, DL, VT, NegX, Y, NegZ, Flags);
     }
 
     // fold (fneg (fma X, Y, Z)) -> (fma X, (fneg Y), (fneg Z))
-    SDValue Neg1 = getNegatedExpression(Op.getOperand(1), DAG, LegalOperations,
-                                        ForCodeSize, Depth + 1);
-    return DAG.getNode(Op.getOpcode(), SDLoc(Op), Op.getValueType(),
-                       Op.getOperand(0), Neg1, Neg2, Flags);
+    SDValue NegY = getNegatedExpression(Y, DAG, LegalOps, OptForSize, Depth);
+    return DAG.getNode(Opcode, DL, VT, X, NegY, NegZ, Flags);
   }
 
   case ISD::FP_EXTEND:
   case ISD::FSIN:
-    return DAG.getNode(Op.getOpcode(), SDLoc(Op), Op.getValueType(),
-                       getNegatedExpression(Op.getOperand(0), DAG,
-                                            LegalOperations, ForCodeSize,
-                                            Depth + 1));
+    return DAG.getNode(Opcode, DL, VT,
+                       getNegatedExpression(Op.getOperand(0), DAG, LegalOps,
+                                            OptForSize, Depth));
   case ISD::FP_ROUND:
-    return DAG.getNode(ISD::FP_ROUND, SDLoc(Op), Op.getValueType(),
-                       getNegatedExpression(Op.getOperand(0), DAG,
-                                            LegalOperations, ForCodeSize,
-                                            Depth + 1),
+    return DAG.getNode(ISD::FP_ROUND, DL, VT,
+                       getNegatedExpression(Op.getOperand(0), DAG, LegalOps,
+                                            OptForSize, Depth),
                        Op.getOperand(1));
   }
 

@@ -348,7 +348,7 @@ Instruction *InstCombiner::visitAllocaInst(AllocaInst &AI) {
     // Move all alloca's of zero byte objects to the entry block and merge them
     // together.  Note that we only do this for alloca's, because malloc should
     // allocate and return a unique pointer, even for a zero byte allocation.
-    if (DL.getTypeAllocSize(AI.getAllocatedType()) == 0) {
+    if (DL.getTypeAllocSize(AI.getAllocatedType()).getKnownMinSize() == 0) {
       // For a zero sized alloca there is no point in doing an array allocation.
       // This is helpful if the array size is a complicated expression not used
       // elsewhere.
@@ -365,7 +365,8 @@ Instruction *InstCombiner::visitAllocaInst(AllocaInst &AI) {
         // dominance as the array size was forced to a constant earlier already.
         AllocaInst *EntryAI = dyn_cast<AllocaInst>(FirstInst);
         if (!EntryAI || !EntryAI->getAllocatedType()->isSized() ||
-            DL.getTypeAllocSize(EntryAI->getAllocatedType()) != 0) {
+            DL.getTypeAllocSize(EntryAI->getAllocatedType())
+                    .getKnownMinSize() != 0) {
           AI.moveBefore(FirstInst);
           return &AI;
         }
@@ -590,10 +591,9 @@ static Instruction *combineLoadToOperationType(InstCombiner &IC, LoadInst &LI) {
   // infinite loop).
   Type *Dummy;
   if (!Ty->isIntegerTy() && Ty->isSized() &&
-      !(Ty->isVectorTy() && Ty->getVectorIsScalable()) &&
+      !(Ty->isVectorTy() && cast<VectorType>(Ty)->isScalable()) &&
       DL.isLegalInteger(DL.getTypeStoreSizeInBits(Ty)) &&
-      DL.typeSizeEqualsStoreSize(Ty) &&
-      !DL.isNonIntegralPointerType(Ty) &&
+      DL.typeSizeEqualsStoreSize(Ty) && !DL.isNonIntegralPointerType(Ty) &&
       !isMinMaxWithLoads(
           peekThroughBitcast(LI.getPointerOperand(), /*OneUseOnly=*/true),
           Dummy)) {

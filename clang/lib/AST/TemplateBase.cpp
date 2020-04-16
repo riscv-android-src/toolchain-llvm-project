@@ -16,7 +16,7 @@
 #include "clang/AST/Decl.h"
 #include "clang/AST/DeclBase.h"
 #include "clang/AST/DeclTemplate.h"
-#include "clang/AST/DependencyFlags.h"
+#include "clang/AST/DependenceFlags.h"
 #include "clang/AST/Expr.h"
 #include "clang/AST/ExprCXX.h"
 #include "clang/AST/PrettyPrinter.h"
@@ -352,13 +352,9 @@ void TemplateArgument::print(const PrintingPolicy &Policy,
 
   case Declaration: {
     NamedDecl *ND = getAsDecl();
-    Out << '&';
-    if (ND->getDeclName()) {
-      // FIXME: distinguish between pointer and reference args?
-      ND->printQualifiedName(Out);
-    } else {
-      Out << "(anonymous)";
-    }
+    if (!getParamTypeForDecl()->isReferenceType())
+      Out << '&';
+    ND->printQualifiedName(Out);
     break;
   }
 

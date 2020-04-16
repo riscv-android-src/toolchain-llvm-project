@@ -52,8 +52,6 @@ protected:
   SDValue LowerFRINT(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerFNEARBYINT(SDValue Op, SelectionDAG &DAG) const;
 
-  SDValue LowerFROUND_LegalFTRUNC(SDValue Op, SelectionDAG &DAG) const;
-  SDValue LowerFROUND64(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerFROUND(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerFFLOOR(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerFLOG(SDValue Op, SelectionDAG &DAG,
@@ -270,6 +268,12 @@ public:
   unsigned ComputeNumSignBitsForTargetNode(SDValue Op, const APInt &DemandedElts,
                                            const SelectionDAG &DAG,
                                            unsigned Depth = 0) const override;
+
+  unsigned computeNumSignBitsForTargetInstr(GISelKnownBits &Analysis,
+                                            Register R,
+                                            const APInt &DemandedElts,
+                                            const MachineRegisterInfo &MRI,
+                                            unsigned Depth = 0) const override;
 
   bool isKnownNeverNaNForTargetNode(SDValue Op,
                                     const SelectionDAG &DAG,

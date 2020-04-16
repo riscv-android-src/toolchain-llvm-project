@@ -343,7 +343,7 @@ def V_CUBEMA_F32 : VOP3Inst <"v_cubema_f32", VOP3_Profile<VOP_F32_F32_F32_F32>, 
 def V_BFE_U32 : VOP3Inst <"v_bfe_u32", VOP3_Profile<VOP_I32_I32_I32_I32>, AMDGPUbfe_u32>;
 def V_BFE_I32 : VOP3Inst <"v_bfe_i32", VOP3_Profile<VOP_I32_I32_I32_I32>, AMDGPUbfe_i32>;
 def V_BFI_B32 : VOP3Inst <"v_bfi_b32", VOP3_Profile<VOP_I32_I32_I32_I32>, AMDGPUbfi>;
-def V_ALIGNBIT_B32 : VOP3Inst <"v_alignbit_b32", VOP3_Profile<VOP_I32_I32_I32_I32>, int_amdgcn_alignbit>;
+def V_ALIGNBIT_B32 : VOP3Inst <"v_alignbit_b32", VOP3_Profile<VOP_I32_I32_I32_I32>, fshr>;
 def V_ALIGNBYTE_B32 : VOP3Inst <"v_alignbyte_b32", VOP3_Profile<VOP_I32_I32_I32_I32>, int_amdgcn_alignbyte>;
 def V_MIN3_F32 : VOP3Inst <"v_min3_f32", VOP3_Profile<VOP_F32_F32_F32_F32>, AMDGPUfmin3>;
 def V_MIN3_I32 : VOP3Inst <"v_min3_i32", VOP3_Profile<VOP_I32_I32_I32_I32>, AMDGPUsmin3>;
@@ -401,6 +401,20 @@ def V_LSHRREV_B64 : VOP3Inst <"v_lshrrev_b64", VOP3_Profile<VOP_I64_I32_I64>, ls
 def V_ASHRREV_I64 : VOP3Inst <"v_ashrrev_i64", VOP3_Profile<VOP_I64_I32_I64>, ashr_rev>;
 } // End SubtargetPredicate = isGFX8Plus
 } // End SchedRW = [Write64Bit]
+
+def : GCNPat<
+  (i64 (getDivergentFrag<sext>.ret i16:$src)),
+    (REG_SEQUENCE VReg_64,
+      (i32 (V_BFE_I32 $src, (S_MOV_B32 (i32 0)), (S_MOV_B32 (i32 0x10)))), sub0,
+      (i32 (COPY_TO_REGCLASS
+         (V_ASHRREV_I32_e32 (S_MOV_B32 (i32 0x1f)), (i32 (V_BFE_I32 $src, (S_MOV_B32 (i32 0)), (S_MOV_B32 (i32 0x10))))
+      ), VGPR_32)), sub1)
+>;
+
+def : GCNPat<
+  (i32 (getDivergentFrag<sext>.ret i16:$src)),
+  (i32 (V_BFE_I32 $src, (S_MOV_B32 (i32 0)), (S_MOV_B32 (i32 0x10))))
+>;
 
 let SubtargetPredicate = isGFX6GFX7GFX10 in {
 def V_MULLIT_F32 : VOP3Inst <"v_mullit_f32", VOP3_Profile<VOP_F32_F32_F32_F32>>;
@@ -701,6 +715,24 @@ let SubtargetPredicate = isGFX10Plus in {
     BoundControlOrFetchInvalidPermlane<int_amdgcn_permlanex16>,
     V_PERMLANEX16_B32>;
 } // End SubtargetPredicate = isGFX10Plus
+
+class DivFmasPat<ValueType vt, Instruction inst, Register CondReg> : GCNPat<
+  (AMDGPUdiv_fmas (vt (VOP3Mods vt:$src0, i32:$src0_modifiers)),
+                  (vt (VOP3Mods vt:$src1, i32:$src1_modifiers)),
+                  (vt (VOP3Mods vt:$src2, i32:$src2_modifiers)),
+                  (i1 CondReg)),
+  (inst $src0_modifiers, $src0, $src1_modifiers, $src1, $src2_modifiers, $src2)
+>;
+
+let WaveSizePredicate = isWave64 in {
+def : DivFmasPat<f32, V_DIV_FMAS_F32, VCC>;
+def : DivFmasPat<f64, V_DIV_FMAS_F64, VCC>;
+}
+
+let WaveSizePredicate = isWave32 in {
+def : DivFmasPat<f32, V_DIV_FMAS_F32, VCC_LO>;
+def : DivFmasPat<f64, V_DIV_FMAS_F64, VCC_LO>;
+}
 
 //===----------------------------------------------------------------------===//
 // Integer Clamp Patterns

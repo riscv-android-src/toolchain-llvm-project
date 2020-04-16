@@ -46,6 +46,37 @@ class raw_ostream;
 class TargetRegisterClass;
 class TargetRegisterInfo;
 
+// This structure uniquely identifies a basic block section.
+// Possible values are
+//  {Type: Default, Number: (unsigned)} (These are regular section IDs)
+//  {Type: Exception, Number: 0}  (ExceptionSectionID)
+//  {Type: Cold, Number: 0}  (ColdSectionID)
+struct MBBSectionID {
+  enum SectionType {
+    Default = 0, // Regular section (these sections are distinguished by the
+                 // Number field).
+    Exception,   // Special section type for exception handling blocks
+    Cold,        // Special section type for cold blocks
+  } Type;
+  unsigned Number;
+
+  MBBSectionID(unsigned N) : Type(Default), Number(N) {}
+
+  // Special unique sections for cold and exception blocks.
+  const static MBBSectionID ColdSectionID;
+  const static MBBSectionID ExceptionSectionID;
+
+  bool operator==(const MBBSectionID &Other) const {
+    return Type == Other.Type && Number == Other.Number;
+  }
+
+  bool operator!=(const MBBSectionID &Other) const { return !(*this == Other); }
+
+private:
+  // This is only used to construct the special cold and exception sections.
+  MBBSectionID(SectionType T) : Type(T), Number(0) {}
+};
+
 template <> struct ilist_traits<MachineInstr> {
 private:
   friend class MachineBasicBlock; // Set by the owning MachineBasicBlock.
@@ -130,6 +161,15 @@ private:
   /// Indicate that this basic block is the entry block of a cleanup funclet.
   bool IsCleanupFuncletEntry = false;
 
+  /// With basic block sections, this stores the Section ID of the basic block.
+  MBBSectionID SectionID{0};
+
+  // Indicate that this basic block begins a section.
+  bool IsBeginSection = false;
+
+  // Indicate that this basic block ends a section.
+  bool IsEndSection = false;
+
   /// Default target of the callbr of a basic block.
   bool InlineAsmBrDefaultTarget = false;
 
@@ -139,6 +179,9 @@ private:
   /// since getSymbol is a relatively heavy-weight operation, the symbol
   /// is only computed once and is cached.
   mutable MCSymbol *CachedMCSymbol = nullptr;
+
+  /// Used during basic block sections to mark the end of a basic block.
+  MCSymbol *EndMCSymbol = nullptr;
 
   // Intrusive list support
   MachineBasicBlock() = default;
@@ -338,7 +381,7 @@ public:
   /// Add PhysReg as live in to this block, and ensure that there is a copy of
   /// PhysReg to a virtual register of class RC. Return the virtual register
   /// that is a copy of the live in PhysReg.
-  unsigned addLiveIn(MCRegister PhysReg, const TargetRegisterClass *RC);
+  Register addLiveIn(MCRegister PhysReg, const TargetRegisterClass *RC);
 
   /// Remove the specified register from the live in set.
   void removeLiveIn(MCPhysReg Reg,
@@ -415,6 +458,22 @@ public:
   /// Indicates if this is the entry block of a cleanup funclet.
   void setIsCleanupFuncletEntry(bool V = true) { IsCleanupFuncletEntry = V; }
 
+  /// Returns true if this block begins any section.
+  bool isBeginSection() const { return IsBeginSection; }
+
+  /// Returns true if this block ends any section.
+  bool isEndSection() const { return IsEndSection; }
+
+  void setIsBeginSection(bool V = true) { IsBeginSection = V; }
+
+  void setIsEndSection(bool V = true) { IsEndSection = V; }
+
+  /// Returns the section ID of this basic block.
+  MBBSectionID getSectionID() const { return SectionID; }
+
+  /// Sets the section ID for this basic block.
+  void setSectionID(MBBSectionID V) { SectionID = V; }
+
   /// Returns true if this is the indirect dest of an INLINEASM_BR.
   bool isInlineAsmBrIndirectTarget(const MachineBasicBlock *Tgt) const {
     return InlineAsmBrIndirectTargets.count(Tgt);
@@ -452,6 +511,11 @@ public:
   /// the end of the block.
   void moveBefore(MachineBasicBlock *NewAfter);
   void moveAfter(MachineBasicBlock *NewBefore);
+
+  /// Returns true if this and MBB belong to the same section.
+  bool sameSection(const MachineBasicBlock *MBB) const {
+    return getSectionID() == MBB->getSectionID();
+  }
 
   /// Update the terminator instructions in block to account for changes to the
   /// layout. If the block previously used a fallthrough, it may now need a
@@ -817,7 +881,7 @@ public:
   ///
   /// \p Reg must be a physical register.
   LivenessQueryResult computeRegisterLiveness(const TargetRegisterInfo *TRI,
-                                              unsigned Reg,
+                                              MCRegister Reg,
                                               const_iterator Before,
                                               unsigned Neighborhood = 10) const;
 

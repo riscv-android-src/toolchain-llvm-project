@@ -641,6 +641,8 @@ SystemZTargetLowering::SystemZTargetLowering(const TargetMachine &TM,
   setTargetDAGCombine(ISD::FP_ROUND);
   setTargetDAGCombine(ISD::STRICT_FP_ROUND);
   setTargetDAGCombine(ISD::FP_EXTEND);
+  setTargetDAGCombine(ISD::SINT_TO_FP);
+  setTargetDAGCombine(ISD::UINT_TO_FP);
   setTargetDAGCombine(ISD::STRICT_FP_EXTEND);
   setTargetDAGCombine(ISD::BSWAP);
   setTargetDAGCombine(ISD::SDIV);
@@ -2049,8 +2051,9 @@ static void adjustSubwordCmp(SelectionDAG &DAG, const SDLoc &DL,
 
   // We must have an 8- or 16-bit load.
   auto *Load = cast<LoadSDNode>(C.Op0);
-  unsigned NumBits = Load->getMemoryVT().getStoreSizeInBits();
-  if (NumBits != 8 && NumBits != 16)
+  unsigned NumBits = Load->getMemoryVT().getSizeInBits();
+  if ((NumBits != 8 && NumBits != 16) ||
+      NumBits != Load->getMemoryVT().getStoreSizeInBits())
     return;
 
   // The load must be an extending one and the constant must be within the
@@ -4387,7 +4390,7 @@ static bool getShuffleInput(const SmallVectorImpl<int> &Bytes, unsigned Start,
 }
 
 // Bytes is a VPERM-like permute vector, except that -1 is used for
-// undefined bytes.  Return true if it can be performed using VSLDI.
+// undefined bytes.  Return true if it can be performed using VSLDB.
 // When returning true, set StartIndex to the shift amount and OpNo0
 // and OpNo1 to the VPERM operands that should be used as the first
 // and second shift operand respectively.
@@ -4447,14 +4450,14 @@ static SDValue getPermuteNode(SelectionDAG &DAG, const SDLoc &DL,
 
 // Bytes is a VPERM-like permute vector, except that -1 is used for
 // undefined bytes.  Implement it on operands Ops[0] and Ops[1] using
-// VSLDI or VPERM.
+// VSLDB or VPERM.
 static SDValue getGeneralPermuteNode(SelectionDAG &DAG, const SDLoc &DL,
                                      SDValue *Ops,
                                      const SmallVectorImpl<int> &Bytes) {
   for (unsigned I = 0; I < 2; ++I)
     Ops[I] = DAG.getNode(ISD::BITCAST, DL, MVT::v16i8, Ops[I]);
 
-  // First see whether VSLDI can be used.
+  // First see whether VSLDB can be used.
   unsigned StartIndex, OpNo0, OpNo1;
   if (isShlDoublePermute(Bytes, StartIndex, OpNo0, OpNo1))
     return DAG.getNode(SystemZISD::SHL_DOUBLE, DL, MVT::v16i8, Ops[OpNo0],
@@ -6081,6 +6084,32 @@ SDValue SystemZTargetLowering::combineFP_EXTEND(
   return SDValue();
 }
 
+SDValue SystemZTargetLowering::combineINT_TO_FP(
+    SDNode *N, DAGCombinerInfo &DCI) const {
+  if (DCI.Level != BeforeLegalizeTypes)
+    return SDValue();
+  unsigned Opcode = N->getOpcode();
+  EVT OutVT = N->getValueType(0);
+  SelectionDAG &DAG = DCI.DAG;
+  SDValue Op = N->getOperand(0);
+  unsigned OutScalarBits = OutVT.getScalarSizeInBits();
+  unsigned InScalarBits = Op->getValueType(0).getScalarSizeInBits();
+
+  // Insert an extension before type-legalization to avoid scalarization, e.g.:
+  // v2f64 = uint_to_fp v2i16
+  // =>
+  // v2f64 = uint_to_fp (v2i64 zero_extend v2i16)
+  if (OutVT.isVector() && OutScalarBits > InScalarBits) {
+    MVT ExtVT = MVT::getVectorVT(MVT::getIntegerVT(OutVT.getScalarSizeInBits()),
+                                 OutVT.getVectorNumElements());
+    unsigned ExtOpcode =
+      (Opcode == ISD::UINT_TO_FP ? ISD::ZERO_EXTEND : ISD::SIGN_EXTEND);
+    SDValue ExtOp = DAG.getNode(ExtOpcode, SDLoc(N), ExtVT, Op);
+    return DAG.getNode(Opcode, SDLoc(N), OutVT, ExtOp);
+  }
+  return SDValue();
+}
+
 SDValue SystemZTargetLowering::combineBSWAP(
     SDNode *N, DAGCombinerInfo &DCI) const {
   SelectionDAG &DAG = DCI.DAG;
@@ -6408,6 +6437,8 @@ SDValue SystemZTargetLowering::PerformDAGCombine(SDNode *N,
   case ISD::FP_ROUND:           return combineFP_ROUND(N, DCI);
   case ISD::STRICT_FP_EXTEND:
   case ISD::FP_EXTEND:          return combineFP_EXTEND(N, DCI);
+  case ISD::SINT_TO_FP:
+  case ISD::UINT_TO_FP:         return combineINT_TO_FP(N, DCI);
   case ISD::BSWAP:              return combineBSWAP(N, DCI);
   case SystemZISD::BR_CCMASK:   return combineBR_CCMASK(N, DCI);
   case SystemZISD::SELECT_CCMASK: return combineSELECT_CCMASK(N, DCI);

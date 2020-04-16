@@ -29,6 +29,7 @@
 #include "clang/AST/DeclOpenMP.h"
 #include "clang/AST/DeclTemplate.h"
 #include "clang/AST/DeclarationName.h"
+#include "clang/AST/DependenceFlags.h"
 #include "clang/AST/Expr.h"
 #include "clang/AST/ExprCXX.h"
 #include "clang/AST/ExprConcepts.h"
@@ -1005,6 +1006,9 @@ ASTContext::~ASTContext() {
 
   for (APValue *Value : APValueCleanups)
     Value->~APValue();
+
+  // Destroy the OMPTraitInfo objects that life here.
+  llvm::DeleteContainerPointers(OMPTraitInfoVector);
 }
 
 void ASTContext::setTraversalScope(const std::vector<Decl *> &TopLevelDecls) {
@@ -1382,8 +1386,11 @@ void ASTContext::InitBuiltinTypes(const TargetInfo &Target,
   InitBuiltinType(BuiltinFnTy,  BuiltinType::BuiltinFn);
 
   // Placeholder type for OMP array sections.
-  if (LangOpts.OpenMP)
+  if (LangOpts.OpenMP) {
     InitBuiltinType(OMPArraySectionTy, BuiltinType::OMPArraySection);
+    InitBuiltinType(OMPArrayShapingTy, BuiltinType::OMPArrayShaping);
+    InitBuiltinType(OMPIteratorTy, BuiltinType::OMPIterator);
+  }
 
   // C99 6.2.5p11.
   FloatComplexTy      = getComplexType(FloatTy);
@@ -1444,6 +1451,12 @@ void ASTContext::InitBuiltinTypes(const TargetInfo &Target,
 
   // Builtin type used to help define __builtin_va_list.
   VaListTagDecl = nullptr;
+
+  // MSVC predeclares struct _GUID, and we need it to create MSGuidDecls.
+  if (LangOpts.MicrosoftExt || LangOpts.Borland) {
+    MSGuidTagDecl = buildImplicitRecord("_GUID");
+    TUDecl->addDecl(MSGuidTagDecl);
+  }
 }
 
 DiagnosticsEngine &ASTContext::getDiagnostics() const {
@@ -1885,24 +1898,24 @@ TypeInfo ASTContext::getTypeInfoImpl(const Type *T) const {
 
   case Type::IncompleteArray:
   case Type::VariableArray:
-    Width = 0;
-    Align = getTypeAlign(cast<ArrayType>(T)->getElementType());
-    break;
-
   case Type::ConstantArray: {
-    const auto *CAT = cast<ConstantArrayType>(T);
+    // Model non-constant sized arrays as size zero, but track the alignment.
+    uint64_t Size = 0;
+    if (const auto *CAT = dyn_cast<ConstantArrayType>(T))
+      Size = CAT->getSize().getZExtValue();
 
-    TypeInfo EltInfo = getTypeInfo(CAT->getElementType());
-    uint64_t Size = CAT->getSize().getZExtValue();
+    TypeInfo EltInfo = getTypeInfo(cast<ArrayType>(T)->getElementType());
     assert((Size == 0 || EltInfo.Width <= (uint64_t)(-1) / Size) &&
            "Overflow in array type bit size evaluation");
     Width = EltInfo.Width * Size;
     Align = EltInfo.Align;
+    AlignIsRequired = EltInfo.AlignIsRequired;
     if (!getTargetInfo().getCXXABI().isMicrosoft() ||
         getTargetInfo().getPointerWidth(0) == 64)
       Width = llvm::alignTo(Width, Align);
     break;
   }
+
   case Type::ExtVector:
   case Type::Vector: {
     const auto *VT = cast<VectorType>(T);
@@ -2100,16 +2113,16 @@ TypeInfo ASTContext::getTypeInfoImpl(const Type *T) const {
     // Because the length is only known at runtime, we use a dummy value
     // of 0 for the static length.  The alignment values are those defined
     // by the Procedure Call Standard for the Arm Architecture.
-#define SVE_VECTOR_TYPE(Name, Id, SingletonId, ElKind, ElBits, IsSigned, IsFP)\
-    case BuiltinType::Id: \
-      Width = 0; \
-      Align = 128; \
-      break;
-#define SVE_PREDICATE_TYPE(Name, Id, SingletonId, ElKind) \
-    case BuiltinType::Id: \
-      Width = 0; \
-      Align = 16; \
-      break;
+#define SVE_VECTOR_TYPE(Name, Id, SingletonId, NumEls, ElBits, IsSigned, IsFP) \
+  case BuiltinType::Id:                                                        \
+    Width = 0;                                                                 \
+    Align = 128;                                                               \
+    break;
+#define SVE_PREDICATE_TYPE(Name, Id, SingletonId, NumEls)                      \
+  case BuiltinType::Id:                                                        \
+    Width = 0;                                                                 \
+    Align = 16;                                                                \
+    break;
 #include "clang/Basic/AArch64SVEACLETypes.def"
     }
     break;
@@ -2157,6 +2170,11 @@ TypeInfo ASTContext::getTypeInfoImpl(const Type *T) const {
     return getTypeInfo(cast<AdjustedType>(T)->getAdjustedType().getTypePtr());
   case Type::ObjCInterface: {
     const auto *ObjCI = cast<ObjCInterfaceType>(T);
+    if (ObjCI->getDecl()->isInvalidDecl()) {
+      Width = 8;
+      Align = 8;
+      break;
+    }
     const ASTRecordLayout &Layout = getASTObjCInterfaceLayout(ObjCI->getDecl());
     Width = toBits(Layout.getSize());
     Align = toBits(Layout.getAlignment());
@@ -3582,6 +3600,28 @@ QualType ASTContext::getIncompleteArrayType(QualType elementType,
   IncompleteArrayTypes.InsertNode(newType, insertPos);
   Types.push_back(newType);
   return QualType(newType, 0);
+}
+
+/// getScalableVectorType - Return the unique reference to a scalable vector
+/// type of the specified element type and size. VectorType must be a built-in
+/// type.
+QualType ASTContext::getScalableVectorType(QualType EltTy,
+                                           unsigned NumElts) const {
+  if (Target->hasAArch64SVETypes()) {
+    uint64_t EltTySize = getTypeSize(EltTy);
+#define SVE_VECTOR_TYPE(Name, Id, SingletonId, NumEls, ElBits, IsSigned, IsFP) \
+  if (!EltTy->isBooleanType() &&                                               \
+      ((EltTy->hasIntegerRepresentation() &&                                   \
+        EltTy->hasSignedIntegerRepresentation() == IsSigned) ||                \
+       (EltTy->hasFloatingRepresentation() && IsFP)) &&                        \
+      EltTySize == ElBits && NumElts == NumEls)                                \
+    return SingletonId;
+#define SVE_PREDICATE_TYPE(Name, Id, SingletonId, NumEls)                      \
+  if (EltTy->isBooleanType() && NumElts == NumEls)                             \
+    return SingletonId;
+#include "clang/Basic/AArch64SVEACLETypes.def"
+  }
+  return QualType();
 }
 
 /// getVectorType - Return the unique reference to a vector type of
@@ -5100,8 +5140,12 @@ ASTContext::getAutoType(QualType DeducedType, AutoTypeKeyword Keyword,
   void *Mem = Allocate(sizeof(AutoType) +
                        sizeof(TemplateArgument) * TypeConstraintArgs.size(),
                        TypeAlignment);
-  auto *AT = new (Mem) AutoType(DeducedType, Keyword, IsDependent, IsPack,
-                                TypeConstraintConcept, TypeConstraintArgs);
+  auto *AT = new (Mem) AutoType(
+      DeducedType, Keyword,
+      (IsDependent ? TypeDependence::DependentInstantiation
+                   : TypeDependence::None) |
+          (IsPack ? TypeDependence::UnexpandedPack : TypeDependence::None),
+      TypeConstraintConcept, TypeConstraintArgs);
   Types.push_back(AT);
   if (InsertPos)
     AutoTypes.InsertNode(AT, InsertPos);
@@ -5161,11 +5205,11 @@ QualType ASTContext::getAtomicType(QualType T) const {
 /// getAutoDeductType - Get type pattern for deducing against 'auto'.
 QualType ASTContext::getAutoDeductType() const {
   if (AutoDeductTy.isNull())
-    AutoDeductTy = QualType(
-      new (*this, TypeAlignment) AutoType(QualType(), AutoTypeKeyword::Auto,
-                                          /*dependent*/false, /*pack*/false,
-                                          /*concept*/nullptr, /*args*/{}),
-      0);
+    AutoDeductTy = QualType(new (*this, TypeAlignment)
+                                AutoType(QualType(), AutoTypeKeyword::Auto,
+                                         TypeDependence::None,
+                                         /*concept*/ nullptr, /*args*/ {}),
+                            0);
   return AutoDeductTy;
 }
 
@@ -7765,6 +7809,57 @@ CreateSystemZBuiltinVaListDecl(const ASTContext *Context) {
   return Context->buildImplicitTypedef(VaListTagArrayType, "__builtin_va_list");
 }
 
+static TypedefDecl *CreateHexagonBuiltinVaListDecl(const ASTContext *Context) {
+  // typedef struct __va_list_tag {
+  RecordDecl *VaListTagDecl;
+  VaListTagDecl = Context->buildImplicitRecord("__va_list_tag");
+  VaListTagDecl->startDefinition();
+
+  const size_t NumFields = 3;
+  QualType FieldTypes[NumFields];
+  const char *FieldNames[NumFields];
+
+  //   void *CurrentSavedRegisterArea;
+  FieldTypes[0] = Context->getPointerType(Context->VoidTy);
+  FieldNames[0] = "__current_saved_reg_area_pointer";
+
+  //   void *SavedRegAreaEnd;
+  FieldTypes[1] = Context->getPointerType(Context->VoidTy);
+  FieldNames[1] = "__saved_reg_area_end_pointer";
+
+  //   void *OverflowArea;
+  FieldTypes[2] = Context->getPointerType(Context->VoidTy);
+  FieldNames[2] = "__overflow_area_pointer";
+
+  // Create fields
+  for (unsigned i = 0; i < NumFields; ++i) {
+    FieldDecl *Field = FieldDecl::Create(
+        const_cast<ASTContext &>(*Context), VaListTagDecl, SourceLocation(),
+        SourceLocation(), &Context->Idents.get(FieldNames[i]), FieldTypes[i],
+        /*TInfo=*/0,
+        /*BitWidth=*/0,
+        /*Mutable=*/false, ICIS_NoInit);
+    Field->setAccess(AS_public);
+    VaListTagDecl->addDecl(Field);
+  }
+  VaListTagDecl->completeDefinition();
+  Context->VaListTagDecl = VaListTagDecl;
+  QualType VaListTagType = Context->getRecordType(VaListTagDecl);
+
+  // } __va_list_tag;
+  TypedefDecl *VaListTagTypedefDecl =
+      Context->buildImplicitTypedef(VaListTagType, "__va_list_tag");
+
+  QualType VaListTagTypedefType = Context->getTypedefType(VaListTagTypedefDecl);
+
+  // typedef __va_list_tag __builtin_va_list[1];
+  llvm::APInt Size(Context->getTypeSize(Context->getSizeType()), 1);
+  QualType VaListTagArrayType = Context->getConstantArrayType(
+      VaListTagTypedefType, Size, nullptr, ArrayType::Normal, 0);
+
+  return Context->buildImplicitTypedef(VaListTagArrayType, "__builtin_va_list");
+}
+
 static TypedefDecl *CreateVaListDecl(const ASTContext *Context,
                                      TargetInfo::BuiltinVaListKind Kind) {
   switch (Kind) {
@@ -7784,6 +7879,8 @@ static TypedefDecl *CreateVaListDecl(const ASTContext *Context,
     return CreateAAPCSABIBuiltinVaListDecl(Context);
   case TargetInfo::SystemZBuiltinVaList:
     return CreateSystemZBuiltinVaListDecl(Context);
+  case TargetInfo::HexagonBuiltinVaList:
+    return CreateHexagonBuiltinVaListDecl(Context);
   }
 
   llvm_unreachable("Unhandled __builtin_va_list type kind");
@@ -8765,8 +8862,8 @@ QualType ASTContext::mergeFunctionParameterTypes(QualType lhs, QualType rhs,
 }
 
 QualType ASTContext::mergeFunctionTypes(QualType lhs, QualType rhs,
-                                        bool OfBlockPointer,
-                                        bool Unqualified) {
+                                        bool OfBlockPointer, bool Unqualified,
+                                        bool AllowCXX) {
   const auto *lbase = lhs->castAs<FunctionType>();
   const auto *rbase = rhs->castAs<FunctionType>();
   const auto *lproto = dyn_cast<FunctionProtoType>(lbase);
@@ -8840,7 +8937,8 @@ QualType ASTContext::mergeFunctionTypes(QualType lhs, QualType rhs,
   FunctionType::ExtInfo einfo = lbaseInfo.withNoReturn(NoReturn);
 
   if (lproto && rproto) { // two C99 style function prototypes
-    assert(!lproto->hasExceptionSpec() && !rproto->hasExceptionSpec() &&
+    assert((AllowCXX ||
+            (!lproto->hasExceptionSpec() && !rproto->hasExceptionSpec())) &&
            "C++ shouldn't be here");
     // Compatible functions must have the same number of parameters
     if (lproto->getNumParams() != rproto->getNumParams())
@@ -8904,7 +9002,7 @@ QualType ASTContext::mergeFunctionTypes(QualType lhs, QualType rhs,
 
   const FunctionProtoType *proto = lproto ? lproto : rproto;
   if (proto) {
-    assert(!proto->hasExceptionSpec() && "C++ shouldn't be here");
+    assert((AllowCXX || !proto->hasExceptionSpec()) && "C++ shouldn't be here");
     if (proto->isVariadic())
       return {};
     // Check that the types are compatible with the types that
@@ -9699,6 +9797,19 @@ static QualType DecodeTypeFromStr(const char *&Str, const ASTContext &Context,
     else
       Type = Context.getLValueReferenceType(Type);
     break;
+  case 'q': {
+    char *End;
+    unsigned NumElements = strtoul(Str, &End, 10);
+    assert(End != Str && "Missing vector size");
+    Str = End;
+
+    QualType ElementType = DecodeTypeFromStr(Str, Context, Error,
+                                             RequiresICE, false);
+    assert(!RequiresICE && "Can't require vector ICE");
+
+    Type = Context.getScalableVectorType(ElementType, NumElements);
+    break;
+  }
   case 'V': {
     char *End;
     unsigned NumElements = strtoul(Str, &End, 10);
@@ -10475,6 +10586,23 @@ ASTContext::getPredefinedStringLiteralFromCache(StringRef Key) const {
   return Result;
 }
 
+MSGuidDecl *
+ASTContext::getMSGuidDecl(MSGuidDecl::Parts Parts) const {
+  assert(MSGuidTagDecl && "building MS GUID without MS extensions?");
+
+  llvm::FoldingSetNodeID ID;
+  MSGuidDecl::Profile(ID, Parts);
+
+  void *InsertPos;
+  if (MSGuidDecl *Existing = MSGuidDecls.FindNodeOrInsertPos(ID, InsertPos))
+    return Existing;
+
+  QualType GUIDType = getMSGuidType().withConst();
+  MSGuidDecl *New = MSGuidDecl::Create(*this, GUIDType, Parts);
+  MSGuidDecls.InsertNode(New, InsertPos);
+  return New;
+}
+
 bool ASTContext::AtomicUsesUnsupportedLibcall(const AtomicExpr *E) const {
   const llvm::Triple &T = getTargetInfo().getTriple();
   if (!T.isOSDarwin())
@@ -10802,4 +10930,9 @@ void ASTContext::getFunctionFeatureMap(llvm::StringMap<bool> &FeatureMap,
     Target->initFeatureMap(FeatureMap, getDiagnostics(), TargetCPU,
                            Target->getTargetOpts().Features);
   }
+}
+
+OMPTraitInfo &ASTContext::getNewOMPTraitInfo() {
+  OMPTraitInfoVector.push_back(new OMPTraitInfo());
+  return *OMPTraitInfoVector.back();
 }

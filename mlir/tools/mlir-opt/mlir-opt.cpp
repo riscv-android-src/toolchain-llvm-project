@@ -10,11 +10,11 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "mlir/Analysis/Passes.h"
-#include "mlir/InitAllDialects.h"
-#include "mlir/InitAllPasses.h"
+#include "mlir/IR/AsmState.h"
 #include "mlir/IR/Dialect.h"
 #include "mlir/IR/MLIRContext.h"
+#include "mlir/InitAllDialects.h"
+#include "mlir/InitAllPasses.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Support/FileUtilities.h"
@@ -40,8 +40,13 @@ void registerSimpleParametricTilingPass();
 void registerSymbolTestPasses();
 void registerTestAffineDataCopyPass();
 void registerTestAllReduceLoweringPass();
+void registerTestAffineLoopUnswitchingPass();
+void registerTestLinalgMatmulToVectorPass();
+void registerTestLoopPermutationPass();
 void registerTestCallGraphPass();
 void registerTestConstantFold();
+void registerTestConvertGPUKernelToCubinPass();
+void registerTestDominancePass();
 void registerTestFunc();
 void registerTestGpuMemoryPromotionPass();
 void registerTestLinalgTransforms();
@@ -83,6 +88,10 @@ static cl::opt<bool>
                  cl::desc("Run the verifier after each transformation pass"),
                  cl::init(true));
 
+static cl::opt<bool> allowUnregisteredDialects(
+    "allow-unregistered-dialect",
+    cl::desc("Allow operation with no registered dialects"), cl::init(false));
+
 void registerTestPasses() {
   registerConvertToTargetEnvPass();
   registerInliner();
@@ -95,8 +104,15 @@ void registerTestPasses() {
   registerSymbolTestPasses();
   registerTestAffineDataCopyPass();
   registerTestAllReduceLoweringPass();
+  registerTestAffineLoopUnswitchingPass();
+  registerTestLinalgMatmulToVectorPass();
+  registerTestLoopPermutationPass();
   registerTestCallGraphPass();
   registerTestConstantFold();
+#if MLIR_CUDA_CONVERSIONS_ENABLED
+  registerTestConvertGPUKernelToCubinPass();
+#endif
+  registerTestDominancePass();
   registerTestFunc();
   registerTestGpuMemoryPromotionPass();
   registerTestLinalgTransforms();
@@ -112,14 +128,6 @@ void registerTestPasses() {
   registerTestVectorConversions();
   registerTestVectorToLoopsPass();
   registerVectorizerTestPass();
-
-  // The following passes are using global initializers, just link them in.
-  if (std::getenv("bar") != (char *)-1)
-    return;
-
-  // TODO: move these to the test folder.
-  createTestMemRefBoundCheckPass();
-  createTestMemRefDependenceCheckPass();
 }
 
 static cl::opt<bool>
@@ -133,7 +141,9 @@ int main(int argc, char **argv) {
   registerTestPasses();
   InitLLVM y(argc, argv);
 
-  // Register any pass manager command line options.
+  // Register any command line options.
+  registerAsmPrinterCLOptions();
+  registerMLIRContextCLOptions();
   registerPassManagerCLOptions();
   PassPipelineCLParser passPipeline("", "Compiler passes to run");
 
@@ -163,6 +173,12 @@ int main(int argc, char **argv) {
     exit(1);
   }
 
-  return failed(MlirOptMain(output->os(), std::move(file), passPipeline,
-                            splitInputFile, verifyDiagnostics, verifyPasses));
+  if (failed(MlirOptMain(output->os(), std::move(file), passPipeline,
+                         splitInputFile, verifyDiagnostics, verifyPasses,
+                         allowUnregisteredDialects))) {
+    return 1;
+  }
+  // Keep the output file if the invocation of MlirOptMain was successful.
+  output->keep();
+  return 0;
 }

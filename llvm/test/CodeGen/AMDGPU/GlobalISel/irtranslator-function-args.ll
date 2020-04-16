@@ -95,11 +95,10 @@ define void @void_func_i8(i8 %arg0) #0 {
   ; CHECK: bb.1 (%ir-block.0):
   ; CHECK:   liveins: $vgpr0, $sgpr30_sgpr31
   ; CHECK:   [[COPY:%[0-9]+]]:_(s32) = COPY $vgpr0
-  ; CHECK:   [[TRUNC:%[0-9]+]]:_(s16) = G_TRUNC [[COPY]](s32)
-  ; CHECK:   [[TRUNC1:%[0-9]+]]:_(s8) = G_TRUNC [[TRUNC]](s16)
   ; CHECK:   [[COPY1:%[0-9]+]]:sgpr_64 = COPY $sgpr30_sgpr31
+  ; CHECK:   [[TRUNC:%[0-9]+]]:_(s8) = G_TRUNC [[COPY]](s32)
   ; CHECK:   [[DEF:%[0-9]+]]:_(p1) = G_IMPLICIT_DEF
-  ; CHECK:   G_STORE [[TRUNC1]](s8), [[DEF]](p1) :: (store 1 into `i8 addrspace(1)* undef`, addrspace 1)
+  ; CHECK:   G_STORE [[TRUNC]](s8), [[DEF]](p1) :: (store 1 into `i8 addrspace(1)* undef`, addrspace 1)
   ; CHECK:   [[COPY2:%[0-9]+]]:ccr_sgpr_64 = COPY [[COPY1]]
   ; CHECK:   S_SETPC_B64_return [[COPY2]]
   store i8 %arg0, i8 addrspace(1)* undef
@@ -111,8 +110,8 @@ define void @void_func_i8_zeroext(i8 zeroext %arg0) #0 {
   ; CHECK: bb.1 (%ir-block.0):
   ; CHECK:   liveins: $vgpr0, $sgpr30_sgpr31
   ; CHECK:   [[COPY:%[0-9]+]]:_(s32) = COPY $vgpr0
-  ; CHECK:   [[TRUNC:%[0-9]+]]:_(s8) = G_TRUNC [[COPY]](s32)
   ; CHECK:   [[COPY1:%[0-9]+]]:sgpr_64 = COPY $sgpr30_sgpr31
+  ; CHECK:   [[TRUNC:%[0-9]+]]:_(s8) = G_TRUNC [[COPY]](s32)
   ; CHECK:   [[C:%[0-9]+]]:_(s32) = G_CONSTANT i32 12
   ; CHECK:   [[DEF:%[0-9]+]]:_(p1) = G_IMPLICIT_DEF
   ; CHECK:   [[ZEXT:%[0-9]+]]:_(s32) = G_ZEXT [[TRUNC]](s8)
@@ -131,8 +130,8 @@ define void @void_func_i8_signext(i8 signext %arg0) #0 {
   ; CHECK: bb.1 (%ir-block.0):
   ; CHECK:   liveins: $vgpr0, $sgpr30_sgpr31
   ; CHECK:   [[COPY:%[0-9]+]]:_(s32) = COPY $vgpr0
-  ; CHECK:   [[TRUNC:%[0-9]+]]:_(s8) = G_TRUNC [[COPY]](s32)
   ; CHECK:   [[COPY1:%[0-9]+]]:sgpr_64 = COPY $sgpr30_sgpr31
+  ; CHECK:   [[TRUNC:%[0-9]+]]:_(s8) = G_TRUNC [[COPY]](s32)
   ; CHECK:   [[C:%[0-9]+]]:_(s32) = G_CONSTANT i32 12
   ; CHECK:   [[DEF:%[0-9]+]]:_(p1) = G_IMPLICIT_DEF
   ; CHECK:   [[SEXT:%[0-9]+]]:_(s32) = G_SEXT [[TRUNC]](s8)
@@ -201,6 +200,51 @@ define void @void_func_i16_signext(i16 signext %arg0) #0 {
   ret void
 }
 
+define void @void_func_i24(i24 %arg0) #0 {
+  ; CHECK-LABEL: name: void_func_i24
+  ; CHECK: bb.1 (%ir-block.0):
+  ; CHECK:   liveins: $vgpr0, $sgpr30_sgpr31
+  ; CHECK:   [[COPY:%[0-9]+]]:_(s32) = COPY $vgpr0
+  ; CHECK:   [[COPY1:%[0-9]+]]:sgpr_64 = COPY $sgpr30_sgpr31
+  ; CHECK:   [[TRUNC:%[0-9]+]]:_(s24) = G_TRUNC [[COPY]](s32)
+  ; CHECK:   [[DEF:%[0-9]+]]:_(p1) = G_IMPLICIT_DEF
+  ; CHECK:   G_STORE [[TRUNC]](s24), [[DEF]](p1) :: (store 3 into `i24 addrspace(1)* undef`, align 4, addrspace 1)
+  ; CHECK:   [[COPY2:%[0-9]+]]:ccr_sgpr_64 = COPY [[COPY1]]
+  ; CHECK:   S_SETPC_B64_return [[COPY2]]
+  store i24 %arg0, i24 addrspace(1)* undef
+  ret void
+}
+
+define void @void_func_i24_zeroext(i24 zeroext %arg0) #0 {
+  ; CHECK-LABEL: name: void_func_i24_zeroext
+  ; CHECK: bb.1 (%ir-block.0):
+  ; CHECK:   liveins: $vgpr0, $sgpr30_sgpr31
+  ; CHECK:   [[COPY:%[0-9]+]]:_(s32) = COPY $vgpr0
+  ; CHECK:   [[COPY1:%[0-9]+]]:sgpr_64 = COPY $sgpr30_sgpr31
+  ; CHECK:   [[TRUNC:%[0-9]+]]:_(s24) = G_TRUNC [[COPY]](s32)
+  ; CHECK:   [[DEF:%[0-9]+]]:_(p1) = G_IMPLICIT_DEF
+  ; CHECK:   G_STORE [[TRUNC]](s24), [[DEF]](p1) :: (store 3 into `i24 addrspace(1)* undef`, align 4, addrspace 1)
+  ; CHECK:   [[COPY2:%[0-9]+]]:ccr_sgpr_64 = COPY [[COPY1]]
+  ; CHECK:   S_SETPC_B64_return [[COPY2]]
+  store i24 %arg0, i24 addrspace(1)* undef
+  ret void
+}
+
+define void @void_func_i24_signext(i24 signext %arg0) #0 {
+  ; CHECK-LABEL: name: void_func_i24_signext
+  ; CHECK: bb.1 (%ir-block.0):
+  ; CHECK:   liveins: $vgpr0, $sgpr30_sgpr31
+  ; CHECK:   [[COPY:%[0-9]+]]:_(s32) = COPY $vgpr0
+  ; CHECK:   [[COPY1:%[0-9]+]]:sgpr_64 = COPY $sgpr30_sgpr31
+  ; CHECK:   [[TRUNC:%[0-9]+]]:_(s24) = G_TRUNC [[COPY]](s32)
+  ; CHECK:   [[DEF:%[0-9]+]]:_(p1) = G_IMPLICIT_DEF
+  ; CHECK:   G_STORE [[TRUNC]](s24), [[DEF]](p1) :: (store 3 into `i24 addrspace(1)* undef`, align 4, addrspace 1)
+  ; CHECK:   [[COPY2:%[0-9]+]]:ccr_sgpr_64 = COPY [[COPY1]]
+  ; CHECK:   S_SETPC_B64_return [[COPY2]]
+  store i24 %arg0, i24 addrspace(1)* undef
+  ret void
+}
+
 define void @void_func_i32(i32 %arg0) #0 {
   ; CHECK-LABEL: name: void_func_i32
   ; CHECK: bb.1 (%ir-block.0):
@@ -229,6 +273,67 @@ define void @void_func_p3i8(i8 addrspace(3)* %arg0) #0 {
   ret void
 }
 
+define void @void_func_i48(i48 %arg0) #0 {
+  ; CHECK-LABEL: name: void_func_i48
+  ; CHECK: bb.1 (%ir-block.0):
+  ; CHECK:   liveins: $vgpr0, $vgpr1, $sgpr30_sgpr31
+  ; CHECK:   [[COPY:%[0-9]+]]:_(s32) = COPY $vgpr0
+  ; CHECK:   [[COPY1:%[0-9]+]]:_(s32) = COPY $vgpr1
+  ; CHECK:   [[COPY2:%[0-9]+]]:sgpr_64 = COPY $sgpr30_sgpr31
+  ; CHECK:   [[MV:%[0-9]+]]:_(s64) = G_MERGE_VALUES [[COPY]](s32), [[COPY1]](s32)
+  ; CHECK:   [[TRUNC:%[0-9]+]]:_(s48) = G_TRUNC [[MV]](s64)
+  ; CHECK:   [[DEF:%[0-9]+]]:_(p1) = G_IMPLICIT_DEF
+  ; CHECK:   G_STORE [[TRUNC]](s48), [[DEF]](p1) :: (store 6 into `i48 addrspace(1)* undef`, align 8, addrspace 1)
+  ; CHECK:   [[COPY3:%[0-9]+]]:ccr_sgpr_64 = COPY [[COPY2]]
+  ; CHECK:   S_SETPC_B64_return [[COPY3]]
+  store i48 %arg0, i48 addrspace(1)* undef
+  ret void
+}
+
+define void @void_func_i48_zeroext(i48 zeroext %arg0) #0 {
+  ; CHECK-LABEL: name: void_func_i48_zeroext
+  ; CHECK: bb.1 (%ir-block.0):
+  ; CHECK:   liveins: $vgpr0, $vgpr1, $sgpr30_sgpr31
+  ; CHECK:   [[COPY:%[0-9]+]]:_(s32) = COPY $vgpr0
+  ; CHECK:   [[COPY1:%[0-9]+]]:_(s32) = COPY $vgpr1
+  ; CHECK:   [[COPY2:%[0-9]+]]:sgpr_64 = COPY $sgpr30_sgpr31
+  ; CHECK:   [[MV:%[0-9]+]]:_(s64) = G_MERGE_VALUES [[COPY]](s32), [[COPY1]](s32)
+  ; CHECK:   [[TRUNC:%[0-9]+]]:_(s48) = G_TRUNC [[MV]](s64)
+  ; CHECK:   [[C:%[0-9]+]]:_(s64) = G_CONSTANT i64 12
+  ; CHECK:   [[DEF:%[0-9]+]]:_(p1) = G_IMPLICIT_DEF
+  ; CHECK:   [[ZEXT:%[0-9]+]]:_(s64) = G_ZEXT [[TRUNC]](s48)
+  ; CHECK:   [[ADD:%[0-9]+]]:_(s64) = G_ADD [[ZEXT]], [[C]]
+  ; CHECK:   G_STORE [[ADD]](s64), [[DEF]](p1) :: (store 8 into `i64 addrspace(1)* undef`, addrspace 1)
+  ; CHECK:   [[COPY3:%[0-9]+]]:ccr_sgpr_64 = COPY [[COPY2]]
+  ; CHECK:   S_SETPC_B64_return [[COPY3]]
+  %ext = zext i48 %arg0 to i64
+  %add = add i64 %ext, 12
+  store i64 %add, i64 addrspace(1)* undef
+  ret void
+}
+
+define void @void_func_i48_signext(i48 signext %arg0) #0 {
+  ; CHECK-LABEL: name: void_func_i48_signext
+  ; CHECK: bb.1 (%ir-block.0):
+  ; CHECK:   liveins: $vgpr0, $vgpr1, $sgpr30_sgpr31
+  ; CHECK:   [[COPY:%[0-9]+]]:_(s32) = COPY $vgpr0
+  ; CHECK:   [[COPY1:%[0-9]+]]:_(s32) = COPY $vgpr1
+  ; CHECK:   [[COPY2:%[0-9]+]]:sgpr_64 = COPY $sgpr30_sgpr31
+  ; CHECK:   [[MV:%[0-9]+]]:_(s64) = G_MERGE_VALUES [[COPY]](s32), [[COPY1]](s32)
+  ; CHECK:   [[TRUNC:%[0-9]+]]:_(s48) = G_TRUNC [[MV]](s64)
+  ; CHECK:   [[C:%[0-9]+]]:_(s64) = G_CONSTANT i64 12
+  ; CHECK:   [[DEF:%[0-9]+]]:_(p1) = G_IMPLICIT_DEF
+  ; CHECK:   [[SEXT:%[0-9]+]]:_(s64) = G_SEXT [[TRUNC]](s48)
+  ; CHECK:   [[ADD:%[0-9]+]]:_(s64) = G_ADD [[SEXT]], [[C]]
+  ; CHECK:   G_STORE [[ADD]](s64), [[DEF]](p1) :: (store 8 into `i64 addrspace(1)* undef`, addrspace 1)
+  ; CHECK:   [[COPY3:%[0-9]+]]:ccr_sgpr_64 = COPY [[COPY2]]
+  ; CHECK:   S_SETPC_B64_return [[COPY3]]
+  %ext = sext i48 %arg0 to i64
+  %add = add i64 %ext, 12
+  store i64 %add, i64 addrspace(1)* undef
+  ret void
+}
+
 define void @void_func_i64(i64 %arg0) #0 {
   ; CHECK-LABEL: name: void_func_i64
   ; CHECK: bb.1 (%ir-block.0):
@@ -242,6 +347,87 @@ define void @void_func_i64(i64 %arg0) #0 {
   ; CHECK:   [[COPY3:%[0-9]+]]:ccr_sgpr_64 = COPY [[COPY2]]
   ; CHECK:   S_SETPC_B64_return [[COPY3]]
   store i64 %arg0, i64 addrspace(1)* undef
+  ret void
+}
+
+define void @void_func_i95(i95 %arg0) #0 {
+  ; CHECK-LABEL: name: void_func_i95
+  ; CHECK: bb.1 (%ir-block.0):
+  ; CHECK:   liveins: $vgpr0, $vgpr1, $vgpr2, $sgpr30_sgpr31
+  ; CHECK:   [[COPY:%[0-9]+]]:_(s32) = COPY $vgpr0
+  ; CHECK:   [[COPY1:%[0-9]+]]:_(s32) = COPY $vgpr1
+  ; CHECK:   [[COPY2:%[0-9]+]]:_(s32) = COPY $vgpr2
+  ; CHECK:   [[COPY3:%[0-9]+]]:sgpr_64 = COPY $sgpr30_sgpr31
+  ; CHECK:   [[MV:%[0-9]+]]:_(s96) = G_MERGE_VALUES [[COPY]](s32), [[COPY1]](s32), [[COPY2]](s32)
+  ; CHECK:   [[TRUNC:%[0-9]+]]:_(s95) = G_TRUNC [[MV]](s96)
+  ; CHECK:   [[DEF:%[0-9]+]]:_(p1) = G_IMPLICIT_DEF
+  ; CHECK:   G_STORE [[TRUNC]](s95), [[DEF]](p1) :: (store 12 into `i95 addrspace(1)* undef`, align 8, addrspace 1)
+  ; CHECK:   [[COPY4:%[0-9]+]]:ccr_sgpr_64 = COPY [[COPY3]]
+  ; CHECK:   S_SETPC_B64_return [[COPY4]]
+  store i95 %arg0, i95 addrspace(1)* undef
+  ret void
+}
+
+define void @void_func_i95_zeroext(i95 zeroext %arg0) #0 {
+  ; CHECK-LABEL: name: void_func_i95_zeroext
+  ; CHECK: bb.1 (%ir-block.0):
+  ; CHECK:   liveins: $vgpr0, $vgpr1, $vgpr2, $sgpr30_sgpr31
+  ; CHECK:   [[COPY:%[0-9]+]]:_(s32) = COPY $vgpr0
+  ; CHECK:   [[COPY1:%[0-9]+]]:_(s32) = COPY $vgpr1
+  ; CHECK:   [[COPY2:%[0-9]+]]:_(s32) = COPY $vgpr2
+  ; CHECK:   [[COPY3:%[0-9]+]]:sgpr_64 = COPY $sgpr30_sgpr31
+  ; CHECK:   [[MV:%[0-9]+]]:_(s96) = G_MERGE_VALUES [[COPY]](s32), [[COPY1]](s32), [[COPY2]](s32)
+  ; CHECK:   [[TRUNC:%[0-9]+]]:_(s95) = G_TRUNC [[MV]](s96)
+  ; CHECK:   [[C:%[0-9]+]]:_(s96) = G_CONSTANT i96 12
+  ; CHECK:   [[DEF:%[0-9]+]]:_(p1) = G_IMPLICIT_DEF
+  ; CHECK:   [[ZEXT:%[0-9]+]]:_(s96) = G_ZEXT [[TRUNC]](s95)
+  ; CHECK:   [[ADD:%[0-9]+]]:_(s96) = G_ADD [[ZEXT]], [[C]]
+  ; CHECK:   G_STORE [[ADD]](s96), [[DEF]](p1) :: (store 12 into `i96 addrspace(1)* undef`, align 8, addrspace 1)
+  ; CHECK:   [[COPY4:%[0-9]+]]:ccr_sgpr_64 = COPY [[COPY3]]
+  ; CHECK:   S_SETPC_B64_return [[COPY4]]
+  %ext = zext i95 %arg0 to i96
+  %add = add i96 %ext, 12
+  store i96 %add, i96 addrspace(1)* undef
+  ret void
+}
+
+define void @void_func_i95_signext(i95 signext %arg0) #0 {
+  ; CHECK-LABEL: name: void_func_i95_signext
+  ; CHECK: bb.1 (%ir-block.0):
+  ; CHECK:   liveins: $vgpr0, $vgpr1, $vgpr2, $sgpr30_sgpr31
+  ; CHECK:   [[COPY:%[0-9]+]]:_(s32) = COPY $vgpr0
+  ; CHECK:   [[COPY1:%[0-9]+]]:_(s32) = COPY $vgpr1
+  ; CHECK:   [[COPY2:%[0-9]+]]:_(s32) = COPY $vgpr2
+  ; CHECK:   [[COPY3:%[0-9]+]]:sgpr_64 = COPY $sgpr30_sgpr31
+  ; CHECK:   [[MV:%[0-9]+]]:_(s96) = G_MERGE_VALUES [[COPY]](s32), [[COPY1]](s32), [[COPY2]](s32)
+  ; CHECK:   [[TRUNC:%[0-9]+]]:_(s95) = G_TRUNC [[MV]](s96)
+  ; CHECK:   [[C:%[0-9]+]]:_(s96) = G_CONSTANT i96 12
+  ; CHECK:   [[DEF:%[0-9]+]]:_(p1) = G_IMPLICIT_DEF
+  ; CHECK:   [[SEXT:%[0-9]+]]:_(s96) = G_SEXT [[TRUNC]](s95)
+  ; CHECK:   [[ADD:%[0-9]+]]:_(s96) = G_ADD [[SEXT]], [[C]]
+  ; CHECK:   G_STORE [[ADD]](s96), [[DEF]](p1) :: (store 12 into `i96 addrspace(1)* undef`, align 8, addrspace 1)
+  ; CHECK:   [[COPY4:%[0-9]+]]:ccr_sgpr_64 = COPY [[COPY3]]
+  ; CHECK:   S_SETPC_B64_return [[COPY4]]
+  %ext = sext i95 %arg0 to i96
+  %add = add i96 %ext, 12
+  store i96 %add, i96 addrspace(1)* undef
+  ret void
+}
+
+define void @void_func_i96(i96 %arg0) #0 {
+  ; CHECK-LABEL: name: void_func_i96
+  ; CHECK: bb.1 (%ir-block.0):
+  ; CHECK:   liveins: $vgpr0, $vgpr1, $vgpr2, $sgpr30_sgpr31
+  ; CHECK:   [[COPY:%[0-9]+]]:_(s32) = COPY $vgpr0
+  ; CHECK:   [[COPY1:%[0-9]+]]:_(s32) = COPY $vgpr1
+  ; CHECK:   [[COPY2:%[0-9]+]]:_(s32) = COPY $vgpr2
+  ; CHECK:   [[COPY3:%[0-9]+]]:sgpr_64 = COPY $sgpr30_sgpr31
+  ; CHECK:   [[MV:%[0-9]+]]:_(s96) = G_MERGE_VALUES [[COPY]](s32), [[COPY1]](s32), [[COPY2]](s32)
+  ; CHECK:   [[DEF:%[0-9]+]]:_(p1) = G_IMPLICIT_DEF
+  ; CHECK:   G_STORE [[MV]](s96), [[DEF]](p1) :: (store 12 into `i96 addrspace(1)* undef`, align 8, addrspace 1)
+  ; CHECK:   [[COPY4:%[0-9]+]]:ccr_sgpr_64 = COPY [[COPY3]]
+  ; CHECK:   S_SETPC_B64_return [[COPY4]]
+  store i96 %arg0, i96 addrspace(1)* undef
   ret void
 }
 
@@ -1355,12 +1541,11 @@ define void @void_func_struct_i8_i32({ i8, i32 } %arg0) #0 {
   ; CHECK: bb.1 (%ir-block.0):
   ; CHECK:   liveins: $vgpr0, $vgpr1, $sgpr30_sgpr31
   ; CHECK:   [[COPY:%[0-9]+]]:_(s32) = COPY $vgpr0
-  ; CHECK:   [[TRUNC:%[0-9]+]]:_(s16) = G_TRUNC [[COPY]](s32)
-  ; CHECK:   [[TRUNC1:%[0-9]+]]:_(s8) = G_TRUNC [[TRUNC]](s16)
   ; CHECK:   [[COPY1:%[0-9]+]]:_(s32) = COPY $vgpr1
   ; CHECK:   [[COPY2:%[0-9]+]]:sgpr_64 = COPY $sgpr30_sgpr31
+  ; CHECK:   [[TRUNC:%[0-9]+]]:_(s8) = G_TRUNC [[COPY]](s32)
   ; CHECK:   [[DEF:%[0-9]+]]:_(p1) = G_IMPLICIT_DEF
-  ; CHECK:   G_STORE [[TRUNC1]](s8), [[DEF]](p1) :: (store 1 into `{ i8, i32 } addrspace(1)* undef`, align 4, addrspace 1)
+  ; CHECK:   G_STORE [[TRUNC]](s8), [[DEF]](p1) :: (store 1 into `{ i8, i32 } addrspace(1)* undef`, align 4, addrspace 1)
   ; CHECK:   [[C:%[0-9]+]]:_(s64) = G_CONSTANT i64 4
   ; CHECK:   [[PTR_ADD:%[0-9]+]]:_(p1) = G_PTR_ADD [[DEF]], [[C]](s64)
   ; CHECK:   G_STORE [[COPY1]](s32), [[PTR_ADD]](p1) :: (store 4 into `{ i8, i32 } addrspace(1)* undef` + 4, addrspace 1)
@@ -1553,13 +1738,14 @@ define void @void_func_v32i32_i1_i8_i16(<32 x i32> %arg0, i1 %arg1, i8 %arg2, i1
   ; CHECK:   [[FRAME_INDEX:%[0-9]+]]:_(p5) = G_FRAME_INDEX %fixed-stack.3
   ; CHECK:   [[LOAD:%[0-9]+]]:_(s1) = G_LOAD [[FRAME_INDEX]](p5) :: (invariant load 1 from %fixed-stack.3, align 16, addrspace 5)
   ; CHECK:   [[FRAME_INDEX1:%[0-9]+]]:_(p5) = G_FRAME_INDEX %fixed-stack.2
-  ; CHECK:   [[LOAD1:%[0-9]+]]:_(s8) = G_LOAD [[FRAME_INDEX1]](p5) :: (invariant load 1 from %fixed-stack.2, align 4, addrspace 5)
+  ; CHECK:   [[LOAD1:%[0-9]+]]:_(s32) = G_LOAD [[FRAME_INDEX1]](p5) :: (invariant load 4 from %fixed-stack.2, addrspace 5)
   ; CHECK:   [[FRAME_INDEX2:%[0-9]+]]:_(p5) = G_FRAME_INDEX %fixed-stack.1
   ; CHECK:   [[LOAD2:%[0-9]+]]:_(s16) = G_LOAD [[FRAME_INDEX2]](p5) :: (invariant load 2 from %fixed-stack.1, align 8, addrspace 5)
   ; CHECK:   [[FRAME_INDEX3:%[0-9]+]]:_(p5) = G_FRAME_INDEX %fixed-stack.0
   ; CHECK:   [[LOAD3:%[0-9]+]]:_(s16) = G_LOAD [[FRAME_INDEX3]](p5) :: (invariant load 2 from %fixed-stack.0, align 4, addrspace 5)
   ; CHECK:   [[COPY32:%[0-9]+]]:sgpr_64 = COPY $sgpr30_sgpr31
   ; CHECK:   [[BUILD_VECTOR:%[0-9]+]]:_(<32 x s32>) = G_BUILD_VECTOR [[COPY]](s32), [[COPY1]](s32), [[COPY2]](s32), [[COPY3]](s32), [[COPY4]](s32), [[COPY5]](s32), [[COPY6]](s32), [[COPY7]](s32), [[COPY8]](s32), [[COPY9]](s32), [[COPY10]](s32), [[COPY11]](s32), [[COPY12]](s32), [[COPY13]](s32), [[COPY14]](s32), [[COPY15]](s32), [[COPY16]](s32), [[COPY17]](s32), [[COPY18]](s32), [[COPY19]](s32), [[COPY20]](s32), [[COPY21]](s32), [[COPY22]](s32), [[COPY23]](s32), [[COPY24]](s32), [[COPY25]](s32), [[COPY26]](s32), [[COPY27]](s32), [[COPY28]](s32), [[COPY29]](s32), [[COPY30]](s32), [[COPY31]](s32)
+  ; CHECK:   [[TRUNC:%[0-9]+]]:_(s8) = G_TRUNC [[LOAD1]](s32)
   ; CHECK:   [[DEF:%[0-9]+]]:_(p1) = G_IMPLICIT_DEF
   ; CHECK:   [[COPY33:%[0-9]+]]:_(p1) = COPY [[DEF]](p1)
   ; CHECK:   [[COPY34:%[0-9]+]]:_(p1) = COPY [[DEF]](p1)
@@ -1567,7 +1753,7 @@ define void @void_func_v32i32_i1_i8_i16(<32 x i32> %arg0, i1 %arg1, i8 %arg2, i1
   ; CHECK:   [[COPY36:%[0-9]+]]:_(p1) = COPY [[DEF]](p1)
   ; CHECK:   G_STORE [[BUILD_VECTOR]](<32 x s32>), [[DEF]](p1) :: (volatile store 128 into `<32 x i32> addrspace(1)* undef`, addrspace 1)
   ; CHECK:   G_STORE [[LOAD]](s1), [[COPY33]](p1) :: (volatile store 1 into `i1 addrspace(1)* undef`, addrspace 1)
-  ; CHECK:   G_STORE [[LOAD1]](s8), [[COPY34]](p1) :: (volatile store 1 into `i8 addrspace(1)* undef`, addrspace 1)
+  ; CHECK:   G_STORE [[TRUNC]](s8), [[COPY34]](p1) :: (volatile store 1 into `i8 addrspace(1)* undef`, addrspace 1)
   ; CHECK:   G_STORE [[LOAD2]](s16), [[COPY35]](p1) :: (volatile store 2 into `i16 addrspace(1)* undef`, addrspace 1)
   ; CHECK:   G_STORE [[LOAD3]](s16), [[COPY36]](p1) :: (volatile store 2 into `half addrspace(1)* undef`, addrspace 1)
   ; CHECK:   [[COPY37:%[0-9]+]]:ccr_sgpr_64 = COPY [[COPY32]]

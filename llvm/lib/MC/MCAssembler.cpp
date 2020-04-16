@@ -683,14 +683,16 @@ void MCAssembler::writeSectionData(raw_ostream &OS, const MCSection *Sec,
         // directives to fill the contents of virtual sections.
         const MCDataFragment &DF = cast<MCDataFragment>(F);
         if (DF.fixup_begin() != DF.fixup_end())
-          report_fatal_error("cannot have fixups in virtual section!");
+          getContext().reportError(SMLoc(), Sec->getVirtualSectionKind() +
+                                                " section '" + Sec->getName() +
+                                                "' cannot have fixups");
         for (unsigned i = 0, e = DF.getContents().size(); i != e; ++i)
           if (DF.getContents()[i]) {
-            if (auto *ELFSec = dyn_cast<const MCSectionELF>(Sec))
-              report_fatal_error("non-zero initializer found in section '" +
-                  ELFSec->getSectionName() + "'");
-            else
-              report_fatal_error("non-zero initializer found in virtual section");
+            getContext().reportError(SMLoc(),
+                                     Sec->getVirtualSectionKind() +
+                                         " section '" + Sec->getName() +
+                                         "' cannot have non-zero initializers");
+            break;
           }
         break;
       }
@@ -785,9 +787,15 @@ void MCAssembler::layout(MCAsmLayout &Layout) {
   }
 
   // Layout until everything fits.
-  while (layoutOnce(Layout))
+  while (layoutOnce(Layout)) {
     if (getContext().hadError())
       return;
+    // Size of fragments in one section can depend on the size of fragments in
+    // another. If any fragment has changed size, we have to re-layout (and
+    // as a result possibly further relax) all.
+    for (MCSection &Sec : *this)
+      Layout.invalidateFragmentsFrom(&*Sec.begin());
+  }
 
   DEBUG_WITH_TYPE("mc-dump", {
       errs() << "assembler backend - post-relaxation\n--\n";

@@ -18,12 +18,12 @@
 #include "mlir/Dialect/GPU/Passes.h"
 #include "mlir/Dialect/LLVMIR/NVVMDialect.h"
 #include "mlir/IR/BlockAndValueMapping.h"
-#include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "llvm/Support/FormatVariadic.h"
 
 #include "../GPUCommon/IndexIntrinsicsOpLowering.h"
 #include "../GPUCommon/OpToFuncCallLowering.h"
+#include "../PassDetail.h"
 
 using namespace mlir;
 
@@ -51,7 +51,7 @@ struct GPUShuffleOpLowering : public ConvertToLLVMPattern {
   ///         !llvm<"{ float, i1 }">
   ///     %shfl_pred = llvm.extractvalue %shfl[1 : index] :
   ///         !llvm<"{ float, i1 }">
-  PatternMatchResult
+  LogicalResult
   matchAndRewrite(Operation *op, ArrayRef<Value> operands,
                   ConversionPatternRewriter &rewriter) const override {
     Location loc = op->getLoc();
@@ -84,7 +84,7 @@ struct GPUShuffleOpLowering : public ConvertToLLVMPattern {
         loc, predTy, shfl, rewriter.getIndexArrayAttr(1));
 
     rewriter.replaceOp(op, {shflValue, isActiveSrcLane});
-    return matchSuccess();
+    return success();
   }
 };
 
@@ -94,7 +94,7 @@ struct GPUFuncOpLowering : ConvertToLLVMPattern {
                              typeConverter.getDialect()->getContext(),
                              typeConverter) {}
 
-  PatternMatchResult
+  LogicalResult
   matchAndRewrite(Operation *op, ArrayRef<Value> operands,
                   ConversionPatternRewriter &rewriter) const override {
     assert(operands.empty() && "func op is not expected to have operands");
@@ -138,9 +138,9 @@ struct GPUFuncOpLowering : ConvertToLLVMPattern {
     // not specific to function modeling.
     SmallVector<NamedAttribute, 4> attributes;
     for (const auto &attr : gpuFuncOp.getAttrs()) {
-      if (attr.first.is(SymbolTable::getSymbolAttrName()) ||
-          attr.first.is(impl::getTypeAttrName()) ||
-          attr.first.is(gpu::GPUFuncOp::getNumWorkgroupAttributionsAttrName()))
+      if (attr.first == SymbolTable::getSymbolAttrName() ||
+          attr.first == impl::getTypeAttrName() ||
+          attr.first == gpu::GPUFuncOp::getNumWorkgroupAttributionsAttrName())
         continue;
       attributes.push_back(attr);
     }
@@ -219,7 +219,7 @@ struct GPUFuncOpLowering : ConvertToLLVMPattern {
                                       signatureConversion);
 
     rewriter.eraseOp(gpuFuncOp);
-    return matchSuccess();
+    return success();
   }
 };
 
@@ -229,11 +229,11 @@ struct GPUReturnOpLowering : public ConvertToLLVMPattern {
                              typeConverter.getDialect()->getContext(),
                              typeConverter) {}
 
-  PatternMatchResult
+  LogicalResult
   matchAndRewrite(Operation *op, ArrayRef<Value> operands,
                   ConversionPatternRewriter &rewriter) const override {
     rewriter.replaceOpWithNewOp<LLVM::ReturnOp>(op, operands);
-    return matchSuccess();
+    return success();
   }
 };
 
@@ -246,7 +246,7 @@ struct GPUReturnOpLowering : public ConvertToLLVMPattern {
 /// This pass only handles device code and is not meant to be run on GPU host
 /// code.
 class LowerGpuOpsToNVVMOpsPass
-    : public OperationPass<LowerGpuOpsToNVVMOpsPass, gpu::GPUModuleOp> {
+    : public ConvertGpuOpsToNVVMOpsBase<LowerGpuOpsToNVVMOpsPass> {
 public:
   void runOnOperation() override {
     gpu::GPUModuleOp m = getOperation();
@@ -268,7 +268,7 @@ public:
     // which need to be lowered further, which is not supported by a single
     // conversion pass.
     populateGpuRewritePatterns(m.getContext(), patterns);
-    applyPatternsGreedily(m, patterns);
+    applyPatternsAndFoldGreedily(m, patterns);
     patterns.clear();
 
     populateStdToLLVMConversionPatterns(converter, patterns);
@@ -279,8 +279,6 @@ public:
                         LLVM::LogOp, LLVM::Log10Op, LLVM::Log2Op>();
     target.addIllegalOp<FuncOp>();
     target.addLegalDialect<NVVM::NVVMDialect>();
-    target.addDynamicallyLegalOp<mlir::LLVM::CallOp>(
-        gpu::filterIllegalLLVMIntrinsics({"tanh", "tanhf"}, m.getContext()));
     // TODO(csigg): Remove once we support replacing non-root ops.
     target.addLegalOp<gpu::YieldOp, gpu::GPUModuleOp, gpu::ModuleEndOp>();
     if (failed(applyPartialConversion(m, target, patterns, &converter)))
@@ -322,10 +320,7 @@ void mlir::populateGpuToNVVMConversionPatterns(
                                                 "__nv_tanh");
 }
 
-std::unique_ptr<OpPassBase<gpu::GPUModuleOp>>
+std::unique_ptr<OperationPass<gpu::GPUModuleOp>>
 mlir::createLowerGpuOpsToNVVMOpsPass() {
   return std::make_unique<LowerGpuOpsToNVVMOpsPass>();
 }
-
-static PassRegistration<LowerGpuOpsToNVVMOpsPass>
-    pass("convert-gpu-to-nvvm", "Generate NVVM operations for gpu operations");

@@ -244,9 +244,10 @@ static inline bool canFreelyInvertAllUsersOf(Value *V, Value *IgnoredUser) {
 /// If no identity constant exists, replace undef with some other safe constant.
 static inline Constant *getSafeVectorConstantForBinop(
       BinaryOperator::BinaryOps Opcode, Constant *In, bool IsRHSConstant) {
-  assert(In->getType()->isVectorTy() && "Not expecting scalars here");
+  auto *InVTy = dyn_cast<VectorType>(In->getType());
+  assert(InVTy && "Not expecting scalars here");
 
-  Type *EltTy = In->getType()->getVectorElementType();
+  Type *EltTy = InVTy->getElementType();
   auto *SafeC = ConstantExpr::getBinOpIdentity(Opcode, EltTy, IsRHSConstant);
   if (!SafeC) {
     // TODO: Should this be available as a constant utility function? It is
@@ -284,7 +285,7 @@ static inline Constant *getSafeVectorConstantForBinop(
     }
   }
   assert(SafeC && "Must have safe constant for binop");
-  unsigned NumElts = In->getType()->getVectorNumElements();
+  unsigned NumElts = InVTy->getNumElements();
   SmallVector<Constant *, 16> Out(NumElts);
   for (unsigned i = 0; i != NumElts; ++i) {
     Constant *C = In->getAggregateElement(i);
@@ -313,9 +314,6 @@ private:
   // Mode in which we are running the combiner.
   const bool MinimizeSize;
 
-  /// Enable combines that trigger rarely but are costly in compiletime.
-  const bool ExpensiveCombines;
-
   AliasAnalysis *AA;
 
   // Required analyses.
@@ -336,12 +334,12 @@ private:
 
 public:
   InstCombiner(InstCombineWorklist &Worklist, BuilderTy &Builder,
-               bool MinimizeSize, bool ExpensiveCombines, AliasAnalysis *AA,
+               bool MinimizeSize, AliasAnalysis *AA,
                AssumptionCache &AC, TargetLibraryInfo &TLI, DominatorTree &DT,
                OptimizationRemarkEmitter &ORE, BlockFrequencyInfo *BFI,
                ProfileSummaryInfo *PSI, const DataLayout &DL, LoopInfo *LI)
       : Worklist(Worklist), Builder(Builder), MinimizeSize(MinimizeSize),
-        ExpensiveCombines(ExpensiveCombines), AA(AA), AC(AC), TLI(TLI), DT(DT),
+        AA(AA), AC(AC), TLI(TLI), DT(DT),
         DL(DL), SQ(DL, &TLI, &DT, &AC), ORE(ORE), BFI(BFI), PSI(PSI), LI(LI) {}
 
   /// Run the combiner over the entire worklist until it is empty.
@@ -689,6 +687,12 @@ public:
     return &I;
   }
 
+  /// Replace use and add the previously used value to the worklist.
+  void replaceUse(Use &U, Value *NewValue) {
+    Worklist.addValue(U);
+    U = NewValue;
+  }
+
   /// Creates a result tuple for an overflow intrinsic \p II with a given
   /// \p Result and a constant \p Overflow value.
   Instruction *CreateOverflowTuple(IntrinsicInst *II, Value *Result,
@@ -721,11 +725,10 @@ public:
 
     // Make sure that we reprocess all operands now that we reduced their
     // use counts.
-    if (I.getNumOperands() < 8) {
-      for (Use &Operand : I.operands())
-        if (auto *Inst = dyn_cast<Instruction>(Operand))
-          Worklist.add(Inst);
-    }
+    for (Use &Operand : I.operands())
+      if (auto *Inst = dyn_cast<Instruction>(Operand))
+        Worklist.add(Inst);
+
     Worklist.remove(&I);
     I.eraseFromParent();
     MadeIRChange = true;

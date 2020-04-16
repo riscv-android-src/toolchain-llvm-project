@@ -77,6 +77,7 @@ class ObjCAtThrowStmt;
 class ObjCAtSynchronizedStmt;
 class ObjCAutoreleasePoolStmt;
 class ReturnsNonNullAttr;
+class SVETypeFlags;
 
 namespace analyze_os_log {
 class OSLogBufferLayout;
@@ -3894,12 +3895,25 @@ public:
                             SmallVectorImpl<llvm::Value*> &O,
                             const char *name,
                             unsigned shift = 0, bool rightshift = false);
+  llvm::Value *EmitNeonSplat(llvm::Value *V, llvm::Constant *Idx,
+                             const llvm::ElementCount &Count);
   llvm::Value *EmitNeonSplat(llvm::Value *V, llvm::Constant *Idx);
   llvm::Value *EmitNeonShiftVector(llvm::Value *V, llvm::Type *Ty,
                                    bool negateForRightShift);
   llvm::Value *EmitNeonRShiftImm(llvm::Value *Vec, llvm::Value *Amt,
                                  llvm::Type *Ty, bool usgn, const char *name);
   llvm::Value *vectorWrapScalar16(llvm::Value *Op);
+
+  llvm::Type *getSVEType(const SVETypeFlags &TypeFlags);
+  llvm::Value *EmitSVEPredicateCast(llvm::Value *Pred, llvm::VectorType *VTy);
+  llvm::Value *EmitSVEMaskedLoad(const CallExpr *, llvm::Type *ReturnTy,
+                                 SmallVectorImpl<llvm::Value *> &Ops,
+                                 unsigned BuiltinID, bool IsZExtReturn);
+  llvm::Value *EmitSVEMaskedStore(const CallExpr *,
+                                  SmallVectorImpl<llvm::Value *> &Ops,
+                                  unsigned BuiltinID);
+  llvm::Value *EmitAArch64SVEBuiltinExpr(unsigned BuiltinID, const CallExpr *E);
+
   llvm::Value *EmitAArch64BuiltinExpr(unsigned BuiltinID, const CallExpr *E,
                                       llvm::Triple::ArchType Arch);
   llvm::Value *EmitBPFBuiltinExpr(unsigned BuiltinID, const CallExpr *E);

@@ -342,10 +342,16 @@ bool ContinuationIndenter::mustBreak(const LineState &State) {
   if (Previous.is(tok::semi) && State.LineContainsContinuedForLoopSection)
     return true;
   if (Style.Language == FormatStyle::LK_ObjC &&
+      Style.ObjCBreakBeforeNestedBlockParam &&
       Current.ObjCSelectorNameParts > 1 &&
       Current.startsSequence(TT_SelectorName, tok::colon, tok::caret)) {
     return true;
   }
+  // Avoid producing inconsistent states by requiring breaks where they are not
+  // permitted for C# generic type constraints.
+  if (State.Stack.back().IsCSharpGenericTypeConstraint &&
+      Previous.isNot(TT_CSharpGenericTypeConstraintComma))
+    return false;
   if ((startsNextParameter(Current, Style) || Previous.is(tok::semi) ||
        (Previous.is(TT_TemplateCloser) && Current.is(TT_StartOfName) &&
         Style.isCpp() &&
@@ -417,7 +423,7 @@ bool ContinuationIndenter::mustBreak(const LineState &State) {
       State.Stack.back().BreakBeforeParameter && Current.CanBreakBefore)
     return true;
 
-  if (State.Column <= NewLineColumn)
+  if (!State.Line->First->is(tok::kw_enum) && State.Column <= NewLineColumn)
     return false;
 
   if (Style.AlwaysBreakBeforeMultilineStrings &&
@@ -634,9 +640,12 @@ void ContinuationIndenter::addTokenOnCurrentLine(LineState &State, bool DryRun,
     State.Stack.back().NoLineBreak = true;
 
   if (Style.AlignAfterOpenBracket != FormatStyle::BAS_DontAlign &&
+      !State.Stack.back().IsCSharpGenericTypeConstraint &&
       Previous.opensScope() && Previous.isNot(TT_ObjCMethodExpr) &&
-      (Current.isNot(TT_LineComment) || Previous.BlockKind == BK_BracedInit))
+      (Current.isNot(TT_LineComment) || Previous.BlockKind == BK_BracedInit)) {
     State.Stack.back().Indent = State.Column + Spaces;
+    State.Stack.back().IsAligned = true;
+  }
   if (State.Stack.back().AvoidBinPacking && startsNextParameter(Current, Style))
     State.Stack.back().NoLineBreak = true;
   if (startsSegmentOfBuilderTypeCall(Current) &&
@@ -715,6 +724,8 @@ void ContinuationIndenter::addTokenOnCurrentLine(LineState &State, bool DryRun,
   } else if (Previous.is(TT_InheritanceColon)) {
     State.Stack.back().Indent = State.Column;
     State.Stack.back().LastSpace = State.Column;
+  } else if (Current.is(TT_CSharpGenericTypeConstraintColon)) {
+    State.Stack.back().ColonPos = State.Column;
   } else if (Previous.opensScope()) {
     // If a function has a trailing call, indent all parameters from the
     // opening parenthesis. This avoids confusing indents like:
@@ -849,6 +860,7 @@ unsigned ContinuationIndenter::addTokenOnNewLine(LineState &State,
     bool ContinuePPDirective =
         State.Line->InPPDirective && State.Line->Type != LT_ImportStatement;
     Whitespaces.replaceWhitespace(Current, Newlines, State.Column, State.Column,
+                                  State.Stack.back().IsAligned,
                                   ContinuePPDirective);
   }
 
@@ -924,7 +936,13 @@ unsigned ContinuationIndenter::addTokenOnNewLine(LineState &State,
 unsigned ContinuationIndenter::getNewLineColumn(const LineState &State) {
   if (!State.NextToken || !State.NextToken->Previous)
     return 0;
+
   FormatToken &Current = *State.NextToken;
+
+  if (State.Stack.back().IsCSharpGenericTypeConstraint &&
+      Current.isNot(TT_CSharpGenericTypeConstraint))
+    return State.Stack.back().ColonPos + 2;
+
   const FormatToken &Previous = *Current.Previous;
   // If we are continuing an expression, we want to use the continuation indent.
   unsigned ContinuationIndent =
@@ -1106,9 +1124,11 @@ unsigned ContinuationIndenter::moveStateToNextToken(LineState &State,
   assert(State.Stack.size());
   const FormatToken &Current = *State.NextToken;
 
+  if (Current.is(TT_CSharpGenericTypeConstraint))
+    State.Stack.back().IsCSharpGenericTypeConstraint = true;
   if (Current.isOneOf(tok::comma, TT_BinaryOperator))
     State.Stack.back().NoLineBreakInOperand = false;
-  if (Current.is(TT_InheritanceColon))
+  if (Current.isOneOf(TT_InheritanceColon, TT_CSharpGenericTypeConstraintColon))
     State.Stack.back().AvoidBinPacking = true;
   if (Current.is(tok::lessless) && Current.isNot(TT_OverloadedOperator)) {
     if (State.Stack.back().FirstLessLess == 0)
@@ -1329,6 +1349,11 @@ void ContinuationIndenter::moveStatePastScopeOpener(LineState &State,
   if (!Current.opensScope())
     return;
 
+  // Don't allow '<' or '(' in C# generic type constraints to start new scopes.
+  if (Current.isOneOf(tok::less, tok::l_paren) &&
+      State.Stack.back().IsCSharpGenericTypeConstraint)
+    return;
+
   if (Current.MatchingParen && Current.BlockKind == BK_Block) {
     moveStateToNewBlock(State);
     return;
@@ -1393,6 +1418,7 @@ void ContinuationIndenter::moveStatePastScopeOpener(LineState &State,
         (State.Line->Type == LT_ObjCDecl && ObjCBinPackProtocolList);
 
     AvoidBinPacking =
+        (State.Stack.back().IsCSharpGenericTypeConstraint) ||
         (Style.Language == FormatStyle::LK_JavaScript && EndsInComma) ||
         (State.Line->MustBeDeclaration && !BinPackDeclaration) ||
         (!State.Line->MustBeDeclaration && !Style.BinPackArguments) ||

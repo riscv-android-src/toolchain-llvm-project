@@ -241,7 +241,7 @@ private:
     };
   }
 
-  /// Returns an accumulator for comparaison such as min, max. T is the type
+  /// Returns an accumulator for comparison such as min, max. T is the type
   /// of the compare op.
   template <typename T, typename PredicateEnum, PredicateEnum predicate>
   AccumulatorFactory getCmpFactory() const {
@@ -380,8 +380,8 @@ struct GpuAllReduceConversion : public RewritePattern {
   explicit GpuAllReduceConversion(MLIRContext *context)
       : RewritePattern(gpu::GPUFuncOp::getOperationName(), 1, context) {}
 
-  PatternMatchResult matchAndRewrite(Operation *op,
-                                     PatternRewriter &rewriter) const override {
+  LogicalResult matchAndRewrite(Operation *op,
+                                PatternRewriter &rewriter) const override {
     auto funcOp = cast<gpu::GPUFuncOp>(op);
     auto callback = [&](gpu::AllReduceOp reduceOp) {
       GpuAllReduceRewriter(funcOp, reduceOp, rewriter).rewrite();
@@ -391,7 +391,7 @@ struct GpuAllReduceConversion : public RewritePattern {
     };
     while (funcOp.walk(callback).wasInterrupted()) {
     }
-    return matchSuccess();
+    return success();
   }
 };
 } // namespace

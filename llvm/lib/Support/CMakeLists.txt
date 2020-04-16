@@ -87,8 +87,11 @@ add_llvm_component_library(LLVMSupport
   DeltaAlgorithm.cpp
   DAGDeltaAlgorithm.cpp
   DJB.cpp
+  ELFAttributeParser.cpp
+  ELFAttributes.cpp
   Error.cpp
   ErrorHandling.cpp
+  ExtensibleRTTI.cpp
   FileCheck.cpp
   FileCollector.cpp
   FileUtilities.cpp
@@ -115,12 +118,15 @@ add_llvm_component_library(LLVMSupport
   MemoryBuffer.cpp
   MD5.cpp
   NativeFormatting.cpp
+  OptimizedStructLayout.cpp
   Optional.cpp
   Parallel.cpp
   PluginLoader.cpp
   PrettyStackTrace.cpp
   RandomNumberGenerator.cpp
   Regex.cpp
+  RISCVAttributes.cpp
+  RISCVAttributeParser.cpp
   ScaledNumber.cpp
   ScopedPrinter.cpp
   SHA1.cpp

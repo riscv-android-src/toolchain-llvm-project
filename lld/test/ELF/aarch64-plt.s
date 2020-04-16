@@ -5,10 +5,10 @@
 // RUN: ld.lld -shared %t.o %t2.so -o %t.so
 // RUN: ld.lld %t.o %t2.so -o %t.exe
 // RUN: llvm-readobj -S -r %t.so | FileCheck --check-prefix=CHECKDSO %s
-// RUN: llvm-objdump -s -section=.got.plt %t.so | FileCheck --check-prefix=DUMPDSO %s
+// RUN: llvm-objdump -s --section=.got.plt %t.so | FileCheck --check-prefix=DUMPDSO %s
 // RUN: llvm-objdump -d --no-show-raw-insn --print-imm-hex %t.so | FileCheck --check-prefix=DISASMDSO %s
 // RUN: llvm-readobj -S -r %t.exe | FileCheck --check-prefix=CHECKEXE %s
-// RUN: llvm-objdump -s -section=.got.plt %t.exe | FileCheck --check-prefix=DUMPEXE %s
+// RUN: llvm-objdump -s --section=.got.plt %t.exe | FileCheck --check-prefix=DUMPEXE %s
 // RUN: llvm-objdump -d --no-show-raw-insn --print-imm-hex %t.exe | FileCheck --check-prefix=DISASMEXE %s
 
 // CHECKDSO:     Name: .plt
@@ -59,9 +59,9 @@
 // DUMPDSO-NEXT: 30470 40030100 00000000 40030100 00000000
 
 // DISASMDSO: <_start>:
-// DISASMDSO-NEXT:     10330: b       #0x30 <foo@plt>
-// DISASMDSO-NEXT:     10334: b       #0x3c <bar@plt>
-// DISASMDSO-NEXT:     10338: b       #0x48 <weak@plt>
+// DISASMDSO-NEXT:     10330: b       0x10360 <foo@plt>
+// DISASMDSO-NEXT:     10334: b       0x10370 <bar@plt>
+// DISASMDSO-NEXT:     10338: b       0x10380 <weak@plt>
 
 // DISASMDSO: <foo>:
 // DISASMDSO-NEXT:     1033c: nop
@@ -151,9 +151,9 @@
 // DUMPEXE-NEXT:  230410 e0022100 00000000
 
 // DISASMEXE: <_start>:
-// DISASMEXE-NEXT:    2102c8: b #0xc <foo>
-// DISASMEXE-NEXT:    2102cc: b #0x34 <bar@plt>
-// DISASMEXE-NEXT:    2102d0: b #0x40 <weak@plt>
+// DISASMEXE-NEXT:    2102c8: b 0x2102d4 <foo>
+// DISASMEXE-NEXT:    2102cc: b 0x210300 <bar@plt>
+// DISASMEXE-NEXT:    2102d0: b 0x210310 <weak@plt>
 
 // DISASMEXE: <foo>:
 // DISASMEXE-NEXT:    2102d4: nop

@@ -500,6 +500,7 @@ void ASTWriter::WriteTypeAbbrevs() {
   Abv->Add(BitCodeAbbrevOp(0));                         // ProducesResult
   Abv->Add(BitCodeAbbrevOp(0));                         // NoCallerSavedRegs
   Abv->Add(BitCodeAbbrevOp(0));                         // NoCfCheck
+  Abv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Fixed, 1)); // CmseNSCall
   // FunctionProtoType
   Abv->Add(BitCodeAbbrevOp(0));                         // IsVariadic
   Abv->Add(BitCodeAbbrevOp(0));                         // HasTrailingReturn
@@ -570,6 +571,7 @@ static void AddStmtsExprs(llvm::BitstreamWriter &Stream,
   RECORD(EXPR_PREDEFINED);
   RECORD(EXPR_DECL_REF);
   RECORD(EXPR_INTEGER_LITERAL);
+  RECORD(EXPR_FIXEDPOINT_LITERAL);
   RECORD(EXPR_FLOATING_LITERAL);
   RECORD(EXPR_IMAGINARY_LITERAL);
   RECORD(EXPR_STRING_LITERAL);
@@ -756,6 +758,7 @@ void ASTWriter::WriteBlockInfoBlock() {
   RECORD(DELETE_EXPRS_TO_ANALYZE);
   RECORD(CUDA_PRAGMA_FORCE_HOST_DEVICE_DEPTH);
   RECORD(PP_CONDITIONAL_STACK);
+  RECORD(DECLS_TO_CHECK_FOR_DEFERRED_DIAGS);
 
   // SourceManager Block.
   BLOCK(SOURCE_MANAGER_BLOCK);
@@ -3903,7 +3906,7 @@ void ASTWriter::WriteDeclContextVisibleUpdate(const DeclContext *DC) {
 
 /// Write an FP_PRAGMA_OPTIONS block for the given FPOptions.
 void ASTWriter::WriteFPPragmaOptions(const FPOptions &Opts) {
-  RecordData::value_type Record[] = {Opts.getInt()};
+  RecordData::value_type Record[] = {Opts.getAsOpaqueInt()};
   Stream.EmitRecord(FP_PRAGMA_OPTIONS, Record);
 }
 
@@ -4369,6 +4372,8 @@ ASTFileSignature ASTWriter::WriteASTCore(Sema &SemaRef, StringRef isysroot,
   RegisterPredefDecl(Context.VaListTagDecl, PREDEF_DECL_VA_LIST_TAG);
   RegisterPredefDecl(Context.BuiltinMSVaListDecl,
                      PREDEF_DECL_BUILTIN_MS_VA_LIST_ID);
+  RegisterPredefDecl(Context.MSGuidTagDecl,
+                     PREDEF_DECL_BUILTIN_MS_GUID_ID);
   RegisterPredefDecl(Context.ExternCContext, PREDEF_DECL_EXTERN_C_CONTEXT_ID);
   RegisterPredefDecl(Context.MakeIntegerSeqDecl,
                      PREDEF_DECL_MAKE_INTEGER_SEQ_ID);
@@ -4671,6 +4676,11 @@ ASTFileSignature ASTWriter::WriteASTCore(Sema &SemaRef, StringRef isysroot,
                               Buffer.data(), Buffer.size());
   }
 
+  // Build a record containing all of the DeclsToCheckForDeferredDiags.
+  RecordData DeclsToCheckForDeferredDiags;
+  for (auto *D : SemaRef.DeclsToCheckForDeferredDiags)
+    AddDeclRef(D, DeclsToCheckForDeferredDiags);
+
   RecordData DeclUpdatesOffsetsRecord;
 
   // Keep writing types, declarations, and declaration update records
@@ -4706,7 +4716,7 @@ ASTFileSignature ASTWriter::WriteASTCore(Sema &SemaRef, StringRef isysroot,
   WriteReferencedSelectorsPool(SemaRef);
   WriteLateParsedTemplates(SemaRef);
   WriteIdentifierTable(PP, SemaRef.IdResolver, isModule);
-  WriteFPPragmaOptions(SemaRef.getFPOptions());
+  WriteFPPragmaOptions(SemaRef.getCurFPFeatures());
   WriteOpenCLExtensions(SemaRef);
   WriteOpenCLExtensionTypes(SemaRef);
   WriteCUDAPragmas(SemaRef);
@@ -4761,6 +4771,11 @@ ASTFileSignature ASTWriter::WriteASTCore(Sema &SemaRef, StringRef isysroot,
   // Write the record containing declaration references of Sema.
   if (!SemaDeclRefs.empty())
     Stream.EmitRecord(SEMA_DECL_REFS, SemaDeclRefs);
+
+  // Write the record containing decls to be checked for deferred diags.
+  if (!DeclsToCheckForDeferredDiags.empty())
+    Stream.EmitRecord(DECLS_TO_CHECK_FOR_DEFERRED_DIAGS,
+        DeclsToCheckForDeferredDiags);
 
   // Write the record containing CUDA-specific declaration references.
   if (!CUDASpecialDeclRefs.empty())
@@ -6025,8 +6040,8 @@ class OMPClauseWriter : public OMPClauseVisitor<OMPClauseWriter> {
 
 public:
   OMPClauseWriter(ASTRecordWriter &Record) : Record(Record) {}
-#define OPENMP_CLAUSE(Name, Class) void Visit##Class(Class *S);
-#include "clang/Basic/OpenMPKinds.def"
+#define OMP_CLAUSE_CLASS(Enum, Str, Class) void Visit##Class(Class *S);
+#include "llvm/Frontend/OpenMP/OMPKinds.def"
   void writeClause(OMPClause *C);
   void VisitOMPClauseWithPreInit(OMPClauseWithPreInit *C);
   void VisitOMPClauseWithPostUpdate(OMPClauseWithPostUpdate *C);
@@ -6039,7 +6054,7 @@ void ASTRecordWriter::writeOMPClause(OMPClause *C) {
 }
 
 void OMPClauseWriter::writeClause(OMPClause *C) {
-  Record.push_back(C->getClauseKind());
+  Record.push_back(unsigned(C->getClauseKind()));
   Visit(C);
   Record.AddSourceLocation(C->getBeginLoc());
   Record.AddSourceLocation(C->getEndLoc());
@@ -6093,6 +6108,11 @@ void OMPClauseWriter::VisitOMPAllocatorClause(OMPAllocatorClause *C) {
 
 void OMPClauseWriter::VisitOMPCollapseClause(OMPCollapseClause *C) {
   Record.AddStmt(C->getNumForLoops());
+  Record.AddSourceLocation(C->getLParenLoc());
+}
+
+void OMPClauseWriter::VisitOMPDetachClause(OMPDetachClause *C) {
+  Record.AddStmt(C->getEventHandler());
   Record.AddSourceLocation(C->getLParenLoc());
 }
 
@@ -6226,7 +6246,9 @@ void OMPClauseWriter::VisitOMPReductionClause(OMPReductionClause *C) {
   Record.push_back(C->varlist_size());
   VisitOMPClauseWithPostUpdate(C);
   Record.AddSourceLocation(C->getLParenLoc());
+  Record.AddSourceLocation(C->getModifierLoc());
   Record.AddSourceLocation(C->getColonLoc());
+  Record.writeEnum(C->getModifier());
   Record.AddNestedNameSpecifierLoc(C->getQualifierLoc());
   Record.AddDeclarationNameInfo(C->getNameInfo());
   for (auto *VE : C->varlists())
@@ -6360,6 +6382,7 @@ void OMPClauseWriter::VisitOMPDependClause(OMPDependClause *C) {
   Record.push_back(C->varlist_size());
   Record.push_back(C->getNumLoops());
   Record.AddSourceLocation(C->getLParenLoc());
+  Record.AddStmt(C->getModifier());
   Record.push_back(C->getDependencyKind());
   Record.AddSourceLocation(C->getDependencyLoc());
   Record.AddSourceLocation(C->getColonLoc());
@@ -6371,7 +6394,9 @@ void OMPClauseWriter::VisitOMPDependClause(OMPDependClause *C) {
 
 void OMPClauseWriter::VisitOMPDeviceClause(OMPDeviceClause *C) {
   VisitOMPClauseWithPreInit(C);
+  Record.writeEnum(C->getModifier());
   Record.AddStmt(C->getDevice());
+  Record.AddSourceLocation(C->getModifierLoc());
   Record.AddSourceLocation(C->getLParenLoc());
 }
 
@@ -6381,7 +6406,7 @@ void OMPClauseWriter::VisitOMPMapClause(OMPMapClause *C) {
   Record.push_back(C->getTotalComponentListNum());
   Record.push_back(C->getTotalComponentsNum());
   Record.AddSourceLocation(C->getLParenLoc());
-  for (unsigned I = 0; I < OMPMapClause::NumberOfModifiers; ++I) {
+  for (unsigned I = 0; I < NumberOfOMPMapClauseModifiers; ++I) {
     Record.push_back(C->getMapTypeModifier(I));
     Record.AddSourceLocation(C->getMapTypeModifierLoc(I));
   }
@@ -6586,15 +6611,29 @@ void OMPClauseWriter::VisitOMPNontemporalClause(OMPNontemporalClause *C) {
     Record.AddStmt(E);
 }
 
+void OMPClauseWriter::VisitOMPInclusiveClause(OMPInclusiveClause *C) {
+  Record.push_back(C->varlist_size());
+  Record.AddSourceLocation(C->getLParenLoc());
+  for (auto *VE : C->varlists())
+    Record.AddStmt(VE);
+}
+
+void OMPClauseWriter::VisitOMPExclusiveClause(OMPExclusiveClause *C) {
+  Record.push_back(C->varlist_size());
+  Record.AddSourceLocation(C->getLParenLoc());
+  for (auto *VE : C->varlists())
+    Record.AddStmt(VE);
+}
+
 void OMPClauseWriter::VisitOMPOrderClause(OMPOrderClause *C) {
   Record.writeEnum(C->getKind());
   Record.AddSourceLocation(C->getLParenLoc());
   Record.AddSourceLocation(C->getKindKwLoc());
 }
 
-void ASTRecordWriter::writeOMPTraitInfo(const OMPTraitInfo &TI) {
-  writeUInt32(TI.Sets.size());
-  for (const auto &Set : TI.Sets) {
+void ASTRecordWriter::writeOMPTraitInfo(const OMPTraitInfo *TI) {
+  writeUInt32(TI->Sets.size());
+  for (const auto &Set : TI->Sets) {
     writeEnum(Set.Kind);
     writeUInt32(Set.Selectors.size());
     for (const auto &Selector : Set.Selectors) {

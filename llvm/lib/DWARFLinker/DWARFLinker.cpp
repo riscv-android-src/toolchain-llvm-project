@@ -923,15 +923,20 @@ void DWARFLinker::DIECloner::cloneExpression(
         OutputBuffer.push_back(Op.getRawOperand(0));
         RefOffset = Op.getRawOperand(1);
       }
-      auto RefDie = Unit.getOrigUnit().getDIEForOffset(RefOffset);
-      uint32_t RefIdx = Unit.getOrigUnit().getDIEIndex(RefDie);
-      CompileUnit::DIEInfo &Info = Unit.getInfo(RefIdx);
       uint32_t Offset = 0;
-      if (DIE *Clone = Info.Clone)
-        Offset = Clone->getOffset();
-      else
-        Linker.reportWarning("base type ref doesn't point to DW_TAG_base_type.",
-                             File);
+      // Look up the base type. For DW_OP_convert, the operand may be 0 to
+      // instead indicate the generic type. The same holds for
+      // DW_OP_reinterpret, which is currently not supported.
+      if (RefOffset > 0 || Op.getCode() != dwarf::DW_OP_convert) {
+        auto RefDie = Unit.getOrigUnit().getDIEForOffset(RefOffset);
+        uint32_t RefIdx = Unit.getOrigUnit().getDIEIndex(RefDie);
+        CompileUnit::DIEInfo &Info = Unit.getInfo(RefIdx);
+        if (DIE *Clone = Info.Clone)
+          Offset = Clone->getOffset();
+        else
+          Linker.reportWarning(
+              "base type ref doesn't point to DW_TAG_base_type.", File);
+      }
       uint8_t ULEB[16];
       unsigned RealSize = encodeULEB128(Offset, ULEB, ULEBsize);
       if (RealSize > ULEBsize) {
@@ -1051,6 +1056,10 @@ unsigned DWARFLinker::DIECloner::cloneAddressAttribute(
     if (Die.getTag() == dwarf::DW_TAG_call_site)
       Addr = (Info.OrigCallReturnPc ? Info.OrigCallReturnPc : Addr) +
              Info.PCOffset;
+  } else if (AttrSpec.Attr == dwarf::DW_AT_call_pc) {
+    // Relocate the address of a branch instruction within a call site entry.
+    if (Die.getTag() == dwarf::DW_TAG_call_site)
+      Addr = (Info.OrigCallPc ? Info.OrigCallPc : Addr) + Info.PCOffset;
   }
 
   Die.addValue(DIEAlloc, static_cast<dwarf::Attribute>(AttrSpec.Attr),
@@ -1909,6 +1918,14 @@ static uint64_t getDwoId(const DWARFDie &CUDie, const DWARFUnit &Unit) {
   return 0;
 }
 
+static std::string remapPath(StringRef Path,
+                             const objectPrefixMap &ObjectPrefixMap) {
+  for (const auto &Entry : ObjectPrefixMap)
+    if (Path.startswith(Entry.first))
+      return (Twine(Entry.second) + Path.substr(Entry.first.size())).str();
+  return Path.str();
+}
+
 bool DWARFLinker::registerModuleReference(
     DWARFDie CUDie, const DWARFUnit &Unit, const DwarfFile &File,
     OffsetsStringPool &StringPool, UniquingStringPool &UniquingStringPool,
@@ -1918,6 +1935,8 @@ bool DWARFLinker::registerModuleReference(
       CUDie.find({dwarf::DW_AT_dwo_name, dwarf::DW_AT_GNU_dwo_name}), "");
   if (PCMfile.empty())
     return false;
+  if (Options.ObjectPrefixMap)
+    PCMfile = remapPath(PCMfile, *Options.ObjectPrefixMap);
 
   // Clang module DWARF skeleton CUs abuse this for the path to the module.
   uint64_t DwoId = getDwoId(CUDie, Unit);

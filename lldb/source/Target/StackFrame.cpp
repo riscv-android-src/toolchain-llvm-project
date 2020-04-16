@@ -1499,7 +1499,7 @@ lldb::ValueObjectSP DoGuessValueAt(StackFrame &frame, ConstString reg,
   // +18 that assigns to rdi, and calls itself recursively for that dereference
   //   DoGuessValueAt(frame, rdi, 8, dis, vars, 0x18) finds the instruction at
   //   +14 that assigns to rdi, and calls itself recursively for that
-  //   derefernece
+  //   dereference
   //     DoGuessValueAt(frame, rbp, -8, dis, vars, 0x14) finds "f" in the
   //     variable list.
   //     Returns a ValueObject for f.  (That's what was stored at rbp-8 at +14)
@@ -1861,6 +1861,7 @@ void StackFrame::UpdatePreviousFrameFromCurrentFrame(StackFrame &curr_frame) {
   m_concrete_frame_index = curr_frame.m_concrete_frame_index;
   m_reg_context_sp = curr_frame.m_reg_context_sp;
   m_frame_code_addr = curr_frame.m_frame_code_addr;
+  m_behaves_like_zeroth_frame = curr_frame.m_behaves_like_zeroth_frame;
   assert(!m_sc.target_sp || !curr_frame.m_sc.target_sp ||
          m_sc.target_sp.get() == curr_frame.m_sc.target_sp.get());
   assert(!m_sc.module_sp || !curr_frame.m_sc.module_sp ||

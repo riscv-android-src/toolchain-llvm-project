@@ -11,24 +11,24 @@
 
 ; RUN: lld-link /out:%T/main.exe /entry:main /include:f2 /subsystem:console %T/main.lto.obj %T/foo.lto.obj
 ; RUN: llvm-readobj --file-headers %T/main.exe | FileCheck -check-prefix=HEADERS-11 %s
-; RUN: llvm-objdump -d %T/main.exe | FileCheck -check-prefix=TEXT-11 %s
+; RUN: llvm-objdump -d %T/main.exe | FileCheck --check-prefix=TEXT-11 %s
 ; RUN: lld-link /out:%T/main.exe /entry:main /include:f2 /subsystem:console %T/main.lto.obj %T/foo.lto.lib /verbose 2>&1 | FileCheck -check-prefix=VERBOSE %s
 ; RUN: llvm-readobj --file-headers %T/main.exe | FileCheck -check-prefix=HEADERS-11 %s
-; RUN: llvm-objdump -d %T/main.exe | FileCheck -check-prefix=TEXT-11 %s
+; RUN: llvm-objdump -d %T/main.exe | FileCheck --check-prefix=TEXT-11 %s
 
 ; RUN: lld-link /out:%T/main.exe /entry:main /subsystem:console %T/main.obj %T/foo.lto.obj
 ; RUN: llvm-readobj --file-headers %T/main.exe | FileCheck -check-prefix=HEADERS-01 %s
-; RUN: llvm-objdump -d %T/main.exe | FileCheck -check-prefix=TEXT-01 %s
+; RUN: llvm-objdump -d %T/main.exe | FileCheck --check-prefix=TEXT-01 %s
 ; RUN: lld-link /out:%T/main.exe /entry:main /subsystem:console %T/main.obj %T/foo.lto.lib
 ; RUN: llvm-readobj --file-headers %T/main.exe | FileCheck -check-prefix=HEADERS-01 %s
-; RUN: llvm-objdump -d %T/main.exe | FileCheck -check-prefix=TEXT-01 %s
+; RUN: llvm-objdump -d %T/main.exe | FileCheck --check-prefix=TEXT-01 %s
 
 ; RUN: lld-link /out:%T/main.exe /entry:main /subsystem:console %T/main.lto.obj %T/foo.obj
 ; RUN: llvm-readobj --file-headers %T/main.exe | FileCheck -check-prefix=HEADERS-10 %s
-; RUN: llvm-objdump -d %T/main.exe | FileCheck -check-prefix=TEXT-10 %s
+; RUN: llvm-objdump -d %T/main.exe | FileCheck --check-prefix=TEXT-10 %s
 ; RUN: lld-link /out:%T/main.exe /entry:main /subsystem:console %T/main.lto.obj %T/foo.lib
 ; RUN: llvm-readobj --file-headers %T/main.exe | FileCheck -check-prefix=HEADERS-10 %s
-; RUN: llvm-objdump -d %T/main.exe | FileCheck -check-prefix=TEXT-10 %s
+; RUN: llvm-objdump -d %T/main.exe | FileCheck --check-prefix=TEXT-10 %s
 
 ; VERBOSE: foo.lto.lib({{.*}}foo.lto.obj)
 
@@ -59,7 +59,7 @@
 ; TEXT-01-EMPTY:
 ; TEXT-01-NEXT: <.text>:
 ; TEXT-01-NEXT: subq	$40, %rsp
-; TEXT-01-NEXT: callq	23
+; TEXT-01-NEXT: callq	0x140001020
 ; TEXT-01-NEXT: xorl	%eax, %eax
 ; TEXT-01-NEXT: addq	$40, %rsp
 ; TEXT-01-NEXT: retq
@@ -118,7 +118,7 @@
 ; TEXT-10-NEXT: int3
 ; TEXT-10-NEXT: int3
 ; TEXT-10-NEXT: subq	$40, %rsp
-; TEXT-10-NEXT: callq	-41
+; TEXT-10-NEXT: callq	0x140001000
 ; TEXT-10-NEXT: xorl	%eax, %eax
 ; TEXT-10-NEXT: addq	$40, %rsp
 ; TEXT-10-NEXT: retq

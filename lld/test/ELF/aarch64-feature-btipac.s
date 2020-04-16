@@ -11,12 +11,12 @@
 
 # RUN: ld.lld %t1.o %t3btipac.o --shared --soname=t.so -o %t.so
 # RUN: llvm-readelf -n %t.so | FileCheck --check-prefix BTIPACPROP %s
-# RUN: llvm-objdump -d -mattr=+v8.5a --no-show-raw-insn %t.so | FileCheck --check-prefix BTIPACSO %s
+# RUN: llvm-objdump -d --mattr=+v8.5a --no-show-raw-insn %t.so | FileCheck --check-prefix BTIPACSO %s
 # RUN: llvm-readelf --dynamic-table %t.so | FileCheck --check-prefix BTIPACDYN %s
 
 # BTIPACSO: Disassembly of section .text:
 # BTIPACSO: 0000000000010348 <func2>:
-# BTIPACSO-NEXT:    10348:              bl      #56 <func3@plt>
+# BTIPACSO-NEXT:    10348:              bl      0x10380 <func3@plt>
 # BTIPACSO-NEXT:                        ret
 # BTIPACSO: 0000000000010350 <func3>:
 # BTIPACSO-NEXT:    10350:              ret
@@ -47,12 +47,12 @@
 
 # RUN: ld.lld %t.o %t3btipac.o %t.so -o %t.exe
 # RUN: llvm-readelf -n %t.exe | FileCheck --check-prefix=BTIPACPROP %s
-# RUN: llvm-objdump -d -mattr=+v8.5a --no-show-raw-insn %t.exe | FileCheck --check-prefix BTIPACEX %s
+# RUN: llvm-objdump -d --mattr=+v8.5a --no-show-raw-insn %t.exe | FileCheck --check-prefix BTIPACEX %s
 # RUN: llvm-readelf --dynamic-table %t.exe | FileCheck --check-prefix BTIPACDYNEX %s
 
 # BTIPACEX: Disassembly of section .text:
 # BTIPACEX: 0000000000210370 <func1>:
-# BTIPACEX-NEXT:   210370:              bl      #48 <func2@plt>
+# BTIPACEX-NEXT:   210370:              bl      0x2103a0 <func2@plt>
 # BTIPACEX-NEXT:                        ret
 # BTIPACEX-NEXT:                        ret
 # BTIPACEX: 000000000021037c <func3>:
@@ -80,12 +80,12 @@
 ## Check that combinations of BTI+PAC with 0 properties results in standard PLT
 
 # RUN: ld.lld %t.o %t3.o %t.so -o %t.exe
-# RUN: llvm-objdump -d -mattr=+v8.5a --no-show-raw-insn %t.exe | FileCheck --check-prefix EX %s
+# RUN: llvm-objdump -d --mattr=+v8.5a --no-show-raw-insn %t.exe | FileCheck --check-prefix EX %s
 # RUN: llvm-readelf --dynamic-table %t.exe | FileCheck --check-prefix=NODYN %s
 
 # EX: Disassembly of section .text:
 # EX: 00000000002102e0 <func1>:
-# EX-NEXT:   2102e0: bl      #48 <func2@plt>
+# EX-NEXT:   2102e0: bl      0x210310 <func2@plt>
 # EX-NEXT:           ret
 # EX-NEXT:           ret
 # EX: 00000000002102ec <func3>:
@@ -121,7 +121,7 @@
 # FORCE-WARN: aarch64-feature-btipac.s.tmp3.o: -z force-bti: file does not have GNU_PROPERTY_AARCH64_FEATURE_1_BTI property
 
 # RUN: llvm-readelf -n %t.exe | FileCheck --check-prefix=BTIPACPROP %s
-# RUN: llvm-objdump -d -mattr=+v8.5a --no-show-raw-insn %t.exe | FileCheck --check-prefix BTIPACEX2 %s
+# RUN: llvm-objdump -d --mattr=+v8.5a --no-show-raw-insn %t.exe | FileCheck --check-prefix BTIPACEX2 %s
 # RUN: llvm-readelf --dynamic-table %t.exe | FileCheck --check-prefix BTIPACDYN2 %s
 .section ".note.gnu.property", "a"
 .long 4
@@ -146,7 +146,7 @@ func1:
 
 # BTIPACEX2: Disassembly of section .text:
 # BTIPACEX2: 0000000000210370 <func1>:
-# BTIPACEX2-NEXT:   210370:              bl      #48 <func2@plt>
+# BTIPACEX2-NEXT:   210370:              bl      0x2103a0 <func2@plt>
 # BTIPACEX2-NEXT:                        ret
 # BTIPACEX2-NEXT:                        ret
 # BTIPACEX2: 000000000021037c <func3>:

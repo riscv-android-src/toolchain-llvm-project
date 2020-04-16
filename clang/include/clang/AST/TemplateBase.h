@@ -14,7 +14,7 @@
 #ifndef LLVM_CLANG_AST_TEMPLATEBASE_H
 #define LLVM_CLANG_AST_TEMPLATEBASE_H
 
-#include "clang/AST/DependencyFlags.h"
+#include "clang/AST/DependenceFlags.h"
 #include "clang/AST/NestedNameSpecifier.h"
 #include "clang/AST/TemplateName.h"
 #include "clang/AST/Type.h"
@@ -82,8 +82,7 @@ public:
     /// The template argument is an expression, and we've not resolved it to one
     /// of the other forms yet, either because it's dependent or because we're
     /// representing a non-canonical template argument (for instance, in a
-    /// TemplateSpecializationType). Also used to represent a non-dependent
-    /// __uuidof expression (a Microsoft extension).
+    /// TemplateSpecializationType).
     Expression,
 
     /// The template argument is actually a parameter pack. Arguments are stored
@@ -669,6 +668,9 @@ struct alignas(void *) ASTTemplateKWAndArgsInfo {
   void initializeFrom(SourceLocation TemplateKWLoc,
                       const TemplateArgumentListInfo &List,
                       TemplateArgumentLoc *OutArgArray);
+  // FIXME: The parameter Deps is the result populated by this method, the
+  // caller doesn't need it since it is populated by computeDependence. remove
+  // it.
   void initializeFrom(SourceLocation TemplateKWLoc,
                       const TemplateArgumentListInfo &List,
                       TemplateArgumentLoc *OutArgArray,
