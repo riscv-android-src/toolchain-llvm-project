@@ -3051,11 +3051,21 @@ SDValue PPCTargetLowering::LowerGlobalAddress(SDValue Op,
   // 64-bit SVR4 ABI & AIX ABI code is always position-independent.
   // The actual address of the GlobalValue is stored in the TOC.
   if (Subtarget.is64BitELFABI() || Subtarget.isAIXABI()) {
-    if (!isAccessedAsGotIndirect(Op) && Subtarget.isUsingPCRelativeCalls()) {
+    if (Subtarget.isUsingPCRelativeCalls()) {
       EVT Ty = getPointerTy(DAG.getDataLayout());
-      SDValue GA = DAG.getTargetGlobalAddress(GV, DL, Ty, GSDN->getOffset(),
-                                              PPCII::MO_PCREL_FLAG);
-      return DAG.getNode(PPCISD::MAT_PCREL_ADDR, DL, Ty, GA);
+      if (isAccessedAsGotIndirect(Op)) {
+        SDValue GA = DAG.getTargetGlobalAddress(GV, DL, Ty, GSDN->getOffset(),
+                                                PPCII::MO_PCREL_FLAG |
+                                                    PPCII::MO_GOT_FLAG);
+        SDValue MatPCRel = DAG.getNode(PPCISD::MAT_PCREL_ADDR, DL, Ty, GA);
+        SDValue Load = DAG.getLoad(MVT::i64, DL, DAG.getEntryNode(), MatPCRel,
+                                   MachinePointerInfo());
+        return Load;
+      } else {
+        SDValue GA = DAG.getTargetGlobalAddress(GV, DL, Ty, GSDN->getOffset(),
+                                                PPCII::MO_PCREL_FLAG);
+        return DAG.getNode(PPCISD::MAT_PCREL_ADDR, DL, Ty, GA);
+      }
     }
     setUsesTOCBasePtr(DAG);
     SDValue GA = DAG.getTargetGlobalAddress(GV, DL, PtrVT, GSDN->getOffset());
@@ -7131,12 +7141,11 @@ SDValue PPCTargetLowering::LowerFormalArguments_AIX(
       continue;
 
     if (Flags.isByVal() && VA.isMemLoc()) {
-      if (Flags.getByValSize() != 0)
-        report_fatal_error(
-            "ByVal arguments passed on stack not implemented yet");
-
+      const unsigned Size =
+          alignTo(Flags.getByValSize() ? Flags.getByValSize() : PtrByteSize,
+                  PtrByteSize);
       const int FI = MF.getFrameInfo().CreateFixedObject(
-          PtrByteSize, VA.getLocMemOffset(), /* IsImmutable */ false,
+          Size, VA.getLocMemOffset(), /* IsImmutable */ false,
           /* IsAliased */ true);
       SDValue FIN = DAG.getFrameIndex(FI, PtrVT);
       InVals.push_back(FIN);
@@ -8201,9 +8210,10 @@ bool PPCTargetLowering::canReuseLoadAddress(SDValue Op, EVT MemVT,
                                             SelectionDAG &DAG,
                                             ISD::LoadExtType ET) const {
   SDLoc dl(Op);
+  bool ValidFPToUint = Op.getOpcode() == ISD::FP_TO_UINT &&
+                       (Subtarget.hasFPCVT() || Op.getValueType() == MVT::i32);
   if (ET == ISD::NON_EXTLOAD &&
-      (Op.getOpcode() == ISD::FP_TO_UINT ||
-       Op.getOpcode() == ISD::FP_TO_SINT) &&
+      (ValidFPToUint || Op.getOpcode() == ISD::FP_TO_SINT) &&
       isOperationLegalOrCustom(Op.getOpcode(),
                                Op.getOperand(0).getValueType())) {
 

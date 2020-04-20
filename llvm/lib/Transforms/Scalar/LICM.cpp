@@ -46,6 +46,7 @@
 #include "llvm/Analysis/MemoryBuiltins.h"
 #include "llvm/Analysis/MemorySSA.h"
 #include "llvm/Analysis/MemorySSAUpdater.h"
+#include "llvm/Analysis/MustExecute.h"
 #include "llvm/Analysis/OptimizationRemarkEmitter.h"
 #include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/Analysis/ScalarEvolutionAliasAnalysis.h"
@@ -330,7 +331,7 @@ bool LoopInvariantCodeMotion::runOnLoop(
   BasicBlock *Preheader = L->getLoopPreheader();
 
   // Compute loop safety information.
-  ICFLoopSafetyInfo SafetyInfo(DT);
+  ICFLoopSafetyInfo SafetyInfo;
   SafetyInfo.computeLoopSafetyInfo(L);
 
   // We want to visit all of the instructions in this loop... that are not parts
