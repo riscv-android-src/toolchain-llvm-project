@@ -827,10 +827,12 @@ class Configuration(object):
         enable_warnings = self.get_lit_bool('enable_warnings',
                                             default_enable_warnings)
         self.cxx.useWarnings(enable_warnings)
-        self.cxx.warning_flags += [
-            '-D_LIBCPP_HAS_NO_PRAGMA_SYSTEM_HEADER',
-            '-Wall', '-Wextra'
-        ]
+        self.cxx.warning_flags += ['-Wall', '-Wextra']
+        # On GCC, the libc++ headers cause errors due to throw() decorators
+        # on operator new clashing with those from the test suite, so we
+        # don't enable warnings in system headers on GCC.
+        if self.cxx.type != 'gcc':
+            self.cxx.warning_flags += ['-D_LIBCPP_HAS_NO_PRAGMA_SYSTEM_HEADER']
         if self.cxx.hasWarningFlag('-Wuser-defined-warnings'):
             self.cxx.warning_flags += ['-Wuser-defined-warnings']
             self.config.available_features.add('diagnose-if-support')
