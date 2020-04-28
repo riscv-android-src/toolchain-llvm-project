@@ -31,6 +31,9 @@ libcxx_sources := \
     condition_variable_destructor.cpp \
     debug.cpp \
     exception.cpp \
+    filesystem/directory_iterator.cpp \
+    filesystem/int128_builtins.cpp \
+    filesystem/operations.cpp \
     functional.cpp \
     future.cpp \
     hash.cpp \
