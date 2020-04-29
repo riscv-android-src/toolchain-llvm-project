@@ -39,8 +39,7 @@ libcxxabi_src_files := \
 
 libcxxabi_includes := \
     $(LOCAL_PATH)/include \
-    $(LOCAL_PATH)/libunwind/include \
-    $(LOCAL_PATH)/../../../external/libcxx/include \
+    $(LOCAL_PATH)/../libcxx/include \
 
 libcxxabi_cflags := -D__STDC_FORMAT_MACROS
 libcxxabi_cppflags := -std=c++11 -Wno-unknown-attributes -DHAS_THREAD_LOCAL
