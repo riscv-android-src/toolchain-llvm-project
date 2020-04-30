@@ -425,6 +425,9 @@ class Configuration(object):
                 intMacroValue(macros['__cpp_concepts']) < 201811:
             self.config.available_features.add('libcpp-no-concepts')
 
+        if sys.platform.lower().strip() == 'win32':
+            self.config.available_features.add('host-windows')
+
         if self.target_info.is_windows():
             self.config.available_features.add('windows')
             if self.cxx_stdlib_under_test == 'libc++':
@@ -650,7 +653,7 @@ class Configuration(object):
     def configure_compile_flags_exceptions(self):
         enable_exceptions = self.get_lit_bool('enable_exceptions', True)
         if not enable_exceptions:
-            self.config.available_features.add('libcpp-no-exceptions')
+            self.config.available_features.add('no-exceptions')
             self.cxx.compile_flags += ['-fno-exceptions']
 
     def configure_compile_flags_rtti(self):
