@@ -51,9 +51,13 @@ class Configuration(libcxx.test.config.Configuration):
         self.cxx.link_flags.append('-Wl,--exclude-libs,libgcc.a')
 
     def configure_features(self):
-        self.config.available_features.add(self.get_lit_conf('std'))
         self.config.available_features.add('long_tests')
         self.config.available_features.add('c++filesystem-disabled')
+        self.config.available_features.add('libcpp-no-concepts')
+
+    def configure_modules(self):
+        # Not something we support yet.
+        pass
 
     def get_test_format(self):
         # Note that we require that the caller has cleaned this directory,
