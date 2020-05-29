@@ -41,6 +41,8 @@
 using namespace lldb;
 using namespace lldb_private;
 
+LLDB_PLUGIN_DEFINE(ObjectFilePECOFF)
+
 struct CVInfoPdb70 {
   // 16-byte GUID
   struct _Guid {
@@ -778,6 +780,9 @@ std::unique_ptr<CallFrameInfo> ObjectFilePECOFF::CreateCallFrameInfo() {
   data_directory data_dir_exception =
       m_coff_header_opt.data_dirs[coff_data_dir_exception_table];
   if (!data_dir_exception.vmaddr)
+    return {};
+
+  if (m_coff_header.machine != llvm::COFF::IMAGE_FILE_MACHINE_AMD64)
     return {};
 
   return std::make_unique<PECallFrameInfo>(*this, data_dir_exception.vmaddr,

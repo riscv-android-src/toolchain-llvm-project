@@ -17,7 +17,6 @@
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Analysis/VectorUtils.h"
 #include "llvm/Config/llvm-config.h"
-#include "llvm/IR/CallSite.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/Instruction.h"
@@ -100,8 +99,8 @@ LazyCallGraph::EdgeSequence &LazyCallGraph::Node::populateSlow() {
   // safety of optimizing a direct call edge.
   for (BasicBlock &BB : *F)
     for (Instruction &I : BB) {
-      if (auto CS = CallSite(&I))
-        if (Function *Callee = CS.getCalledFunction())
+      if (auto *CB = dyn_cast<CallBase>(&I))
+        if (Function *Callee = CB->getCalledFunction())
           if (!Callee->isDeclaration())
             if (Callees.insert(Callee).second) {
               Visited.insert(Callee);
@@ -1566,6 +1565,21 @@ void LazyCallGraph::removeDeadFunction(Function &F) {
   // allocators.
 }
 
+void LazyCallGraph::addNewFunctionIntoSCC(Function &NewF, SCC &C) {
+  addNodeToSCC(C, createNode(NewF));
+}
+
+void LazyCallGraph::addNewFunctionIntoRefSCC(Function &NewF, RefSCC &RC) {
+  Node &N = createNode(NewF);
+
+  auto *C = createSCC(RC, SmallVector<Node *, 1>());
+  addNodeToSCC(*C, N);
+
+  auto Index = RC.SCCIndices.size();
+  RC.SCCIndices[C] = Index;
+  RC.SCCs.push_back(C);
+}
+
 LazyCallGraph::Node &LazyCallGraph::insertInto(Function &F, Node *&MappedN) {
   return *new (MappedN = BPA.Allocate()) Node(*this, F);
 }
@@ -1578,6 +1592,21 @@ void LazyCallGraph::updateGraphPtrs() {
 
   for (auto *RC : PostOrderRefSCCs)
     RC->G = this;
+}
+
+LazyCallGraph::Node &LazyCallGraph::createNode(Function &F) {
+  assert(!lookup(F) && "node already exists");
+
+  Node &N = get(F);
+  NodeMap[&F] = &N;
+  N.DFSNumber = N.LowLink = -1;
+  N.populate();
+  return N;
+}
+
+void LazyCallGraph::addNodeToSCC(LazyCallGraph::SCC &C, Node &N) {
+  C.Nodes.push_back(&N);
+  SCCMap[&N] = &C;
 }
 
 template <typename RootsT, typename GetBeginT, typename GetEndT,

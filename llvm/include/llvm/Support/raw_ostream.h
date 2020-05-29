@@ -86,16 +86,16 @@ public:
     RESET,
   };
 
-  static const Colors BLACK = Colors::BLACK;
-  static const Colors RED = Colors::RED;
-  static const Colors GREEN = Colors::GREEN;
-  static const Colors YELLOW = Colors::YELLOW;
-  static const Colors BLUE = Colors::BLUE;
-  static const Colors MAGENTA = Colors::MAGENTA;
-  static const Colors CYAN = Colors::CYAN;
-  static const Colors WHITE = Colors::WHITE;
-  static const Colors SAVEDCOLOR = Colors::SAVEDCOLOR;
-  static const Colors RESET = Colors::RESET;
+  static constexpr Colors BLACK = Colors::BLACK;
+  static constexpr Colors RED = Colors::RED;
+  static constexpr Colors GREEN = Colors::GREEN;
+  static constexpr Colors YELLOW = Colors::YELLOW;
+  static constexpr Colors BLUE = Colors::BLUE;
+  static constexpr Colors MAGENTA = Colors::MAGENTA;
+  static constexpr Colors CYAN = Colors::CYAN;
+  static constexpr Colors WHITE = Colors::WHITE;
+  static constexpr Colors SAVEDCOLOR = Colors::SAVEDCOLOR;
+  static constexpr Colors RESET = Colors::RESET;
 
   explicit raw_ostream(bool unbuffered = false)
       : BufferMode(unbuffered ? BufferKind::Unbuffered
@@ -358,9 +358,9 @@ private:
 /// Call the appropriate insertion operator, given an rvalue reference to a
 /// raw_ostream object and return a stream of the same type as the argument.
 template <typename OStream, typename T>
-typename std::enable_if<!std::is_reference<OStream>::value &&
-                            std::is_base_of<raw_ostream, OStream>::value,
-                        OStream &&>::type
+std::enable_if_t<!std::is_reference<OStream>::value &&
+                     std::is_base_of<raw_ostream, OStream>::value,
+                 OStream &&>
 operator<<(OStream &&OS, const T &Value) {
   OS << Value;
   return std::move(OS);

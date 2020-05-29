@@ -112,11 +112,9 @@ bool DWARFVerifier::verifyUnitHeader(const DWARFDataExtractor DebugInfoData,
   bool ValidAbbrevOffset = true;
 
   uint64_t OffsetStart = *Offset;
-  Length = DebugInfoData.getU32(Offset);
-  if (Length == dwarf::DW_LENGTH_DWARF64) {
-    Length = DebugInfoData.getU64(Offset);
-    isUnitDWARF64 = true;
-  }
+  DwarfFormat Format;
+  std::tie(Length, Format) = DebugInfoData.getInitialLength(Offset);
+  isUnitDWARF64 = Format == DWARF64;
   Version = DebugInfoData.getU16(Offset);
 
   if (Version >= 5) {
@@ -354,7 +352,7 @@ bool DWARFVerifier::handleDebugInfo() {
 
   OS << "Verifying .debug_types Unit Header Chain...\n";
   DObj.forEachTypesSections([&](const DWARFSection &S) {
-    NumErrors += verifyUnitSection(S, DW_SECT_TYPES);
+    NumErrors += verifyUnitSection(S, DW_SECT_EXT_TYPES);
   });
   return NumErrors == 0;
 }

@@ -156,6 +156,10 @@ protected:
   /// Defaults to false.
   bool AllowAtInName = false;
 
+  /// This is true if the assembler allows $ @ ? characters at the start of
+  /// symbol names. Defaults to false.
+  bool AllowSymbolAtNameStart = false;
+
   /// If this is true, symbol names with invalid characters will be printed in
   /// quotes.
   bool SupportsQuotedNames = true;
@@ -318,9 +322,10 @@ protected:
   /// symbol that can be hidden (unexported).  Defaults to false.
   bool HasWeakDefCanBeHiddenDirective = false;
 
-  /// True if we have a .linkonce directive.  This is used on cygwin/mingw.
+  /// True if we should mark symbols as global instead of weak, for
+  /// weak*/linkonce*, if the symbol has a comdat.
   /// Defaults to false.
-  bool HasLinkOnceDirective = false;
+  bool AvoidWeakIfComdat = false;
 
   /// True if we have a .lglobl directive, which is used to emit the information
   /// of a static symbol into the symbol table. Defaults to false.
@@ -537,6 +542,7 @@ public:
   const char *getCode64Directive() const { return Code64Directive; }
   unsigned getAssemblerDialect() const { return AssemblerDialect; }
   bool doesAllowAtInName() const { return AllowAtInName; }
+  bool doesAllowSymbolAtNameStart() const { return AllowSymbolAtNameStart; }
   bool supportsNameQuoting() const { return SupportsQuotedNames; }
 
   bool doesSupportDataRegionDirectives() const {
@@ -585,7 +591,7 @@ public:
     return HasWeakDefCanBeHiddenDirective;
   }
 
-  bool hasLinkOnceDirective() const { return HasLinkOnceDirective; }
+  bool avoidWeakIfComdat() const { return AvoidWeakIfComdat; }
 
   bool hasDotLGloblDirective() const { return HasDotLGloblDirective; }
 

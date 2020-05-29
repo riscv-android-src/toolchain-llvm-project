@@ -17,7 +17,6 @@
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/Analysis/LoopAccessAnalysis.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
-#include "llvm/IR/IRBuilder.h"
 #include "llvm/Support/CheckedArithmetic.h"
 
 namespace llvm {
@@ -254,6 +253,7 @@ template <typename T> class ArrayRef;
 class DemandedBits;
 class GetElementPtrInst;
 template <typename InstTy> class InterleaveGroup;
+class IRBuilderBase;
 class Loop;
 class ScalarEvolution;
 class TargetTransformInfo;
@@ -262,6 +262,15 @@ class Value;
 
 namespace Intrinsic {
 typedef unsigned ID;
+}
+
+/// A helper function for converting Scalar types to vector types.
+/// If the incoming type is void, we return void. If the VF is 1, we return
+/// the scalar type.
+inline Type *ToVectorTy(Type *Scalar, unsigned VF, bool isScalable = false) {
+  if (Scalar->isVoidTy() || VF == 1)
+    return Scalar;
+  return VectorType::get(Scalar, {VF, isScalable});
 }
 
 /// Identify if the intrinsic is trivially vectorizable.
@@ -318,6 +327,38 @@ const Value *getSplatValue(const Value *V);
 /// This may be more powerful than the related getSplatValue() because it is
 /// not limited by finding a scalar source value to a splatted vector.
 bool isSplatValue(const Value *V, int Index = -1, unsigned Depth = 0);
+
+/// Replace each shuffle mask index with the scaled sequential indices for an
+/// equivalent mask of narrowed elements. Mask elements that are less than 0
+/// (sentinel values) are repeated in the output mask.
+///
+/// Example with Scale = 4:
+///   <4 x i32> <3, 2, 0, -1> -->
+///   <16 x i8> <12, 13, 14, 15, 8, 9, 10, 11, 0, 1, 2, 3, -1, -1, -1, -1>
+///
+/// This is the reverse process of widening shuffle mask elements, but it always
+/// succeeds because the indexes can always be multiplied (scaled up) to map to
+/// narrower vector elements.
+void narrowShuffleMaskElts(int Scale, ArrayRef<int> Mask,
+                           SmallVectorImpl<int> &ScaledMask);
+
+/// Try to transform a shuffle mask by replacing elements with the scaled index
+/// for an equivalent mask of widened elements. If all mask elements that would
+/// map to a wider element of the new mask are the same negative number
+/// (sentinel value), that element of the new mask is the same value. If any
+/// element in a given slice is negative and some other element in that slice is
+/// not the same value, return false (partial matches with sentinel values are
+/// not allowed).
+///
+/// Example with Scale = 4:
+///   <16 x i8> <12, 13, 14, 15, 8, 9, 10, 11, 0, 1, 2, 3, -1, -1, -1, -1> -->
+///   <4 x i32> <3, 2, 0, -1>
+///
+/// This is the reverse process of narrowing shuffle mask elements if it
+/// succeeds. This transform is not always possible because indexes may not
+/// divide evenly (scale down) to map to wider vector elements.
+bool widenShuffleMaskElts(int Scale, ArrayRef<int> Mask,
+                          SmallVectorImpl<int> &ScaledMask);
 
 /// Compute a map of integer instructions to their minimum legal type
 /// size.
@@ -394,7 +435,7 @@ Instruction *propagateMetadata(Instruction *I, ArrayRef<Value *> VL);
 /// Note: The result is a mask of 0's and 1's, as opposed to the other
 /// create[*]Mask() utilities which create a shuffle mask (mask that
 /// consists of indices).
-Constant *createBitMaskForGaps(IRBuilder<> &Builder, unsigned VF,
+Constant *createBitMaskForGaps(IRBuilderBase &Builder, unsigned VF,
                                const InterleaveGroup<Instruction> &Group);
 
 /// Create a mask with replicated elements.
@@ -409,8 +450,8 @@ Constant *createBitMaskForGaps(IRBuilder<> &Builder, unsigned VF,
 /// For example, the mask for \p ReplicationFactor=3 and \p VF=4 is:
 ///
 ///   <0,0,0,1,1,1,2,2,2,3,3,3>
-Constant *createReplicatedMask(IRBuilder<> &Builder, unsigned ReplicationFactor,
-                               unsigned VF);
+llvm::SmallVector<int, 16> createReplicatedMask(unsigned ReplicationFactor,
+                                                unsigned VF);
 
 /// Create an interleave shuffle mask.
 ///
@@ -423,8 +464,7 @@ Constant *createReplicatedMask(IRBuilder<> &Builder, unsigned ReplicationFactor,
 /// For example, the mask for VF = 4 and NumVecs = 2 is:
 ///
 ///   <0, 4, 1, 5, 2, 6, 3, 7>.
-Constant *createInterleaveMask(IRBuilder<> &Builder, unsigned VF,
-                               unsigned NumVecs);
+llvm::SmallVector<int, 16> createInterleaveMask(unsigned VF, unsigned NumVecs);
 
 /// Create a stride shuffle mask.
 ///
@@ -438,8 +478,8 @@ Constant *createInterleaveMask(IRBuilder<> &Builder, unsigned VF,
 /// For example, the mask for Start = 0, Stride = 2, and VF = 4 is:
 ///
 ///   <0, 2, 4, 6>
-Constant *createStrideMask(IRBuilder<> &Builder, unsigned Start,
-                           unsigned Stride, unsigned VF);
+llvm::SmallVector<int, 16> createStrideMask(unsigned Start, unsigned Stride,
+                                            unsigned VF);
 
 /// Create a sequential shuffle mask.
 ///
@@ -452,8 +492,8 @@ Constant *createStrideMask(IRBuilder<> &Builder, unsigned Start,
 /// For example, the mask for Start = 0, NumInsts = 4, and NumUndefs = 4 is:
 ///
 ///   <0, 1, 2, 3, undef, undef, undef, undef>
-Constant *createSequentialMask(IRBuilder<> &Builder, unsigned Start,
-                               unsigned NumInts, unsigned NumUndefs);
+llvm::SmallVector<int, 16>
+createSequentialMask(unsigned Start, unsigned NumInts, unsigned NumUndefs);
 
 /// Concatenate a list of vectors.
 ///
@@ -462,7 +502,7 @@ Constant *createSequentialMask(IRBuilder<> &Builder, unsigned Start,
 /// their element types should be the same. The number of elements in the
 /// vectors should also be the same; however, if the last vector has fewer
 /// elements, it will be padded with undefs.
-Value *concatenateVectors(IRBuilder<> &Builder, ArrayRef<Value *> Vecs);
+Value *concatenateVectors(IRBuilderBase &Builder, ArrayRef<Value *> Vecs);
 
 /// Given a mask vector of the form <Y x i1>, Return true if all of the
 /// elements of this predicate mask are false or undef.  That is, return true
@@ -521,7 +561,10 @@ public:
 
   bool isReverse() const { return Reverse; }
   uint32_t getFactor() const { return Factor; }
-  uint32_t getAlignment() const { return Alignment.value(); }
+  LLVM_ATTRIBUTE_DEPRECATED(uint32_t getAlignment() const,
+                            "Use getAlign instead.") {
+    return Alignment.value();
+  }
   Align getAlign() const { return Alignment; }
   uint32_t getNumMembers() const { return Members.size(); }
 
@@ -655,7 +698,7 @@ public:
                         const LoopAccessInfo *LAI)
       : PSE(PSE), TheLoop(L), DT(DT), LI(LI), LAI(LAI) {}
 
-  ~InterleavedAccessInfo() { reset(); }
+  ~InterleavedAccessInfo() { invalidateGroups(); }
 
   /// Analyze the interleaved accesses and collect them in interleave
   /// groups. Substitute symbolic strides using \p Strides.
@@ -666,15 +709,23 @@ public:
   /// Invalidate groups, e.g., in case all blocks in loop will be predicated
   /// contrary to original assumption. Although we currently prevent group
   /// formation for predicated accesses, we may be able to relax this limitation
-  /// in the future once we handle more complicated blocks.
-  void reset() {
+  /// in the future once we handle more complicated blocks. Returns true if any
+  /// groups were invalidated.
+  bool invalidateGroups() {
+    if (InterleaveGroups.empty()) {
+      assert(
+          !RequiresScalarEpilogue &&
+          "RequiresScalarEpilog should not be set without interleave groups");
+      return false;
+    }
+
     InterleaveGroupMap.clear();
     for (auto *Ptr : InterleaveGroups)
       delete Ptr;
     InterleaveGroups.clear();
     RequiresScalarEpilogue = false;
+    return true;
   }
-
 
   /// Check if \p Instr belongs to any interleave group.
   bool isInterleaved(Instruction *Instr) const {

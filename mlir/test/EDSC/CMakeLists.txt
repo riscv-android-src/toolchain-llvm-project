@@ -7,6 +7,7 @@ llvm_update_compile_flags(mlir-edsc-builder-api-test)
 target_link_libraries(mlir-edsc-builder-api-test
   PRIVATE
   MLIRAffineOps
+  MLIRAffineEDSC
   MLIREDSC
   MLIRIR
   MLIRLinalgEDSC
@@ -14,16 +15,9 @@ target_link_libraries(mlir-edsc-builder-api-test
   MLIRLoopOps
   MLIRStandardOps
   MLIRTransforms
+  MLIRVector
   LLVMCore
   LLVMSupport
 )
 
 target_include_directories(mlir-edsc-builder-api-test PRIVATE ..)
-
-whole_archive_link(mlir-edsc-builder-api-test
-  MLIRAffineOps
-  MLIRLinalgOps
-  MLIRLoopOps
-  MLIRStandardOps
-  MLIRTransforms
-)

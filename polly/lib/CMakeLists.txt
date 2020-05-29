@@ -25,6 +25,7 @@ endif ()
 # the sources them to be recompiled for each of them.
 add_llvm_pass_plugin(Polly
   NO_MODULE
+  SUBPROJECT Polly
   Analysis/DependenceInfo.cpp
   Analysis/PolyhedralInfo.cpp
   Analysis/ScopDetection.cpp
@@ -106,7 +107,7 @@ if (GPU_CODEGEN)
   llvm_map_components_to_libnames(nvptx_libs NVPTX)
 endif ()
 
-if (LLVM_LINK_LLVM_DYLIB)
+if (LLVM_LINK_LLVM_DYLIB AND NOT LLVM_POLLY_LINK_INTO_TOOLS)
   # The shlib/dylib contains all the LLVM components
   # (including NVPTX is enabled) already. Adding them to target_link_libraries
   # would cause them being twice in the address space

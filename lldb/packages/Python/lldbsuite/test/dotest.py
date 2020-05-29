@@ -349,7 +349,8 @@ def parseOptionsAndInitTestdirs():
                 logging.error('"%s" is not a setting in the form "key=value"',
                               setting[0])
                 sys.exit(-1)
-            configuration.settings.append(setting[0].split('=', 1))
+            setting_list = setting[0].split('=', 1)
+            configuration.settings.append((setting_list[0], setting_list[1]))
 
     if args.d:
         sys.stdout.write(
@@ -428,6 +429,17 @@ def parseOptionsAndInitTestdirs():
         configuration.results_formatter_name = (
             "lldbsuite.test_event.formatter.results_formatter.ResultsFormatter")
 
+    # Reproducer arguments
+    if args.capture_path and args.replay_path:
+        logging.error('Cannot specify both a capture and a replay path.')
+        sys.exit(-1)
+
+    if args.capture_path:
+        configuration.capture_path = args.capture_path
+
+    if args.replay_path:
+        configuration.replay_path = args.replay_path
+
     # rerun-related arguments
     configuration.rerun_all_issues = args.rerun_all_issues
 
@@ -454,6 +466,9 @@ def parseOptionsAndInitTestdirs():
 
     if args.lldb_libs_dir:
         configuration.lldb_libs_dir = args.lldb_libs_dir
+
+    if args.enabled_plugins:
+        configuration.enabled_plugins = args.enabled_plugins
 
     # Gather all the dirs passed on the command line.
     if len(args.args) > 0:
@@ -504,6 +519,7 @@ def setupSysPath():
         sys.exit(-1)
 
     os.environ["LLDB_TEST"] = scriptPath
+    os.environ["LLDB_TEST_SRC"] = lldbsuite.lldb_test_root
 
     # Set up the root build directory.
     builddir = configuration.test_build_dir
@@ -773,16 +789,6 @@ def visit(prefix, dir, names):
             raise
 
 
-def setSetting(setting, value):
-    import lldb
-    ci = lldb.DBG.GetCommandInterpreter()
-    res = lldb.SBCommandReturnObject()
-    cmd = 'setting set %s %s'%(setting, value)
-    print(cmd)
-    ci.HandleCommand(cmd, res, False)
-    if not res.Succeeded():
-        raise Exception('failed to run "%s"'%cmd)
-
 # ======================================== #
 #                                          #
 # Execution of the test driver starts here #
@@ -808,6 +814,8 @@ def checkDsymForUUIDIsNotOn():
 
 
 def exitTestSuite(exitCode=None):
+    # lldb.py does SBDebugger.Initialize().
+    # Call SBDebugger.Terminate() on exit.
     import lldb
     lldb.SBDebugger.Terminate()
     if exitCode:
@@ -930,7 +938,7 @@ def checkWatchpointSupport():
 def checkDebugInfoSupport():
     import lldb
 
-    platform = lldb.DBG.GetSelectedPlatform().GetTriple().split('-')[2]
+    platform = lldb.selected_platform.GetTriple().split('-')[2]
     compiler = configuration.compiler
     skipped = []
     for cat in test_categories.debug_info_categories:
@@ -960,16 +968,25 @@ def run_suite():
 
     setupSysPath()
 
-
-    # For the time being, let's bracket the test runner within the
-    # lldb.SBDebugger.Initialize()/Terminate() pair.
+    import lldbconfig
+    if configuration.capture_path or configuration.replay_path:
+        lldbconfig.INITIALIZE = False
     import lldb
+
+    if configuration.capture_path:
+        lldb.SBReproducer.Capture(configuration.capture_path)
+        lldb.SBReproducer.SetAutoGenerate(True)
+    elif configuration.replay_path:
+        lldb.SBReproducer.PassiveReplay(configuration.replay_path)
+
+    if not lldbconfig.INITIALIZE:
+        lldb.SBDebugger.Initialize()
+
+    # Use host platform by default.
+    lldb.selected_platform = lldb.SBPlatform.GetHostPlatform()
 
     # Now we can also import lldbutil
     from lldbsuite.test import lldbutil
-
-    # Create a singleton SBDebugger in the lldb namespace.
-    lldb.DBG = lldb.SBDebugger.Create()
 
     if configuration.lldb_platform_name:
         print("Setting up remote platform '%s'" %
@@ -1019,7 +1036,7 @@ def run_suite():
         if not lldb.remote_platform.SetWorkingDirectory(
                 configuration.lldb_platform_working_dir):
             raise Exception("failed to set working directory '%s'" % configuration.lldb_platform_working_dir)
-        lldb.DBG.SetSelectedPlatform(lldb.remote_platform)
+        lldb.selected_platform = lldb.remote_platform
     else:
         lldb.remote_platform = None
         configuration.lldb_platform_working_dir = None
@@ -1030,7 +1047,7 @@ def run_suite():
     build_dir = configuration.test_build_dir
     lldbutil.mkdir_p(build_dir)
 
-    target_platform = lldb.DBG.GetSelectedPlatform().GetTriple().split('-')[2]
+    target_platform = lldb.selected_platform.GetTriple().split('-')[2]
 
     checkLibcxxSupport()
     checkLibstdcxxSupport()
@@ -1050,25 +1067,13 @@ def run_suite():
             "netbsd" in target_platform or
             "windows" in target_platform)
 
-    # Collect tests from the specified testing directories. If a test
-    # subdirectory filter is explicitly specified, limit the search to that
-    # subdirectory.
-    exclusive_test_subdir = configuration.get_absolute_path_to_exclusive_test_subdir()
-    if exclusive_test_subdir:
-        dirs_to_search = [exclusive_test_subdir]
-    else:
-        dirs_to_search = configuration.testdirs
-    for testdir in dirs_to_search:
+    for testdir in configuration.testdirs:
         for (dirpath, dirnames, filenames) in os.walk(testdir):
             visit('Test', dirpath, filenames)
 
     #
     # Now that we have loaded all the test cases, run the whole test suite.
     #
-
-    # Set any user-overridden settings.
-    for key, value in configuration.settings:
-        setSetting(key, value)
 
     # Install the control-c handler.
     unittest2.signals.installHandler()

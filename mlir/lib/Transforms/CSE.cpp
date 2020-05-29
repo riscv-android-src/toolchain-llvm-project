@@ -7,16 +7,13 @@
 //===----------------------------------------------------------------------===//
 //
 // This transformation pass performs a simple common sub-expression elimination
-// algorithm on operations within a function.
+// algorithm on operations within a region.
 //
 //===----------------------------------------------------------------------===//
 
+#include "PassDetail.h"
 #include "mlir/Analysis/Dominance.h"
-#include "mlir/IR/Attributes.h"
-#include "mlir/IR/Builders.h"
-#include "mlir/IR/Function.h"
 #include "mlir/Pass/Pass.h"
-#include "mlir/Support/Functional.h"
 #include "mlir/Transforms/Passes.h"
 #include "mlir/Transforms/Utils.h"
 #include "llvm/ADT/DenseMapInfo.h"
@@ -25,6 +22,7 @@
 #include "llvm/Support/Allocator.h"
 #include "llvm/Support/RecyclingAllocator.h"
 #include <deque>
+
 using namespace mlir;
 
 namespace {
@@ -73,10 +71,7 @@ struct SimpleOperationInfo : public llvm::DenseMapInfo<Operation *> {
 
 namespace {
 /// Simple common sub-expression elimination.
-struct CSE : public OperationPass<CSE> {
-  CSE() = default;
-  CSE(const CSE &) {}
-
+struct CSE : public CSEBase<CSE> {
   /// Shared implementation of operation elimination and scoped map definitions.
   using AllocatorTy = llvm::RecyclingAllocator<
       llvm::BumpPtrAllocator,
@@ -114,15 +109,22 @@ struct CSE : public OperationPass<CSE> {
 private:
   /// Operations marked as dead and to be erased.
   std::vector<Operation *> opsToErase;
-
-  /// Statistics for CSE.
-  Statistic numCSE{this, "num-cse'd", "Number of operations CSE'd"};
-  Statistic numDCE{this, "num-dce'd", "Number of operations trivially DCE'd"};
 };
 } // end anonymous namespace
 
 /// Attempt to eliminate a redundant operation.
 LogicalResult CSE::simplifyOperation(ScopedMapTy &knownValues, Operation *op) {
+  // Don't simplify terminator operations.
+  if (op->isKnownTerminator())
+    return failure();
+
+  // If the operation is already trivially dead just add it to the erase list.
+  if (isOpTriviallyDead(op)) {
+    opsToErase.push_back(op);
+    ++numDCE;
+    return success();
+  }
+
   // Don't simplify operations with nested blocks. We don't currently model
   // equality comparisons correctly among other things. It is also unclear
   // whether we would want to CSE such operations.
@@ -131,15 +133,8 @@ LogicalResult CSE::simplifyOperation(ScopedMapTy &knownValues, Operation *op) {
 
   // TODO(riverriddle) We currently only eliminate non side-effecting
   // operations.
-  if (!op->hasNoSideEffect())
+  if (!MemoryEffectOpInterface::hasNoEffect(op))
     return failure();
-
-  // If the operation is already trivially dead just add it to the erase list.
-  if (op->use_empty()) {
-    opsToErase.push_back(op);
-    ++numDCE;
-    return success();
-  }
 
   // Look for an existing definition for the operation.
   if (auto *existing = knownValues.lookup(op)) {
@@ -258,5 +253,3 @@ void CSE::runOnOperation() {
 }
 
 std::unique_ptr<Pass> mlir::createCSEPass() { return std::make_unique<CSE>(); }
-
-static PassRegistration<CSE> pass("cse", "Eliminate common sub-expressions");

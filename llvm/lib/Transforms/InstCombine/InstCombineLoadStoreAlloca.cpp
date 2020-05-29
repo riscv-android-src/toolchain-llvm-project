@@ -348,7 +348,7 @@ Instruction *InstCombiner::visitAllocaInst(AllocaInst &AI) {
     // Move all alloca's of zero byte objects to the entry block and merge them
     // together.  Note that we only do this for alloca's, because malloc should
     // allocate and return a unique pointer, even for a zero byte allocation.
-    if (DL.getTypeAllocSize(AI.getAllocatedType()) == 0) {
+    if (DL.getTypeAllocSize(AI.getAllocatedType()).getKnownMinSize() == 0) {
       // For a zero sized alloca there is no point in doing an array allocation.
       // This is helpful if the array size is a complicated expression not used
       // elsewhere.
@@ -365,7 +365,8 @@ Instruction *InstCombiner::visitAllocaInst(AllocaInst &AI) {
         // dominance as the array size was forced to a constant earlier already.
         AllocaInst *EntryAI = dyn_cast<AllocaInst>(FirstInst);
         if (!EntryAI || !EntryAI->getAllocatedType()->isSized() ||
-            DL.getTypeAllocSize(EntryAI->getAllocatedType()) != 0) {
+            DL.getTypeAllocSize(EntryAI->getAllocatedType())
+                    .getKnownMinSize() != 0) {
           AI.moveBefore(FirstInst);
           return &AI;
         }
@@ -397,9 +398,10 @@ Instruction *InstCombiner::visitAllocaInst(AllocaInst &AI) {
     // is only subsequently read.
     SmallVector<Instruction *, 4> ToDelete;
     if (MemTransferInst *Copy = isOnlyCopiedFromConstantGlobal(&AI, ToDelete)) {
-      unsigned SourceAlign = getOrEnforceKnownAlignment(
-          Copy->getSource(), AI.getAlignment(), DL, &AI, &AC, &DT);
-      if (AI.getAlignment() <= SourceAlign &&
+      MaybeAlign AllocaAlign = AI.getAlign();
+      Align SourceAlign = getOrEnforceKnownAlignment(
+          Copy->getSource(), AllocaAlign, DL, &AI, &AC, &DT);
+      if ((!AllocaAlign || *AllocaAlign <= SourceAlign) &&
           isDereferenceableForAllocaSize(Copy->getSource(), &AI, DL)) {
         LLVM_DEBUG(dbgs() << "Found alloca equal to global: " << AI << '\n');
         LLVM_DEBUG(dbgs() << "  memcpy = " << *Copy << '\n');
@@ -589,11 +591,9 @@ static Instruction *combineLoadToOperationType(InstCombiner &IC, LoadInst &LI) {
   // Do not perform canonicalization if minmax pattern is found (to avoid
   // infinite loop).
   Type *Dummy;
-  if (!Ty->isIntegerTy() && Ty->isSized() &&
-      !(Ty->isVectorTy() && Ty->getVectorIsScalable()) &&
+  if (!Ty->isIntegerTy() && Ty->isSized() && !isa<ScalableVectorType>(Ty) &&
       DL.isLegalInteger(DL.getTypeStoreSizeInBits(Ty)) &&
-      DL.typeSizeEqualsStoreSize(Ty) &&
-      !DL.isNonIntegralPointerType(Ty) &&
+      DL.typeSizeEqualsStoreSize(Ty) && !DL.isNonIntegralPointerType(Ty) &&
       !isMinMaxWithLoads(
           peekThroughBitcast(LI.getPointerOperand(), /*OneUseOnly=*/true),
           Dummy)) {
@@ -956,16 +956,16 @@ Instruction *InstCombiner::visitLoadInst(LoadInst &LI) {
     return Res;
 
   // Attempt to improve the alignment.
-  unsigned KnownAlign = getOrEnforceKnownAlignment(
-      Op, DL.getPrefTypeAlignment(LI.getType()), DL, &LI, &AC, &DT);
-  unsigned LoadAlign = LI.getAlignment();
-  unsigned EffectiveLoadAlign =
-      LoadAlign != 0 ? LoadAlign : DL.getABITypeAlignment(LI.getType());
+  Align KnownAlign = getOrEnforceKnownAlignment(
+      Op, DL.getPrefTypeAlign(LI.getType()), DL, &LI, &AC, &DT);
+  MaybeAlign LoadAlign = LI.getAlign();
+  Align EffectiveLoadAlign =
+      LoadAlign ? *LoadAlign : DL.getABITypeAlign(LI.getType());
 
   if (KnownAlign > EffectiveLoadAlign)
-    LI.setAlignment(MaybeAlign(KnownAlign));
+    LI.setAlignment(KnownAlign);
   else if (LoadAlign == 0)
-    LI.setAlignment(MaybeAlign(EffectiveLoadAlign));
+    LI.setAlignment(EffectiveLoadAlign);
 
   // Replace GEP indices if possible.
   if (Instruction *NewGEPI = replaceGEPIdxWithZero(*this, Op, LI)) {
@@ -1320,6 +1320,11 @@ static bool removeBitcastsFromLoadStoreOnMinMax(InstCombiner &IC,
   if (!isMinMaxWithLoads(LoadAddr, CmpLoadTy))
     return false;
 
+  // Make sure the type would actually change.
+  // This condition can be hit with chains of bitcasts.
+  if (LI->getType() == CmpLoadTy)
+    return false;
+
   // Make sure we're not changing the size of the load/store.
   const auto &DL = IC.getDataLayout();
   if (DL.getTypeStoreSizeInBits(LI->getType()) !=
@@ -1356,11 +1361,11 @@ Instruction *InstCombiner::visitStoreInst(StoreInst &SI) {
     return eraseInstFromFunction(SI);
 
   // Attempt to improve the alignment.
-  const Align KnownAlign = Align(getOrEnforceKnownAlignment(
-      Ptr, DL.getPrefTypeAlignment(Val->getType()), DL, &SI, &AC, &DT));
-  const MaybeAlign StoreAlign = MaybeAlign(SI.getAlignment());
+  const Align KnownAlign = getOrEnforceKnownAlignment(
+      Ptr, DL.getPrefTypeAlign(Val->getType()), DL, &SI, &AC, &DT);
+  const MaybeAlign StoreAlign = SI.getAlign();
   const Align EffectiveStoreAlign =
-      StoreAlign ? *StoreAlign : Align(DL.getABITypeAlignment(Val->getType()));
+      StoreAlign ? *StoreAlign : DL.getABITypeAlign(Val->getType());
 
   if (KnownAlign > EffectiveStoreAlign)
     SI.setAlignment(KnownAlign);

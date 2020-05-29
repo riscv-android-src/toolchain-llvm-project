@@ -51,9 +51,11 @@ computeConversionSet(iterator_range<Region::iterator> region,
                                  : Optional<ConversionTarget::LegalOpDetails>();
       if (legalityInfo && legalityInfo->isRecursivelyLegal)
         continue;
-      for (auto &region : op.getRegions())
-        computeConversionSet(region.getBlocks(), region.getLoc(), toConvert,
-                             target);
+      for (auto &region : op.getRegions()) {
+        if (failed(computeConversionSet(region.getBlocks(), region.getLoc(),
+                                        toConvert, target)))
+          return failure();
+      }
     }
 
     // Recurse to children that haven't been visited.
@@ -195,8 +197,6 @@ struct ArgConverter {
 
   /// Fully replace uses of the old arguments with the new, materializing cast
   /// operations as necessary.
-  // FIXME(riverriddle) The 'mapping' parameter is only necessary because the
-  // implementation of replaceUsesOfBlockArgument is buggy.
   void applyRewrites(ConversionValueMapping &mapping);
 
   //===--------------------------------------------------------------------===//
@@ -401,8 +401,7 @@ Block *ArgConverter::applySignatureConversion(
     auto replArgs = newArgs.slice(inputMap->inputNo, inputMap->size);
     Operation *cast = typeConverter->materializeConversion(
         rewriter, origArg.getType(), replArgs, loc);
-    assert(cast->getNumResults() == 1 &&
-           cast->getNumOperands() == replArgs.size());
+    assert(cast->getNumResults() == 1);
     mapping.map(origArg, cast->getResult(0));
     info.argInfo[i] =
         ConvertedArgInfo(inputMap->inputNo, inputMap->size, cast->getResult(0));
@@ -435,9 +434,10 @@ namespace {
 /// This is useful when saving and undoing a set of rewrites.
 struct RewriterState {
   RewriterState(unsigned numCreatedOps, unsigned numReplacements,
-                unsigned numBlockActions, unsigned numIgnoredOperations,
-                unsigned numRootUpdates)
+                unsigned numArgReplacements, unsigned numBlockActions,
+                unsigned numIgnoredOperations, unsigned numRootUpdates)
       : numCreatedOps(numCreatedOps), numReplacements(numReplacements),
+        numArgReplacements(numArgReplacements),
         numBlockActions(numBlockActions),
         numIgnoredOperations(numIgnoredOperations),
         numRootUpdates(numRootUpdates) {}
@@ -447,6 +447,9 @@ struct RewriterState {
 
   /// The current number of replacements queued.
   unsigned numReplacements;
+
+  /// The current number of argument replacements queued.
+  unsigned numArgReplacements;
 
   /// The current number of block actions performed.
   unsigned numBlockActions;
@@ -584,6 +587,9 @@ struct ConversionPatternRewriterImpl {
   /// PatternRewriter hook for replacing the results of an operation.
   void replaceOp(Operation *op, ValueRange newValues);
 
+  /// Notifies that a block was created.
+  void notifyCreatedBlock(Block *block);
+
   /// Notifies that a block was split.
   void notifySplitBlock(Block *block, Block *continuation);
 
@@ -620,6 +626,9 @@ struct ConversionPatternRewriterImpl {
   /// Ordered vector of any requested operation replacements.
   SmallVector<OpReplacement, 4> replacements;
 
+  /// Ordered vector of any requested block argument replacements.
+  SmallVector<BlockArgument, 4> argReplacements;
+
   /// Ordered list of block operations (creations, splits, motions).
   SmallVector<BlockAction, 4> blockActions;
 
@@ -650,8 +659,8 @@ struct ConversionPatternRewriterImpl {
 
 RewriterState ConversionPatternRewriterImpl::getCurrentState() {
   return RewriterState(createdOps.size(), replacements.size(),
-                       blockActions.size(), ignoredOps.size(),
-                       rootUpdates.size());
+                       argReplacements.size(), blockActions.size(),
+                       ignoredOps.size(), rootUpdates.size());
 }
 
 void ConversionPatternRewriterImpl::resetState(RewriterState state) {
@@ -659,6 +668,12 @@ void ConversionPatternRewriterImpl::resetState(RewriterState state) {
   for (unsigned i = state.numRootUpdates, e = rootUpdates.size(); i != e; ++i)
     rootUpdates[i].resetOperation();
   rootUpdates.resize(state.numRootUpdates);
+
+  // Reset any replaced arguments.
+  for (BlockArgument replacedArg :
+       llvm::drop_begin(argReplacements, state.numArgReplacements))
+    mapping.erase(replacedArg);
+  argReplacements.resize(state.numArgReplacements);
 
   // Undo any block actions.
   undoBlockActions(state.numBlockActions);
@@ -749,6 +764,25 @@ void ConversionPatternRewriterImpl::applyRewrites() {
       argConverter.notifyOpRemoved(repl.op);
   }
 
+  // Apply all of the requested argument replacements.
+  for (BlockArgument arg : argReplacements) {
+    Value repl = mapping.lookupOrDefault(arg);
+    if (repl.isa<BlockArgument>()) {
+      arg.replaceAllUsesWith(repl);
+      continue;
+    }
+
+    // If the replacement value is an operation, we check to make sure that we
+    // don't replace uses that are within the parent operation of the
+    // replacement value.
+    Operation *replOp = repl.cast<OpResult>().getOwner();
+    Block *replBlock = replOp->getBlock();
+    arg.replaceUsesWithIf(repl, [&](OpOperand &operand) {
+      Operation *user = operand.getOwner();
+      return user->getBlock() != replBlock || replOp->isBeforeInBlock(user);
+    });
+  }
+
   // In a second pass, erase all of the replaced operations in reverse. This
   // allows processing nested operations before their parent region is
   // destroyed.
@@ -801,6 +835,10 @@ void ConversionPatternRewriterImpl::replaceOp(Operation *op,
   /// Mark this operation as recursively ignored so that we don't need to
   /// convert any nested operations.
   markNestedOpsIgnored(op);
+}
+
+void ConversionPatternRewriterImpl::notifyCreatedBlock(Block *block) {
+  blockActions.push_back(BlockAction::getCreate(block));
 }
 
 void ConversionPatternRewriterImpl::notifySplitBlock(Block *block,
@@ -887,6 +925,10 @@ void ConversionPatternRewriter::eraseOp(Operation *op) {
   impl->replaceOp(op, nullRepls);
 }
 
+void ConversionPatternRewriter::eraseBlock(Block *block) {
+  llvm_unreachable("erasing blocks for dialect conversion not implemented");
+}
+
 /// Apply a signature conversion to the entry block of the given region.
 Block *ConversionPatternRewriter::applySignatureConversion(
     Region *region, TypeConverter::SignatureConversion &conversion) {
@@ -895,11 +937,13 @@ Block *ConversionPatternRewriter::applySignatureConversion(
 
 void ConversionPatternRewriter::replaceUsesOfBlockArgument(BlockArgument from,
                                                            Value to) {
-  for (auto &u : from.getUses()) {
-    if (u.getOwner() == to.getDefiningOp())
-      continue;
-    u.getOwner()->replaceUsesOfWith(from, to);
-  }
+  LLVM_DEBUG({
+    Operation *parentOp = from.getOwner()->getParentOp();
+    impl->logger.startLine() << "** Replace Argument : '" << from
+                             << "'(in region of '" << parentOp->getName()
+                             << "'(" << from.getOwner()->getParentOp() << ")\n";
+  });
+  impl->argReplacements.push_back(from);
   impl->mapping.map(impl->mapping.lookupOrDefault(from), to);
 }
 
@@ -907,6 +951,15 @@ void ConversionPatternRewriter::replaceUsesOfBlockArgument(BlockArgument from,
 /// no such a converted value.
 Value ConversionPatternRewriter::getRemappedValue(Value key) {
   return impl->mapping.lookupOrDefault(key);
+}
+
+/// PatternRewriter hook for creating a new block with the given arguments.
+Block *ConversionPatternRewriter::createBlock(Region *parent,
+                                              Region::iterator insertPtr,
+                                              TypeRange argTypes) {
+  Block *block = PatternRewriter::createBlock(parent, insertPtr, argTypes);
+  impl->notifyCreatedBlock(block);
+  return block;
 }
 
 /// PatternRewriter hook for splitting a block into two parts.
@@ -988,6 +1041,17 @@ void ConversionPatternRewriter::cancelRootUpdate(Operation *op) {
   rootUpdates.erase(rootUpdates.begin() + (rootUpdates.rend() - it));
 }
 
+/// PatternRewriter hook for notifying match failure reasons.
+LogicalResult ConversionPatternRewriter::notifyMatchFailure(
+    Operation *op, function_ref<void(Diagnostic &)> reasonCallback) {
+  LLVM_DEBUG({
+    Diagnostic diag(op->getLoc(), DiagnosticSeverity::Remark);
+    reasonCallback(diag);
+    impl->logger.startLine() << "** Failure : " << diag.str() << "\n";
+  });
+  return failure();
+}
+
 /// Return a reference to the internal implementation.
 detail::ConversionPatternRewriterImpl &ConversionPatternRewriter::getImpl() {
   return *impl;
@@ -998,39 +1062,13 @@ detail::ConversionPatternRewriterImpl &ConversionPatternRewriter::getImpl() {
 //===----------------------------------------------------------------------===//
 
 /// Attempt to match and rewrite the IR root at the specified operation.
-PatternMatchResult
+LogicalResult
 ConversionPattern::matchAndRewrite(Operation *op,
                                    PatternRewriter &rewriter) const {
   SmallVector<Value, 4> operands;
   auto &dialectRewriter = static_cast<ConversionPatternRewriter &>(rewriter);
   dialectRewriter.getImpl().remapValues(op->getOperands(), operands);
-
-  // If this operation has no successors, invoke the rewrite directly.
-  if (op->getNumSuccessors() == 0)
-    return matchAndRewrite(op, operands, dialectRewriter);
-
-  // Otherwise, we need to remap the successors.
-  SmallVector<Block *, 2> destinations;
-  destinations.reserve(op->getNumSuccessors());
-
-  SmallVector<ArrayRef<Value>, 2> operandsPerDestination;
-  unsigned firstSuccessorOperand = op->getSuccessorOperandIndex(0);
-  for (unsigned i = 0, seen = 0, e = op->getNumSuccessors(); i < e; ++i) {
-    destinations.push_back(op->getSuccessor(i));
-
-    // Lookup the successors operands.
-    unsigned n = op->getNumSuccessorOperands(i);
-    operandsPerDestination.push_back(
-        llvm::makeArrayRef(operands.data() + firstSuccessorOperand + seen, n));
-    seen += n;
-  }
-
-  // Rewrite the operation.
-  return matchAndRewrite(
-      op,
-      llvm::makeArrayRef(operands.data(),
-                         operands.data() + firstSuccessorOperand),
-      destinations, operandsPerDestination, dialectRewriter);
+  return matchAndRewrite(op, operands, dialectRewriter);
 }
 
 //===----------------------------------------------------------------------===//
@@ -1122,6 +1160,12 @@ OperationLegalizer::legalize(Operation *op,
     os.startLine() << "Legalizing operation : '" << op->getName() << "'(" << op
                    << ") {\n";
     os.indent();
+
+    // If the operation has no regions, just print it here.
+    if (op->getNumRegions() == 0) {
+      op->print(os.startLine(), OpPrintingFlags().printGenericOpForm());
+      os.getOStream() << "\n\n";
+    }
   });
 
   // Check if this operation is legal on the target.
@@ -1238,16 +1282,15 @@ OperationLegalizer::legalizePattern(Operation *op, RewritePattern *pattern,
     auto &os = rewriterImpl.logger;
     os.getOStream() << "\n";
     os.startLine() << "* Pattern : '" << pattern->getRootKind() << " -> (";
-    interleaveComma(pattern->getGeneratedOps(), llvm::dbgs());
+    llvm::interleaveComma(pattern->getGeneratedOps(), llvm::dbgs());
     os.getOStream() << ")' {\n";
     os.indent();
   });
 
   // Ensure that we don't cycle by not allowing the same pattern to be
-  // applied twice in the same recursion stack.
-  // TODO(riverriddle) We could eventually converge, but that requires more
-  // complicated analysis.
-  if (!appliedPatterns.insert(pattern).second) {
+  // applied twice in the same recursion stack if it is not known to be safe.
+  if (!pattern->hasBoundedRewriteRecursion() &&
+      !appliedPatterns.insert(pattern).second) {
     LLVM_DEBUG(logFailure(rewriterImpl.logger, "pattern was already applied"));
     return failure();
   }
@@ -1262,12 +1305,12 @@ OperationLegalizer::legalizePattern(Operation *op, RewritePattern *pattern,
 
   // Try to rewrite with the given pattern.
   rewriter.setInsertionPoint(op);
-  auto matchedPattern = pattern->matchAndRewrite(op, rewriter);
+  LogicalResult matchedPattern = pattern->matchAndRewrite(op, rewriter);
 #ifndef NDEBUG
   assert(rewriterImpl.pendingRootUpdates.empty() && "dangling root updates");
 #endif
 
-  if (!matchedPattern) {
+  if (failed(matchedPattern)) {
     LLVM_DEBUG(logFailure(rewriterImpl.logger, "pattern failed to match"));
     return cleanupFailure();
   }
@@ -1647,11 +1690,24 @@ void TypeConverter::SignatureConversion::remapInput(unsigned origInputNo,
 /// This hooks allows for converting a type.
 LogicalResult TypeConverter::convertType(Type t,
                                          SmallVectorImpl<Type> &results) {
-  if (auto newT = convertType(t)) {
-    results.push_back(newT);
-    return success();
-  }
+  // Walk the added converters in reverse order to apply the most recently
+  // registered first.
+  for (ConversionCallbackFn &converter : llvm::reverse(conversions))
+    if (Optional<LogicalResult> result = converter(t, results))
+      return *result;
   return failure();
+}
+
+/// This hook simplifies defining 1-1 type conversions. This function returns
+/// the type to convert to on success, and a null type on failure.
+Type TypeConverter::convertType(Type t) {
+  // Use the multi-type result version to convert the type.
+  SmallVector<Type, 1> results;
+  if (failed(convertType(t, results)))
+    return nullptr;
+
+  // Check to ensure that only one type was produced.
+  return results.size() == 1 ? results.front() : nullptr;
 }
 
 /// Convert the given set of types, filling 'results' as necessary. This
@@ -1706,7 +1762,7 @@ struct FuncOpSignatureConversion : public OpConversionPattern<FuncOp> {
       : OpConversionPattern(ctx), converter(converter) {}
 
   /// Hook for derived classes to implement combined matching and rewriting.
-  PatternMatchResult
+  LogicalResult
   matchAndRewrite(FuncOp funcOp, ArrayRef<Value> operands,
                   ConversionPatternRewriter &rewriter) const override {
     FunctionType type = funcOp.getType();
@@ -1715,12 +1771,12 @@ struct FuncOpSignatureConversion : public OpConversionPattern<FuncOp> {
     TypeConverter::SignatureConversion result(type.getNumInputs());
     for (unsigned i = 0, e = type.getNumInputs(); i != e; ++i)
       if (failed(converter.convertSignatureArg(i, type.getInput(i), result)))
-        return matchFailure();
+        return failure();
 
     // Convert the original function results.
     SmallVector<Type, 1> convertedResults;
     if (failed(converter.convertTypes(type.getResults(), convertedResults)))
-      return matchFailure();
+      return failure();
 
     // Update the function signature in-place.
     rewriter.updateRootInPlace(funcOp, [&] {
@@ -1728,7 +1784,7 @@ struct FuncOpSignatureConversion : public OpConversionPattern<FuncOp> {
                                        convertedResults, funcOp.getContext()));
       rewriter.applySignatureConversion(&funcOp.getBody(), result);
     });
-    return matchSuccess();
+    return success();
   }
 
   /// The type converter to use when rewriting the signature.

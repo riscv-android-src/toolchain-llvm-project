@@ -246,6 +246,12 @@ static Expected<DsymutilOptions> getOptions(opt::InputArgList &Args) {
   if (opt::Arg *OsoPrependPath = Args.getLastArg(OPT_oso_prepend_path))
     Options.LinkOpts.PrependPath = OsoPrependPath->getValue();
 
+  for (const auto &Arg : Args.getAllArgValues(OPT_object_prefix_map)) {
+    auto Split = StringRef(Arg).split('=');
+    Options.LinkOpts.ObjectPrefixMap.insert(
+        {std::string(Split.first), std::string(Split.second)});
+  }
+
   if (opt::Arg *OutputFile = Args.getLastArg(OPT_output))
     Options.OutputFile = OutputFile->getValue();
 
@@ -258,7 +264,7 @@ static Expected<DsymutilOptions> getOptions(opt::InputArgList &Args) {
   if (opt::Arg *NumThreads = Args.getLastArg(OPT_threads))
     Options.LinkOpts.Threads = atoi(NumThreads->getValue());
   else
-    Options.LinkOpts.Threads = thread::hardware_concurrency();
+    Options.LinkOpts.Threads = 0; // Use all available hardware threads
 
   if (Options.DumpDebugMap || Options.LinkOpts.Verbose)
     Options.LinkOpts.Threads = 1;
@@ -541,9 +547,14 @@ int main(int argc, char **argv) {
     // Shared a single binary holder for all the link steps.
     BinaryHolder BinHolder;
 
-    unsigned ThreadCount =
-        std::min<unsigned>(Options.LinkOpts.Threads, DebugMapPtrsOrErr->size());
-    ThreadPool Threads(ThreadCount);
+    ThreadPoolStrategy S = hardware_concurrency(Options.LinkOpts.Threads);
+    if (Options.LinkOpts.Threads == 0) {
+      // If NumThreads is not specified, create one thread for each input, up to
+      // the number of hardware threads.
+      S.ThreadsRequested = DebugMapPtrsOrErr->size();
+      S.Limit = true;
+    }
+    ThreadPool Threads(S);
 
     // If there is more than one link to execute, we need to generate
     // temporary files.
@@ -618,7 +629,7 @@ int main(int argc, char **argv) {
       // FIXME: The DwarfLinker can have some very deep recursion that can max
       // out the (significantly smaller) stack when using threads. We don't
       // want this limitation when we only have a single thread.
-      if (ThreadCount == 1)
+      if (S.ThreadsRequested == 1)
         LinkLambda(OS, Options.LinkOpts);
       else
         Threads.async(LinkLambda, OS, Options.LinkOpts);

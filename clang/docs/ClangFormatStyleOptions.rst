@@ -968,6 +968,24 @@ the configuration (without a prefix: ``Auto``).
       } else {
       }
 
+  * ``bool BeforeLambdaBody`` Wrap lambda block.
+
+    .. code-block:: c++
+
+      true:
+      connect(
+        []()
+        {
+          foo();
+          bar();
+        });
+
+      false:
+      connect([]() {
+        foo();
+        bar();
+      });
+
   * ``bool IndentBraces`` Indent the wrapped braces themselves.
 
   * ``bool SplitEmptyFunction`` If ``false``, empty function body can be put on a single line.
@@ -2054,8 +2072,8 @@ the configuration (without a prefix: ``Auto``).
      - (void)_aMethod
      {
         [self.test1 t:self
-                     w:self
-            callback:^(typeof(self) self, NSNumber *u, NSNumber *v) {
+                    w:self
+             callback:^(typeof(self) self, NSNumber *u, NSNumber *v) {
                  u = c;
              }]
      }
@@ -2516,7 +2534,11 @@ the configuration (without a prefix: ``Auto``).
     Use tabs only for indentation.
 
   * ``UT_ForContinuationAndIndentation`` (in configuration: ``ForContinuationAndIndentation``)
-    Use tabs only for line continuation and indentation.
+    Fill all leading whitespace with tabs, and use spaces for alignment that
+    appears within a line (e.g. consecutive assignments and declarations).
+
+  * ``UT_AlignWithSpaces`` (in configuration: ``AlignWithSpaces``)
+    Use tabs for line continuation and indentation, and spaces for alignment.
 
   * ``UT_Always`` (in configuration: ``Always``)
     Use tabs whenever we need to fill whitespace that spans at least from

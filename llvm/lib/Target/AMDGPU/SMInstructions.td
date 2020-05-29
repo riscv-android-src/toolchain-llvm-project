@@ -1,4 +1,4 @@
-//===---- SMInstructions.td - Scalar Memory Instruction Defintions --------===//
+//===---- SMInstructions.td - Scalar Memory Instruction Definitions -------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -769,7 +769,7 @@ multiclass SMLoad_Pattern <string Instr, ValueType vt> {
   // 1. Offset as an immediate
   def : GCNPat <
     (SIsbuffer_load v4i32:$sbase, (SMRDBufferImm i32:$offset), timm:$cachepolicy),
-    (vt (!cast<SM_Pseudo>(Instr#"_IMM") $sbase, $offset, (extract_glc $cachepolicy),
+    (vt (!cast<SM_Pseudo>(Instr#"_IMM") SReg_128:$sbase, i32imm:$offset, (extract_glc $cachepolicy),
                                         (extract_dlc $cachepolicy)))> {
     let AddedComplexity = 2;
   }
@@ -777,7 +777,8 @@ multiclass SMLoad_Pattern <string Instr, ValueType vt> {
   // 2. 32-bit IMM offset on CI
   def : GCNPat <
     (vt (SIsbuffer_load v4i32:$sbase, (SMRDBufferImm32 i32:$offset), timm:$cachepolicy)),
-    (!cast<InstSI>(Instr#"_IMM_ci") $sbase, $offset, (extract_glc $cachepolicy), (extract_dlc $cachepolicy))> {
+    (!cast<InstSI>(Instr#"_IMM_ci") SReg_128:$sbase, smrd_literal_offset:$offset,
+                                    (extract_glc $cachepolicy), (extract_dlc $cachepolicy))> {
     let OtherPredicates = [isGFX7Only];
     let AddedComplexity = 1;
   }
@@ -785,7 +786,7 @@ multiclass SMLoad_Pattern <string Instr, ValueType vt> {
   // 3. Offset loaded in an 32bit SGPR
   def : GCNPat <
     (SIsbuffer_load v4i32:$sbase, i32:$offset, timm:$cachepolicy),
-    (vt (!cast<SM_Pseudo>(Instr#"_SGPR") $sbase, $offset, (extract_glc $cachepolicy),
+    (vt (!cast<SM_Pseudo>(Instr#"_SGPR") SReg_128:$sbase, SReg_32:$offset, (extract_glc $cachepolicy),
                                          (extract_dlc $cachepolicy)))
   >;
 }
@@ -807,7 +808,9 @@ foreach vt = SReg_128.RegTypes in {
 defm : SMRD_Pattern <"S_LOAD_DWORDX4", vt>;
 }
 
-defm : SMRD_Pattern <"S_LOAD_DWORDX8",  v8i32>;
+foreach vt = SReg_256.RegTypes in {
+defm : SMRD_Pattern <"S_LOAD_DWORDX8", vt>;
+}
 defm : SMRD_Pattern <"S_LOAD_DWORDX16", v16i32>;
 
 defm : SMLoad_Pattern <"S_BUFFER_LOAD_DWORD",     i32>;

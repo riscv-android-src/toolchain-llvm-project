@@ -40,6 +40,8 @@ typedef struct ar_hdr {
 using namespace lldb;
 using namespace lldb_private;
 
+LLDB_PLUGIN_DEFINE(ObjectContainerBSDArchive)
+
 ObjectContainerBSDArchive::Object::Object()
     : ar_name(), modification_time(0), uid(0), gid(0), mode(0), size(0),
       file_offset(0), file_size(0) {}
@@ -86,7 +88,7 @@ ObjectContainerBSDArchive::Object::Extract(const DataExtractor &data,
     return LLDB_INVALID_OFFSET;
 
   str.assign((const char *)data.GetData(&offset, 16), 16);
-  if (str.find("#1/") == 0) {
+  if (llvm::StringRef(str).startswith("#1/")) {
     // If the name is longer than 16 bytes, or contains an embedded space then
     // it will use this format where the length of the name is here and the
     // name characters are after this header.

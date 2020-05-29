@@ -15,12 +15,13 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringExtras.h"
+#include "llvm/ADT/Twine.h"
 #include "llvm/Config/llvm-config.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/TableGen/Record.h"
+#include "llvm/Support/SourceMgr.h"
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
@@ -1180,7 +1181,13 @@ Init *TGParser::ParseOperation(Record *CurRec, RecTy *ItemType) {
       InitList.push_back(ParseValue(CurRec, ArgType));
       if (!InitList.back()) return nullptr;
 
-      RecTy *ListType = cast<TypedInit>(InitList.back())->getType();
+      TypedInit *InitListBack = dyn_cast<TypedInit>(InitList.back());
+      if (!InitListBack) {
+        Error(OpLoc, Twine("expected value to be a typed value, got '" +
+                           InitList.back()->getAsString() + "'"));
+        return nullptr;
+      }
+      RecTy *ListType = InitListBack->getType();
       if (!ArgType) {
         ArgType = ListType;
 

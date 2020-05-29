@@ -597,7 +597,8 @@ bool IRInterpreter::CanInterpret(llvm::Module &module, llvm::Function &function,
         switch (operand_type->getTypeID()) {
         default:
           break;
-        case Type::VectorTyID: {
+        case Type::FixedVectorTyID:
+        case Type::ScalableVectorTyID: {
           LLDB_LOGF(log, "Unsupported operand type: %s",
                     PrintType(operand_type).c_str());
           error.SetErrorString(unsupported_operand_error);
@@ -1510,7 +1511,7 @@ bool IRInterpreter::Interpret(llvm::Module &module, llvm::Function &function,
         lldb_private::ValueObject *vobj = retVal.get();
 
         // Check if the return value is valid
-        if (vobj == nullptr || retVal.empty()) {
+        if (vobj == nullptr || !retVal) {
           error.SetErrorToGenericError();
           error.SetErrorStringWithFormat("unable to get the return value");
           return false;

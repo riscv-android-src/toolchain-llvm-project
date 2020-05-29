@@ -11,13 +11,12 @@
 //
 //===----------------------------------------------------------------------===//
 #include "mlir/ExecutionEngine/ExecutionEngine.h"
+#include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/IR/Function.h"
 #include "mlir/IR/Module.h"
 #include "mlir/Support/FileUtilities.h"
 #include "mlir/Target/LLVMIR.h"
 
-#include "llvm/Bitcode/BitcodeReader.h"
-#include "llvm/Bitcode/BitcodeWriter.h"
 #include "llvm/ExecutionEngine/JITEventListener.h"
 #include "llvm/ExecutionEngine/ObjectCache.h"
 #include "llvm/ExecutionEngine/Orc/CompileUtils.h"
@@ -30,6 +29,7 @@
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/Error.h"
+#include "llvm/Support/Host.h"
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/ToolOutputFile.h"
 
@@ -182,15 +182,20 @@ static void packFunctionArguments(Module *module) {
   }
 }
 
-ExecutionEngine::ExecutionEngine(bool enableObjectCache)
-    : cache(enableObjectCache ? nullptr : new SimpleObjectCache()),
-      gdbListener(llvm::JITEventListener::createGDBRegistrationListener()) {}
+ExecutionEngine::ExecutionEngine(bool enableObjectCache,
+                                 bool enableGDBNotificationListener)
+    : cache(enableObjectCache ? new SimpleObjectCache() : nullptr),
+      gdbListener(enableGDBNotificationListener
+                      ? llvm::JITEventListener::createGDBRegistrationListener()
+                      : nullptr) {}
 
 Expected<std::unique_ptr<ExecutionEngine>> ExecutionEngine::create(
     ModuleOp m, std::function<Error(llvm::Module *)> transformer,
     Optional<llvm::CodeGenOpt::Level> jitCodeGenOptLevel,
-    ArrayRef<StringRef> sharedLibPaths, bool enableObjectCache) {
-  auto engine = std::make_unique<ExecutionEngine>(enableObjectCache);
+    ArrayRef<StringRef> sharedLibPaths, bool enableObjectCache,
+    bool enableGDBNotificationListener) {
+  auto engine = std::make_unique<ExecutionEngine>(
+      enableObjectCache, enableGDBNotificationListener);
 
   std::unique_ptr<llvm::LLVMContext> ctx(new llvm::LLVMContext);
   auto llvmModule = translateModuleToLLVMIR(m);
@@ -205,17 +210,9 @@ Expected<std::unique_ptr<ExecutionEngine>> ExecutionEngine::create(
   // Clone module in a new LLVMContext since translateModuleToLLVMIR buries
   // ownership too deeply.
   // TODO(zinenko): Reevaluate model of ownership of LLVMContext in LLVMDialect.
-  SmallVector<char, 1> buffer;
-  {
-    llvm::raw_svector_ostream os(buffer);
-    WriteBitcodeToFile(*llvmModule, os);
-  }
-  llvm::MemoryBufferRef bufferRef(StringRef(buffer.data(), buffer.size()),
-                                  "cloned module buffer");
-  auto expectedModule = parseBitcodeFile(bufferRef, *ctx);
-  if (!expectedModule)
-    return expectedModule.takeError();
-  std::unique_ptr<Module> deserModule = std::move(*expectedModule);
+  std::unique_ptr<Module> deserModule =
+      LLVM::cloneModuleIntoNewContext(ctx.get(), llvmModule.get());
+  auto dataLayout = deserModule->getDataLayout();
 
   // Callback to create the object layer with symbol resolution to current
   // process and dynamically linked libraries.
@@ -227,19 +224,12 @@ Expected<std::unique_ptr<ExecutionEngine>> ExecutionEngine::create(
         [engine = engine.get()](
             llvm::orc::VModuleKey, const llvm::object::ObjectFile &object,
             const llvm::RuntimeDyld::LoadedObjectInfo &objectInfo) {
-          uint64_t key = static_cast<uint64_t>(
-              reinterpret_cast<uintptr_t>(object.getData().data()));
-          engine->gdbListener->notifyObjectLoaded(key, object, objectInfo);
+          if (engine->gdbListener) {
+            uint64_t key = static_cast<uint64_t>(
+                reinterpret_cast<uintptr_t>(object.getData().data()));
+            engine->gdbListener->notifyObjectLoaded(key, object, objectInfo);
+          }
         });
-    auto dataLayout = deserModule->getDataLayout();
-    llvm::orc::JITDylib *mainJD = session.getJITDylibByName("<main>");
-    if (!mainJD)
-      mainJD = &session.createJITDylib("<main>");
-
-    // Resolve symbols that are statically linked in the current process.
-    mainJD->addGenerator(
-        cantFail(DynamicLibrarySearchGenerator::GetForCurrentProcess(
-            dataLayout.getGlobalPrefix())));
 
     // Resolve symbols from shared libraries.
     for (auto libPath : sharedLibPaths) {
@@ -248,7 +238,7 @@ Expected<std::unique_ptr<ExecutionEngine>> ExecutionEngine::create(
         errs() << "Fail to create MemoryBuffer for: " << libPath << "\n";
         continue;
       }
-      auto &JD = session.createJITDylib(std::string(libPath));
+      auto &JD = session.createBareJITDylib(std::string(libPath));
       auto loaded = DynamicLibrarySearchGenerator::Load(
           libPath.data(), dataLayout.getGlobalPrefix());
       if (!loaded) {
@@ -291,13 +281,32 @@ Expected<std::unique_ptr<ExecutionEngine>> ExecutionEngine::create(
   cantFail(jit->addIRModule(std::move(tsm)));
   engine->jit = std::move(jit);
 
+  // Resolve symbols that are statically linked in the current process.
+  llvm::orc::JITDylib &mainJD = engine->jit->getMainJITDylib();
+  mainJD.addGenerator(
+      cantFail(DynamicLibrarySearchGenerator::GetForCurrentProcess(
+          dataLayout.getGlobalPrefix())));
+
   return std::move(engine);
 }
 
 Expected<void (*)(void **)> ExecutionEngine::lookup(StringRef name) const {
   auto expectedSymbol = jit->lookup(makePackedFunctionName(name));
-  if (!expectedSymbol)
-    return expectedSymbol.takeError();
+
+  // JIT lookup may return an Error referring to strings stored internally by
+  // the JIT. If the Error outlives the ExecutionEngine, it would want have a
+  // dangling reference, which is currently caught by an assertion inside JIT
+  // thanks to hand-rolled reference counting. Rewrap the error message into a
+  // string before returning. Alternatively, ORC JIT should consider copying
+  // the string into the error message.
+  if (!expectedSymbol) {
+    std::string errorMessage;
+    llvm::raw_string_ostream os(errorMessage);
+    llvm::handleAllErrors(expectedSymbol.takeError(),
+                          [&os](llvm::ErrorInfoBase &ei) { ei.log(os); });
+    return make_string_error(os.str());
+  }
+
   auto rawFPtr = expectedSymbol->getAddress();
   auto fptr = reinterpret_cast<void (*)(void **)>(rawFPtr);
   if (!fptr)

@@ -145,7 +145,7 @@ std::string HeaderSearch::getCachedModuleFileName(Module *Module) {
 std::string HeaderSearch::getPrebuiltModuleFileName(StringRef ModuleName,
                                                     bool FileMapOnly) {
   // First check the module name to pcm file map.
-  auto i(HSOpts->PrebuiltModuleFiles.find(std::string(ModuleName)));
+  auto i(HSOpts->PrebuiltModuleFiles.find(ModuleName));
   if (i != HSOpts->PrebuiltModuleFiles.end())
     return i->second;
 
@@ -1568,6 +1568,16 @@ HeaderSearch::lookupModuleMapFile(const DirectoryEntry *Dir, bool IsFramework) {
   llvm::sys::path::append(ModuleMapFileName, "module.map");
   if (auto F = FileMgr.getFile(ModuleMapFileName))
     return *F;
+
+  // For frameworks, allow to have a private module map with a preferred
+  // spelling when a public module map is absent.
+  if (IsFramework) {
+    ModuleMapFileName = Dir->getName();
+    llvm::sys::path::append(ModuleMapFileName, "Modules",
+                            "module.private.modulemap");
+    if (auto F = FileMgr.getFile(ModuleMapFileName))
+      return *F;
+  }
   return nullptr;
 }
 

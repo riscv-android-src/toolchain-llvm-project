@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef SymbolFileDWARFDwo_SymbolFileDWARFDwo_h_
-#define SymbolFileDWARFDwo_SymbolFileDWARFDwo_h_
+#ifndef LLDB_SOURCE_PLUGINS_SYMBOLFILE_DWARF_SYMBOLFILEDWARFDWO_H
+#define LLDB_SOURCE_PLUGINS_SYMBOLFILE_DWARF_SYMBOLFILEDWARFDWO_H
 
 #include "SymbolFileDWARF.h"
 
@@ -29,13 +29,10 @@ public:
 
   ~SymbolFileDWARFDwo() override = default;
 
-  DWARFCompileUnit *GetCompileUnit();
+  DWARFCompileUnit *GetDWOCompileUnitForHash(uint64_t hash);
 
-  DWARFUnit *
-  GetDWARFCompileUnit(lldb_private::CompileUnit *comp_unit) override;
-
-  size_t GetObjCMethodDIEOffsets(lldb_private::ConstString class_name,
-                                 DIEArray &method_die_offsets) override;
+  void GetObjCMethods(lldb_private::ConstString class_name,
+                      llvm::function_ref<bool(DWARFDIE die)> callback) override;
 
   llvm::Expected<lldb_private::TypeSystem &>
   GetTypeSystemForLanguage(lldb::LanguageType language) override;
@@ -46,9 +43,6 @@ public:
   llvm::Optional<uint32_t> GetDwoNum() override { return GetID() >> 32; }
 
 protected:
-  void LoadSectionData(lldb::SectionType sect_type,
-                       lldb_private::DWARFDataExtractor &data) override;
-
   DIEToTypePtr &GetDIEToType() override;
 
   DIEToVariableSP &GetDIEToVariable() override;
@@ -68,10 +62,11 @@ protected:
 
   SymbolFileDWARF &GetBaseSymbolFile() { return m_base_symbol_file; }
 
-  DWARFCompileUnit *ComputeCompileUnit();
+  /// If this file contains exactly one compile unit, this function will return
+  /// it. Otherwise it returns nullptr.
+  DWARFCompileUnit *FindSingleCompileUnit();
 
   SymbolFileDWARF &m_base_symbol_file;
-  DWARFCompileUnit *m_cu = nullptr;
 };
 
-#endif // SymbolFileDWARFDwo_SymbolFileDWARFDwo_h_
+#endif // LLDB_SOURCE_PLUGINS_SYMBOLFILE_DWARF_SYMBOLFILEDWARFDWO_H

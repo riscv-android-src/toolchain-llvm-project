@@ -1,4 +1,4 @@
-# MLIR Specification
+# MLIR Language Reference
 
 MLIR (Multi-Level IR) is a compiler intermediate representation with
 similarities to traditional three-address SSA representations (like
@@ -12,7 +12,7 @@ continuous design provides a framework to lower from dataflow graphs to
 high-performance target-specific code.
 
 This document defines and describes the key concepts in MLIR, and is intended to
-be a dry reference document - the [rationale documentation](Rationale.md),
+be a dry reference document - the [rationale documentation](Rationale/Rationale.md),
 [glossary](../getting_started/Glossary.md), and other content are hosted elsewhere.
 
 MLIR is designed to be used in three different forms: a human-readable textual
@@ -432,7 +432,7 @@ cases from the IR compared to traditional "PHI nodes are operations" SSA IRs
 [parallel copy semantics](http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.524.5461&rep=rep1&type=pdf)
 of SSA is immediately apparent, and function arguments are no longer a special
 case: they become arguments to the entry block
-[[more rationale](Rationale.md#block-arguments-vs-phi-nodes)].
+[[more rationale](Rationale/Rationale.md#block-arguments-vs-phi-nodes)].
 
 ## Regions
 
@@ -648,7 +648,7 @@ the lighter syntax: `!foo.something<a%%123^^^>>>` because it contains characters
 that are not allowed in the lighter syntax, as well as unbalanced `<>`
 characters.
 
-See [here](DefiningAttributesAndTypes.md) to learn how to define dialect types.
+See [here](Tutorials/DefiningAttributesAndTypes.md) to learn how to define dialect types.
 
 ### Standard Types
 
@@ -731,10 +731,10 @@ index-type ::= `index`
 ```
 
 The `index` type is a signless integer whose size is equal to the natural
-machine word of the target ([rationale](Rationale.md#signless-types)) and is
+machine word of the target ([rationale](Rationale/Rationale.md#signless-types)) and is
 used by the affine constructs in MLIR. Unlike fixed-size integers, it cannot be
 used as an element of vector, tensor or memref type
-([rationale](Rationale.md#index-type-disallowed-in-vectortensormemref-types)).
+([rationale](Rationale/Rationale.md#index-type-disallowed-in-vectortensormemref-types)).
 
 **Rationale:** integers of platform-specific bit widths are practical to express
 sizes, dimensionalities and subscripts.
@@ -745,11 +745,16 @@ Syntax:
 
 ```
 // Sized integers like i1, i4, i8, i16, i32.
-integer-type ::= `i` [1-9][0-9]*
+signed-integer-type ::= `si` [1-9][0-9]*
+unsigned-integer-type ::= `ui` [1-9][0-9]*
+signless-integer-type ::= `i` [1-9][0-9]*
+integer-type ::= signed-integer-type |
+                 unsigned-integer-type |
+                 signless-integer-type
 ```
 
-MLIR supports arbitrary precision integer types. Integer types are signless, but
-have a designated width.
+MLIR supports arbitrary precision integer types. Integer types have a designated
+width and may have signedness semantics.
 
 **Rationale:** low precision integers (like `i2`, `i4` etc) are useful for
 low-precision inference chips, and arbitrary precision integers are useful for
@@ -757,7 +762,7 @@ hardware synthesis (where a 13 bit multiplier is a lot cheaper/smaller than a 16
 bit one).
 
 TODO: Need to decide on a representation for quantized integers
-([initial thoughts](Rationale.md#quantized-integer-operations)).
+([initial thoughts](Rationale/Rationale.md#quantized-integer-operations)).
 
 #### Memref Type
 
@@ -897,7 +902,7 @@ memref<16x32xf32, #identity, memspace0>
 %T = alloc(%M, %N) [%B1, %B2] : memref<?x?xf32, #tiled_dynamic>
 
 // A memref that has a two-element padding at either end. The allocation size
-// will fit 16 * 68 float elements of data.
+// will fit 16 * 64 float elements of data.
 %P = alloc() : memref<16x64xf32, #padded>
 
 // Affine map with symbol 's0' used as offset for the first dimension.
@@ -939,7 +944,7 @@ multidimensional index from one index space to another. For example, the
 following figure shows an index map which maps a 2-dimensional index from a 2x2
 index space to a 3x3 index space, using symbols `S0` and `S1` as offsets.
 
-![Index Map Example](includes/img/index-map.svg)
+![Index Map Example](/includes/img/index-map.svg)
 
 The number of domain dimensions and range dimensions of an index map can be
 different, but must match the number of dimensions of the input and output index
@@ -1104,7 +1109,7 @@ each element may be of a different type.
 
 **Rationale:** Though this type is first class in the type system, MLIR provides
 no standard operations for operating on `tuple` types
-([rationale](Rationale.md#tuple-types)).
+([rationale](Rationale/Rationale.md#tuple-types)).
 
 Examples:
 
@@ -1151,7 +1156,8 @@ attribute-dict ::= `{` `}`
 attribute-entry ::= dialect-attribute-entry | dependent-attribute-entry
 dialect-attribute-entry ::= dialect-namespace `.` bare-id `=` attribute-value
 dependent-attribute-entry ::= dependent-attribute-name `=` attribute-value
-dependent-attribute-name ::= (letter|[_]) (letter|digit|[_$])*
+dependent-attribute-name ::= ((letter|[_]) (letter|digit|[_$])*)
+                           | string-literal
 ```
 
 Attributes are the mechanism for specifying constant data on operations in
@@ -1237,7 +1243,7 @@ the lighter syntax: `#foo.something<a%%123^^^>>>` because it contains characters
 that are not allowed in the lighter syntax, as well as unbalanced `<>`
 characters.
 
-See [here](DefiningAttributesAndTypes.md) to learn how to define dialect
+See [here](Tutorials/DefiningAttributesAndTypes.md) to learn how to define dialect
 attribute values.
 
 ### Standard Attribute Values
@@ -1269,7 +1275,7 @@ Syntax:
 affine-map-attribute ::= `affine_map` `<` affine-map `>`
 ```
 
-An affine-map attribute is an attribute that represents a affine-map object.
+An affine-map attribute is an attribute that represents an affine-map object.
 
 #### Array Attribute
 
@@ -1457,14 +1463,15 @@ This attribute can only be held internally by
 [array attributes](#array-attribute) and
 [dictionary attributes](#dictionary-attribute)(including the top-level operation
 attribute dictionary), i.e. no other attribute kinds such as Locations or
-extended attribute kinds. If a reference to a symbol is necessary from outside
-of the symbol table that the symbol is defined in, a
-[string attribute](#string-attribute) can be used to refer to the symbol name.
+extended attribute kinds.
 
 **Rationale:** Given that MLIR models global accesses with symbol references, to
 enable efficient multi-threading, it becomes difficult to effectively reason
 about their uses. By restricting the places that can legally hold a symbol
 reference, we can always opaquely reason about a symbols usage characteristics.
+
+See [`Symbols And SymbolTables`](SymbolsAndSymbolTables.md) for more
+information.
 
 #### Type Attribute
 

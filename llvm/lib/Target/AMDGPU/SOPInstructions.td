@@ -1,4 +1,4 @@
-//===-- SOPInstructions.td - SOP Instruction Defintions -------------------===//
+//===-- SOPInstructions.td - SOP Instruction Definitions ------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -210,7 +210,9 @@ def S_BCNT1_I32_B64 : SOP1_32_64 <"s_bcnt1_i32_b64",
 
 def S_FF0_I32_B32 : SOP1_32 <"s_ff0_i32_b32">;
 def S_FF0_I32_B64 : SOP1_32_64 <"s_ff0_i32_b64">;
-def S_FF1_I32_B64 : SOP1_32_64 <"s_ff1_i32_b64">;
+def S_FF1_I32_B64 : SOP1_32_64 <"s_ff1_i32_b64",
+  [(set i32:$sdst, (AMDGPUffbl_b32 i64:$src0))]
+>;
 
 def S_FF1_I32_B32 : SOP1_32 <"s_ff1_i32_b32",
   [(set i32:$sdst, (AMDGPUffbl_b32 i32:$src0))]
@@ -220,7 +222,9 @@ def S_FLBIT_I32_B32 : SOP1_32 <"s_flbit_i32_b32",
   [(set i32:$sdst, (AMDGPUffbh_u32 i32:$src0))]
 >;
 
-def S_FLBIT_I32_B64 : SOP1_32_64 <"s_flbit_i32_b64">;
+def S_FLBIT_I32_B64 : SOP1_32_64 <"s_flbit_i32_b64",
+  [(set i32:$sdst, (AMDGPUffbh_u32 i64:$src0))]
+>;
 def S_FLBIT_I32 : SOP1_32 <"s_flbit_i32",
   [(set i32:$sdst, (AMDGPUffbh_i32 i32:$src0))]
 >;
@@ -609,10 +613,18 @@ let SubtargetPredicate = isGFX9Plus in {
   def S_PACK_HH_B32_B16 : SOP2_32<"s_pack_hh_b32_b16">;
 
   let Defs = [SCC] in {
-    def S_LSHL1_ADD_U32 : SOP2_32<"s_lshl1_add_u32">;
-    def S_LSHL2_ADD_U32 : SOP2_32<"s_lshl2_add_u32">;
-    def S_LSHL3_ADD_U32 : SOP2_32<"s_lshl3_add_u32">;
-    def S_LSHL4_ADD_U32 : SOP2_32<"s_lshl4_add_u32">;
+    def S_LSHL1_ADD_U32 : SOP2_32<"s_lshl1_add_u32",
+      [(set i32:$sdst, (shl1_add SSrc_b32:$src0, SSrc_b32:$src1))]
+    >;
+    def S_LSHL2_ADD_U32 : SOP2_32<"s_lshl2_add_u32",
+      [(set i32:$sdst, (shl2_add SSrc_b32:$src0, SSrc_b32:$src1))]
+    >;
+    def S_LSHL3_ADD_U32 : SOP2_32<"s_lshl3_add_u32",
+      [(set i32:$sdst, (shl3_add SSrc_b32:$src0, SSrc_b32:$src1))]
+    >;
+    def S_LSHL4_ADD_U32 : SOP2_32<"s_lshl4_add_u32",
+      [(set i32:$sdst, (shl4_add SSrc_b32:$src0, SSrc_b32:$src1))]
+    >;
   } // End Defs = [SCC]
 
   let isCommutable = 1 in {
@@ -1244,7 +1256,7 @@ def : GCNPat <
 
 // Same as a 32-bit inreg
 def : GCNPat<
-  (i32 (sext i16:$src)),
+  (i32 (UniformUnaryFrag<sext> i16:$src)),
   (S_SEXT_I32_I16 $src)
 >;
 
@@ -1271,7 +1283,7 @@ def : GCNPat<
 >;
 
 def : GCNPat <
-  (i64 (sext i16:$src)),
+  (i64 (UniformUnaryFrag<sext> i16:$src)),
     (REG_SEQUENCE SReg_64, (i32 (S_SEXT_I32_I16 $src)), sub0,
     (i32 (COPY_TO_REGCLASS (S_ASHR_I32 (i32 (S_SEXT_I32_I16 $src)), (S_MOV_B32 (i32 31))), SGPR_32)), sub1)
 >;

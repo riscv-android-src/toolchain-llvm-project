@@ -42,15 +42,11 @@ OperationState::OperationState(Location location, StringRef name,
 }
 
 void OperationState::addOperands(ValueRange newOperands) {
-  assert(successors.empty() && "Non successor operands should be added first.");
   operands.append(newOperands.begin(), newOperands.end());
 }
 
-void OperationState::addSuccessor(Block *successor, ValueRange succOperands) {
-  successors.push_back(successor);
-  // Insert a sentinel operand to mark a barrier between successor operands.
-  operands.push_back(nullptr);
-  operands.append(succOperands.begin(), succOperands.end());
+void OperationState::addSuccessors(SuccessorRange newSuccessors) {
+  successors.append(newSuccessors.begin(), newSuccessors.end());
 }
 
 Region *OperationState::addRegion() {
@@ -137,14 +133,76 @@ void detail::OperandStorage::grow(ResizableStorage &resizeUtil,
 }
 
 //===----------------------------------------------------------------------===//
+// ResultStorage
+//===----------------------------------------------------------------------===//
+
+/// Returns the parent operation of this trailing result.
+Operation *detail::TrailingOpResult::getOwner() {
+  // We need to do some arithmetic to get the operation pointer. Move the
+  // trailing owner to the start of the array.
+  TrailingOpResult *trailingIt = this - trailingResultNumber;
+
+  // Move the owner past the inline op results to get to the operation.
+  auto *inlineResultIt = reinterpret_cast<InLineOpResult *>(trailingIt) -
+                         OpResult::getMaxInlineResults();
+  return reinterpret_cast<Operation *>(inlineResultIt) - 1;
+}
+
+//===----------------------------------------------------------------------===//
 // Operation Value-Iterators
 //===----------------------------------------------------------------------===//
+
+//===----------------------------------------------------------------------===//
+// TypeRange
+
+TypeRange::TypeRange(ArrayRef<Type> types)
+    : TypeRange(types.data(), types.size()) {}
+TypeRange::TypeRange(OperandRange values)
+    : TypeRange(values.begin().getBase(), values.size()) {}
+TypeRange::TypeRange(ResultRange values)
+    : TypeRange(values.getBase()->getResultTypes().slice(values.getStartIndex(),
+                                                         values.size())) {}
+TypeRange::TypeRange(ArrayRef<Value> values)
+    : TypeRange(values.data(), values.size()) {}
+TypeRange::TypeRange(ValueRange values) : TypeRange(OwnerT(), values.size()) {
+  detail::ValueRangeOwner owner = values.begin().getBase();
+  if (auto *op = reinterpret_cast<Operation *>(owner.ptr.dyn_cast<void *>()))
+    this->base = op->getResultTypes().drop_front(owner.startIndex).data();
+  else if (auto *operand = owner.ptr.dyn_cast<OpOperand *>())
+    this->base = operand;
+  else
+    this->base = owner.ptr.get<const Value *>();
+}
+
+/// See `llvm::detail::indexed_accessor_range_base` for details.
+TypeRange::OwnerT TypeRange::offset_base(OwnerT object, ptrdiff_t index) {
+  if (auto *value = object.dyn_cast<const Value *>())
+    return {value + index};
+  if (auto *operand = object.dyn_cast<OpOperand *>())
+    return {operand + index};
+  return {object.dyn_cast<const Type *>() + index};
+}
+/// See `llvm::detail::indexed_accessor_range_base` for details.
+Type TypeRange::dereference_iterator(OwnerT object, ptrdiff_t index) {
+  if (auto *value = object.dyn_cast<const Value *>())
+    return (value + index)->getType();
+  if (auto *operand = object.dyn_cast<OpOperand *>())
+    return (operand + index)->get().getType();
+  return object.dyn_cast<const Type *>()[index];
+}
 
 //===----------------------------------------------------------------------===//
 // OperandRange
 
 OperandRange::OperandRange(Operation *op)
     : OperandRange(op->getOpOperands().data(), op->getNumOperands()) {}
+
+/// Return the operand index of the first element of this range. The range
+/// must not be empty.
+unsigned OperandRange::getBeginOperandIndex() const {
+  assert(!empty() && "range must not be empty");
+  return base->getOperandNumber();
+}
 
 //===----------------------------------------------------------------------===//
 // ResultRange
@@ -153,10 +211,10 @@ ResultRange::ResultRange(Operation *op)
     : ResultRange(op, /*startIndex=*/0, op->getNumResults()) {}
 
 ArrayRef<Type> ResultRange::getTypes() const {
-  return getBase()->getResultTypes();
+  return getBase()->getResultTypes().slice(getStartIndex(), size());
 }
 
-/// See `indexed_accessor_range` for details.
+/// See `llvm::indexed_accessor_range` for details.
 OpResult ResultRange::dereference(Operation *op, ptrdiff_t index) {
   return op->getResult(index);
 }
@@ -173,7 +231,7 @@ ValueRange::ValueRange(ResultRange values)
           {values.getBase(), static_cast<unsigned>(values.getStartIndex())},
           values.size()) {}
 
-/// See `detail::indexed_accessor_range_base` for details.
+/// See `llvm::detail::indexed_accessor_range_base` for details.
 ValueRange::OwnerT ValueRange::offset_base(const OwnerT &owner,
                                            ptrdiff_t index) {
   if (auto *value = owner.ptr.dyn_cast<const Value *>())
@@ -183,7 +241,7 @@ ValueRange::OwnerT ValueRange::offset_base(const OwnerT &owner,
   Operation *operation = reinterpret_cast<Operation *>(owner.ptr.get<void *>());
   return {operation, owner.startIndex + static_cast<unsigned>(index)};
 }
-/// See `detail::indexed_accessor_range_base` for details.
+/// See `llvm::detail::indexed_accessor_range_base` for details.
 Value ValueRange::dereference_iterator(const OwnerT &owner, ptrdiff_t index) {
   if (auto *value = owner.ptr.dyn_cast<const Value *>())
     return value[index];

@@ -35,6 +35,8 @@ using namespace lldb;
 using namespace lldb_private;
 using namespace lldb_private::platform_gdb_server;
 
+LLDB_PLUGIN_DEFINE_ADV(PlatformRemoteGDBServer, PlatformGDB)
+
 static bool g_initialized = false;
 
 void PlatformRemoteGDBServer::Initialize() {
@@ -288,7 +290,7 @@ Status PlatformRemoteGDBServer::ConnectRemote(Args &args) {
                                    GetHostname());
   } else {
     if (args.GetArgumentCount() == 1) {
-      m_gdb_client.SetConnection(new ConnectionFileDescriptor());
+      m_gdb_client.SetConnection(std::make_unique<ConnectionFileDescriptor>());
       // we're going to reuse the hostname when we connect to the debugserver
       int port;
       std::string path;

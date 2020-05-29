@@ -128,6 +128,7 @@ template <class ELFT> class ELFState {
   NameToIdxMap DynSymN2I;
   ELFYAML::Object &Doc;
 
+  uint64_t LocationCounter = 0;
   bool HasError = false;
   yaml::ErrorHandler ErrHandler;
   void reportError(const Twine &Msg);
@@ -218,6 +219,8 @@ template <class ELFT> class ELFState {
 
   ELFState(ELFYAML::Object &D, yaml::ErrorHandler EH);
 
+  void assignSectionAddress(Elf_Shdr &SHeader, ELFYAML::Section *YAMLSec);
+
 public:
   static bool writeELF(raw_ostream &OS, ELFYAML::Object &Doc,
                        yaml::ErrorHandler EH);
@@ -251,12 +254,11 @@ ELFState<ELFT>::ELFState(ELFYAML::Object &D, yaml::ErrorHandler EH)
             ELFYAML::Chunk::ChunkKind::RawContent, /*IsImplicit=*/true));
 
   std::vector<StringRef> ImplicitSections;
+  if (Doc.DynamicSymbols)
+    ImplicitSections.insert(ImplicitSections.end(), {".dynsym", ".dynstr"});
   if (Doc.Symbols)
     ImplicitSections.push_back(".symtab");
   ImplicitSections.insert(ImplicitSections.end(), {".strtab", ".shstrtab"});
-
-  if (Doc.DynamicSymbols)
-    ImplicitSections.insert(ImplicitSections.end(), {".dynsym", ".dynstr"});
 
   // Insert placeholders for implicit sections that are not
   // defined explicitly in YAML.
@@ -316,6 +318,7 @@ template <class ELFT>
 void ELFState<ELFT>::initProgramHeaders(std::vector<Elf_Phdr> &PHeaders) {
   for (const auto &YamlPhdr : Doc.ProgramHeaders) {
     Elf_Phdr Phdr;
+    zero(Phdr);
     Phdr.p_type = YamlPhdr.Type;
     Phdr.p_flags = YamlPhdr.Flags;
     Phdr.p_vaddr = YamlPhdr.VAddr;
@@ -391,6 +394,8 @@ bool ELFState<ELFT>::initImplicitHeader(ContiguousBlobAccumulator &CBA,
   else
     return false;
 
+  LocationCounter += Header.sh_size;
+
   // Override section fields if requested.
   overrideFields<ELFT>(YAMLSec, Header);
   return true;
@@ -414,6 +419,7 @@ void ELFState<ELFT>::initSectionHeaders(std::vector<Elf_Shdr> &SHeaders,
   for (const std::unique_ptr<ELFYAML::Chunk> &D : Doc.Chunks) {
     if (auto S = dyn_cast<ELFYAML::Fill>(D.get())) {
       writeFill(*S, CBA);
+      LocationCounter += S->Size;
       continue;
     }
 
@@ -439,8 +445,9 @@ void ELFState<ELFT>::initSectionHeaders(std::vector<Elf_Shdr> &SHeaders,
     SHeader.sh_type = Sec->Type;
     if (Sec->Flags)
       SHeader.sh_flags = *Sec->Flags;
-    SHeader.sh_addr = Sec->Address;
     SHeader.sh_addralign = Sec->AddressAlign;
+
+    assignSectionAddress(SHeader, Sec);
 
     if (!Sec->Link.empty())
       SHeader.sh_link = toSectionIndex(Sec->Link, Sec->Name);
@@ -501,9 +508,32 @@ void ELFState<ELFT>::initSectionHeaders(std::vector<Elf_Shdr> &SHeaders,
       llvm_unreachable("Unknown section type");
     }
 
+    LocationCounter += SHeader.sh_size;
+
     // Override section fields if requested.
     overrideFields<ELFT>(Sec, SHeader);
   }
+}
+
+template <class ELFT>
+void ELFState<ELFT>::assignSectionAddress(Elf_Shdr &SHeader,
+                                          ELFYAML::Section *YAMLSec) {
+  if (YAMLSec && YAMLSec->Address) {
+    SHeader.sh_addr = *YAMLSec->Address;
+    LocationCounter = *YAMLSec->Address;
+    return;
+  }
+
+  // sh_addr represents the address in the memory image of a process. Sections
+  // in a relocatable object file or non-allocatable sections do not need
+  // sh_addr assignment.
+  if (Doc.Header.Type.value == ELF::ET_REL ||
+      !(SHeader.sh_flags & ELF::SHF_ALLOC))
+    return;
+
+  LocationCounter =
+      alignTo(LocationCounter, SHeader.sh_addralign ? SHeader.sh_addralign : 1);
+  SHeader.sh_addr = LocationCounter;
 }
 
 static size_t findFirstNonGlobal(ArrayRef<ELFYAML::Symbol> Symbols) {
@@ -630,7 +660,8 @@ void ELFState<ELFT>::initSymtabSectionHeader(Elf_Shdr &SHeader,
                            ? (uint64_t)(*YAMLSec->EntSize)
                            : sizeof(Elf_Sym);
   SHeader.sh_addralign = YAMLSec ? (uint64_t)YAMLSec->AddressAlign : 8;
-  SHeader.sh_addr = YAMLSec ? (uint64_t)YAMLSec->Address : 0;
+
+  assignSectionAddress(SHeader, YAMLSec);
 
   auto &OS = CBA.getOSAndAlignedOffset(SHeader.sh_offset, SHeader.sh_addralign);
   if (RawSec && (RawSec->Content || RawSec->Size)) {
@@ -677,10 +708,7 @@ void ELFState<ELFT>::initStrtabSectionHeader(Elf_Shdr &SHeader, StringRef Name,
   else if (Name == ".dynstr")
     SHeader.sh_flags = ELF::SHF_ALLOC;
 
-  // If the section is explicitly described in the YAML
-  // then we want to use its section address.
-  if (YAMLSec)
-    SHeader.sh_addr = YAMLSec->Address;
+  assignSectionAddress(SHeader, YAMLSec);
 }
 
 template <class ELFT> void ELFState<ELFT>::reportError(const Twine &Msg) {
@@ -726,35 +754,41 @@ void ELFState<ELFT>::setProgramHeaderLayout(std::vector<Elf_Phdr> &PHeaders,
   for (auto &YamlPhdr : Doc.ProgramHeaders) {
     Elf_Phdr &PHeader = PHeaders[PhdrIdx++];
     std::vector<Fragment> Fragments = getPhdrFragments(YamlPhdr, SHeaders);
+    if (!llvm::is_sorted(Fragments, [](const Fragment &A, const Fragment &B) {
+          return A.Offset < B.Offset;
+        }))
+      reportError("sections in the program header with index " +
+                  Twine(PhdrIdx) + " are not sorted by their file offset");
 
     if (YamlPhdr.Offset) {
+      if (!Fragments.empty() && *YamlPhdr.Offset > Fragments.front().Offset)
+        reportError("'Offset' for segment with index " + Twine(PhdrIdx) +
+                    " must be less than or equal to the minimum file offset of "
+                    "all included sections (0x" +
+                    Twine::utohexstr(Fragments.front().Offset) + ")");
       PHeader.p_offset = *YamlPhdr.Offset;
-    } else {
-      if (YamlPhdr.Sections.size())
-        PHeader.p_offset = UINT32_MAX;
-      else
-        PHeader.p_offset = 0;
-
-      // Find the minimum offset for the program header.
-      for (const Fragment &F : Fragments)
-        PHeader.p_offset = std::min((uint64_t)PHeader.p_offset, F.Offset);
+    } else if (!Fragments.empty()) {
+      PHeader.p_offset = Fragments.front().Offset;
     }
 
-    // Find the maximum offset of the end of a section in order to set p_filesz
-    // and p_memsz. When setting p_filesz, trailing SHT_NOBITS sections are not
-    // counted.
-    uint64_t FileOffset = PHeader.p_offset, MemOffset = PHeader.p_offset;
-    for (const Fragment &F : Fragments) {
-      uint64_t End = F.Offset + F.Size;
-      MemOffset = std::max(MemOffset, End);
-
-      if (F.Type != llvm::ELF::SHT_NOBITS)
-        FileOffset = std::max(FileOffset, End);
+    // Set the file size if not set explicitly.
+    if (YamlPhdr.FileSize) {
+      PHeader.p_filesz = *YamlPhdr.FileSize;
+    } else if (!Fragments.empty()) {
+      uint64_t FileSize = Fragments.back().Offset - PHeader.p_offset;
+      // SHT_NOBITS sections occupy no physical space in a file, we should not
+      // take their sizes into account when calculating the file size of a
+      // segment.
+      if (Fragments.back().Type != llvm::ELF::SHT_NOBITS)
+        FileSize += Fragments.back().Size;
+      PHeader.p_filesz = FileSize;
     }
 
-    // Set the file size and the memory size if not set explicitly.
-    PHeader.p_filesz = YamlPhdr.FileSize ? uint64_t(*YamlPhdr.FileSize)
-                                         : FileOffset - PHeader.p_offset;
+    // Find the maximum offset of the end of a section in order to set p_memsz.
+    uint64_t MemOffset = PHeader.p_offset;
+    for (const Fragment &F : Fragments)
+      MemOffset = std::max(MemOffset, F.Offset + F.Size);
+    // Set the memory size if not set explicitly.
     PHeader.p_memsz = YamlPhdr.MemSize ? uint64_t(*YamlPhdr.MemSize)
                                        : MemOffset - PHeader.p_offset;
 
@@ -1038,10 +1072,13 @@ void ELFState<ELFT>::writeSectionContent(Elf_Shdr &SHeader,
     return;
   }
 
-  support::endian::write<uint32_t>(OS, Section.Bucket->size(),
-                                   ELFT::TargetEndianness);
-  support::endian::write<uint32_t>(OS, Section.Chain->size(),
-                                   ELFT::TargetEndianness);
+  support::endian::write<uint32_t>(
+      OS, Section.NBucket.getValueOr(llvm::yaml::Hex64(Section.Bucket->size())),
+      ELFT::TargetEndianness);
+  support::endian::write<uint32_t>(
+      OS, Section.NChain.getValueOr(llvm::yaml::Hex64(Section.Chain->size())),
+      ELFT::TargetEndianness);
+
   for (uint32_t Val : *Section.Bucket)
     support::endian::write<uint32_t>(OS, Val, ELFT::TargetEndianness);
   for (uint32_t Val : *Section.Chain)

@@ -109,7 +109,7 @@ DWARFLocationInterpreter::Interpret(const DWARFLocationEntry &E) {
 static void dumpExpression(raw_ostream &OS, ArrayRef<uint8_t> Data,
                            bool IsLittleEndian, unsigned AddressSize,
                            const MCRegisterInfo *MRI, DWARFUnit *U) {
-  DWARFDataExtractor Extractor(toStringRef(Data), IsLittleEndian, AddressSize);
+  DWARFDataExtractor Extractor(Data, IsLittleEndian, AddressSize);
   DWARFExpression(Extractor, AddressSize).print(OS, MRI, U);
 }
 
@@ -156,9 +156,7 @@ bool DWARFLocationTable::dumpLocationList(uint64_t *Offset, raw_ostream &OS,
     return true;
   });
   if (E) {
-    OS << "\n";
-    OS.indent(Indent);
-    OS << "error: " << toString(std::move(E));
+    DumpOpts.RecoverableErrorHandler(std::move(E));
     return false;
   }
   return true;

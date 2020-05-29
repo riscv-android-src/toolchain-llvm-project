@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef liblldb_StringPrinter_h_
-#define liblldb_StringPrinter_h_
+#ifndef LLDB_DATAFORMATTERS_STRINGPRINTER_H
+#define LLDB_DATAFORMATTERS_STRINGPRINTER_H
 
 #include <functional>
 #include <string>
@@ -115,9 +115,15 @@ public:
 
     lldb::ProcessSP GetProcessSP() const { return m_process_sp; }
 
+    void SetHasSourceSize(bool e) { m_has_source_size = e; }
+
+    bool HasSourceSize() const { return m_has_source_size; }
+
   private:
     uint64_t m_location = 0;
     lldb::ProcessSP m_process_sp;
+    /// True iff we know the source size of the string.
+    bool m_has_source_size = false;
   };
 
   class ReadBufferAndDumpToStreamOptions : public DumpToStreamOptions {
@@ -218,4 +224,4 @@ public:
 } // namespace formatters
 } // namespace lldb_private
 
-#endif // liblldb_StringPrinter_h_
+#endif // LLDB_DATAFORMATTERS_STRINGPRINTER_H

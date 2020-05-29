@@ -42,11 +42,11 @@ def FeatureAES : SubtargetFeature<
     "Enable AES support", [FeatureNEON]>;
 
 // Crypto has been split up and any combination is now valid (see the
-// crypto defintions above). Also, crypto is now context sensitive:
+// crypto definitions above). Also, crypto is now context sensitive:
 // it has a different meaning for e.g. Armv8.4 than it has for Armv8.2.
 // Therefore, we rely on Clang, the user interacing tool, to pass on the
 // appropriate crypto options. But here in the backend, crypto has very little
-// meaning anymore. We kept the Crypto defintion here for backward
+// meaning anymore. We kept the Crypto definition here for backward
 // compatibility, and now imply features SHA2 and AES, which was the
 // "traditional" meaning of Crypto.
 def FeatureCrypto : SubtargetFeature<"crypto", "HasCrypto", "true",
@@ -101,7 +101,7 @@ def FeatureCCPP : SubtargetFeature<"ccpp", "HasCCPP",
     "true", "Enable v8.2 data Cache Clean to Point of Persistence" >;
 
 def FeatureSVE : SubtargetFeature<"sve", "HasSVE", "true",
-  "Enable Scalable Vector Extension (SVE) instructions">;
+  "Enable Scalable Vector Extension (SVE) instructions", [FeatureFullFP16]>;
 
 def FeatureSVE2 : SubtargetFeature<"sve2", "HasSVE2", "true",
   "Enable Scalable Vector Extension 2 (SVE2) instructions", [FeatureSVE]>;
@@ -240,11 +240,11 @@ def FeatureDotProd : SubtargetFeature<
 
 def FeaturePA : SubtargetFeature<
     "pa", "HasPA", "true",
-    "Enable v8.3-A Pointer Authentication enchancement">;
+    "Enable v8.3-A Pointer Authentication extension">;
 
 def FeatureJS : SubtargetFeature<
     "jsconv", "HasJS", "true",
-    "Enable v8.3-A JavaScript FP conversion enchancement",
+    "Enable v8.3-A JavaScript FP conversion instructions",
     [FeatureFPARMv8]>;
 
 def FeatureCCIDX : SubtargetFeature<
@@ -280,6 +280,11 @@ def FeatureTRACEV8_4 : SubtargetFeature<
 def FeatureAM : SubtargetFeature<
     "am", "HasAM", "true",
     "Enable v8.4-A Activity Monitors extension">;
+
+def FeatureAMVS : SubtargetFeature<
+    "amvs", "HasAMVS", "true",
+    "Enable v8.6-A Activity Monitors Virtualization support",
+    [FeatureAM]>;
 
 def FeatureSEL2 : SubtargetFeature<
     "sel2", "HasSEL2", "true",
@@ -365,6 +370,25 @@ def FeatureTaggedGlobals : SubtargetFeature<"tagged-globals",
     "true", "Use an instruction sequence for taking the address of a global "
     "that allows a memory tag in the upper address bits">;
 
+def FeatureBF16 : SubtargetFeature<"bf16", "HasBF16",
+    "true", "Enable BFloat16 Extension" >;
+
+def FeatureMatMulInt8 : SubtargetFeature<"i8mm", "HasMatMulInt8",
+    "true", "Enable Matrix Multiply Int8 Extension">;
+
+def FeatureMatMulFP32 : SubtargetFeature<"f32mm", "HasMatMulFP32",
+    "true", "Enable Matrix Multiply FP32 Extension", [FeatureSVE]>;
+
+def FeatureMatMulFP64 : SubtargetFeature<"f64mm", "HasMatMulFP64",
+    "true", "Enable Matrix Multiply FP64 Extension", [FeatureSVE]>;
+
+def FeatureFineGrainedTraps : SubtargetFeature<"fgt", "HasFineGrainedTraps",
+    "true", "Enable fine grained virtualization traps extension">;
+
+def FeatureEnhancedCounterVirtualization :
+      SubtargetFeature<"ecv", "HasEnhancedCounterVirtualization",
+      "true", "Enable enhanced counter virtualization extension">;
+
 //===----------------------------------------------------------------------===//
 // Architectures.
 //
@@ -391,8 +415,13 @@ def HasV8_5aOps : SubtargetFeature<
   "v8.5a", "HasV8_5aOps", "true", "Support ARM v8.5a instructions",
   [HasV8_4aOps, FeatureAltFPCmp, FeatureFRInt3264, FeatureSpecRestrict,
    FeatureSSBS, FeatureSB, FeaturePredRes, FeatureCacheDeepPersist,
-   FeatureBranchTargetId]
->;
+   FeatureBranchTargetId]>;
+
+def HasV8_6aOps : SubtargetFeature<
+  "v8.6a", "HasV8_6aOps", "true", "Support ARM v8.6a instructions",
+
+  [HasV8_5aOps, FeatureAMVS, FeatureBF16, FeatureFineGrainedTraps,
+   FeatureEnhancedCounterVirtualization, FeatureMatMulInt8]>;
 
 //===----------------------------------------------------------------------===//
 // Register File Description
@@ -562,6 +591,19 @@ def ProcA76     : SubtargetFeature<"a76", "ARMProcFamily", "CortexA76",
                                     FeatureDotProd,
                                     FeatureSSBS
                                     ]>;
+
+def ProcA64FX : SubtargetFeature<"a64fx", "ARMProcFamily", "A64FX",
+                                 "Fujitsu A64FX processors", [
+                                  HasV8_2aOps,
+                                  FeatureFPARMv8,
+                                  FeatureNEON,
+                                  FeatureSHA2,
+                                  FeaturePerfMon,
+                                  FeatureFullFP16,
+                                  FeatureSVE,
+                                  FeaturePostRAScheduler,
+                                  FeatureComplxNum
+                                  ]>;
 
 // Note that cyclone does not fuse AES instructions, but newer apple chips do
 // perform the fusion and cyclone is used by default when targetting apple OSes.
@@ -844,7 +886,7 @@ def : ProcessorModel<"generic", NoSchedModel, [
                      FeatureNEON,
                      FeaturePerfMon,
                      FeaturePostRAScheduler,
-// ETE and TRBE are future architecture extensions. We temporariliy enable them
+// ETE and TRBE are future architecture extensions. We temporarily enable them
 // by default for users targeting generic AArch64, until it is decided in which
 // armv8.x-a architecture revision they will end up. The extensions do not
 // affect code generated by the compiler and can be used only by explicitly
@@ -853,6 +895,7 @@ def : ProcessorModel<"generic", NoSchedModel, [
                      ]>;
 
 def : ProcessorModel<"cortex-a35", CortexA53Model, [ProcA35]>;
+def : ProcessorModel<"cortex-a34", CortexA53Model, [ProcA35]>;
 def : ProcessorModel<"cortex-a53", CortexA53Model, [ProcA53]>;
 def : ProcessorModel<"cortex-a55", CortexA53Model, [ProcA55]>;
 def : ProcessorModel<"cortex-a57", CortexA57Model, [ProcA57]>;
@@ -899,6 +942,10 @@ def : ProcessorModel<"apple-s5", CycloneModel, [ProcAppleA12]>;
 
 // Alias for the latest Apple processor model supported by LLVM.
 def : ProcessorModel<"apple-latest", CycloneModel, [ProcAppleA13]>;
+
+// Fujitsu A64FX
+// FIXME: Scheduling model is not implemented yet.
+def : ProcessorModel<"a64fx", NoSchedModel, [ProcA64FX]>;
 
 //===----------------------------------------------------------------------===//
 // Assembly parser

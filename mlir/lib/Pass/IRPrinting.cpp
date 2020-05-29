@@ -141,7 +141,7 @@ void IRPrinterInstrumentation::runBeforePass(Pass *pass, Operation *op) {
     beforePassFingerPrints.try_emplace(pass, op);
 
   config->printBeforeIfEnabled(pass, op, [&](raw_ostream &out) {
-    out << formatv("*** IR Dump Before {0} ***", pass->getName());
+    out << formatv("// *** IR Dump Before {0} ***", pass->getName());
     printIR(op, config->shouldPrintAtModuleScope(), out, OpPrintingFlags());
     out << "\n\n";
   });
@@ -165,7 +165,7 @@ void IRPrinterInstrumentation::runAfterPass(Pass *pass, Operation *op) {
   }
 
   config->printAfterIfEnabled(pass, op, [&](raw_ostream &out) {
-    out << formatv("*** IR Dump After {0} ***", pass->getName());
+    out << formatv("// *** IR Dump After {0} ***", pass->getName());
     printIR(op, config->shouldPrintAtModuleScope(), out, OpPrintingFlags());
     out << "\n\n";
   });
@@ -178,7 +178,7 @@ void IRPrinterInstrumentation::runAfterPassFailed(Pass *pass, Operation *op) {
     beforePassFingerPrints.erase(pass);
 
   config->printAfterIfEnabled(pass, op, [&](raw_ostream &out) {
-    out << formatv("*** IR Dump After {0} Failed ***", pass->getName());
+    out << formatv("// *** IR Dump After {0} Failed ***", pass->getName());
     printIR(op, config->shouldPrintAtModuleScope(), out,
             OpPrintingFlags().printGenericOpForm());
     out << "\n\n";
@@ -256,6 +256,9 @@ struct BasicIRPrinterConfig : public PassManager::IRPrinterConfig {
 /// Add an instrumentation to print the IR before and after pass execution,
 /// using the provided configuration.
 void PassManager::enableIRPrinting(std::unique_ptr<IRPrinterConfig> config) {
+  if (config->shouldPrintAtModuleScope() && isMultithreadingEnabled())
+    llvm::report_fatal_error("IR printing can't be setup on a pass-manager "
+                             "without disabling multi-threading first.");
   addInstrumentation(
       std::make_unique<IRPrinterInstrumentation>(std::move(config)));
 }

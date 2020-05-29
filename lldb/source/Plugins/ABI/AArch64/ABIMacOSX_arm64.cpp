@@ -1665,7 +1665,7 @@ ABIMacOSX_arm64::CreateInstance(ProcessSP process_sp, const ArchSpec &arch) {
   const llvm::Triple::VendorType vendor_type = arch.GetTriple().getVendor();
 
   if (vendor_type == llvm::Triple::Apple) {
-    if (arch_type == llvm::Triple::aarch64 || 
+    if (arch_type == llvm::Triple::aarch64 ||
         arch_type == llvm::Triple::aarch64_32) {
       return ABISP(
           new ABIMacOSX_arm64(std::move(process_sp), MakeMCRegisterInfo(arch)));
@@ -2021,7 +2021,7 @@ bool ABIMacOSX_arm64::CreateDefaultUnwindPlan(UnwindPlan &unwind_plan) {
 // volatile (and specifically only the lower 8 bytes of these regs), the rest
 // of the fp/SIMD registers are volatile.
 //
-// v. https://github.com/ARM-software/software-standards/blob/master/abi/aapcs64/
+// v. https://github.com/ARM-software/abi-aa/blob/master/aapcs64/
 
 // We treat x29 as callee preserved also, else the unwinder won't try to
 // retrieve fp saves.

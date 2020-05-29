@@ -63,7 +63,6 @@ namespace PPC {
 }
 
 class GlobalValue;
-class TargetMachine;
 
 class PPCSubtarget : public PPCGenSubtargetInfo {
 public:
@@ -135,6 +134,9 @@ protected:
   bool HasDirectMove;
   bool HasHTM;
   bool HasFloat128;
+  bool HasFusion;
+  bool HasAddiLoadFusion;
+  bool HasAddisLoadFusion;
   bool IsISA3_0;
   bool UseLongCalls;
   bool SecurePlt;
@@ -292,13 +294,23 @@ public:
     return Align(16);
   }
 
-  // PPC32 SVR4ABI has no red zone and PPC64 SVR4ABI has a 288-byte red zone.
-  unsigned getRedZoneSize() const { return isPPC64() ? 288 : 0; }
+  unsigned  getRedZoneSize() const {
+    if (isPPC64())
+      // 288 bytes = 18*8 (FPRs) + 18*8 (GPRs, GPR13 reserved)
+      return 288;
+
+    // AIX PPC32: 220 bytes = 18*8 (FPRs) + 19*4 (GPRs);
+    // PPC32 SVR4ABI has no redzone.
+    return isAIXABI() ? 220 : 0;
+  }
 
   bool hasHTM() const { return HasHTM; }
   bool hasFloat128() const { return HasFloat128; }
   bool isISA3_0() const { return IsISA3_0; }
   bool useLongCalls() const { return UseLongCalls; }
+  bool hasFusion() const { return HasFusion; }
+  bool hasAddiLoadFusion() const { return HasAddiLoadFusion; }
+  bool hasAddisLoadFusion() const { return HasAddisLoadFusion; }
   bool needsSwapsForVSXMemOps() const {
     return hasVSX() && isLittleEndian() && !hasP9Vector();
   }
@@ -320,6 +332,7 @@ public:
 
   bool is64BitELFABI() const { return  isSVR4ABI() && isPPC64(); }
   bool is32BitELFABI() const { return  isSVR4ABI() && !isPPC64(); }
+  bool isUsingPCRelativeCalls() const;
 
   /// Originally, this function return hasISEL(). Now we always enable it,
   /// but may expand the ISEL instruction later.

@@ -29,7 +29,6 @@
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringMap.h"
-#include "llvm/ADT/StringRef.h"
 #include "llvm/BinaryFormat/Dwarf.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DebugInfoMetadata.h"
@@ -53,8 +52,7 @@
 
 namespace llvm {
 
-class ConstantFP;
-class ConstantInt;
+class StringRef;
 class Type;
 class Value;
 class ValueHandleBase;
@@ -355,19 +353,22 @@ template <> struct MDNodeKeyImpl<DISubrange> {
 };
 
 template <> struct MDNodeKeyImpl<DIEnumerator> {
-  int64_t Value;
+  APInt Value;
   MDString *Name;
   bool IsUnsigned;
 
-  MDNodeKeyImpl(int64_t Value, bool IsUnsigned, MDString *Name)
+  MDNodeKeyImpl(APInt Value, bool IsUnsigned, MDString *Name)
       : Value(Value), Name(Name), IsUnsigned(IsUnsigned) {}
+  MDNodeKeyImpl(int64_t Value, bool IsUnsigned, MDString *Name)
+      : Value(APInt(64, Value, !IsUnsigned)), Name(Name),
+        IsUnsigned(IsUnsigned) {}
   MDNodeKeyImpl(const DIEnumerator *N)
       : Value(N->getValue()), Name(N->getRawName()),
         IsUnsigned(N->isUnsigned()) {}
 
   bool isKeyOf(const DIEnumerator *RHS) const {
-    return Value == RHS->getValue() && IsUnsigned == RHS->isUnsigned() &&
-           Name == RHS->getRawName();
+    return APInt::isSameValue(Value, RHS->getValue()) &&
+           IsUnsigned == RHS->isUnsigned() && Name == RHS->getRawName();
   }
 
   unsigned getHashValue() const { return hash_combine(Value, Name); }
@@ -819,20 +820,23 @@ template <> struct MDNodeKeyImpl<DIModule> {
   MDString *Name;
   MDString *ConfigurationMacros;
   MDString *IncludePath;
+  MDString *APINotesFile;
 
   MDNodeKeyImpl(Metadata *Scope, MDString *Name, MDString *ConfigurationMacros,
-                MDString *IncludePath)
+                MDString *IncludePath, MDString *APINotesFile)
       : Scope(Scope), Name(Name), ConfigurationMacros(ConfigurationMacros),
-        IncludePath(IncludePath) {}
+        IncludePath(IncludePath), APINotesFile(APINotesFile) {}
   MDNodeKeyImpl(const DIModule *N)
       : Scope(N->getRawScope()), Name(N->getRawName()),
         ConfigurationMacros(N->getRawConfigurationMacros()),
-        IncludePath(N->getRawIncludePath()) {}
+        IncludePath(N->getRawIncludePath()),
+        APINotesFile(N->getRawAPINotesFile()) {}
 
   bool isKeyOf(const DIModule *RHS) const {
     return Scope == RHS->getRawScope() && Name == RHS->getRawName() &&
            ConfigurationMacros == RHS->getRawConfigurationMacros() &&
-           IncludePath == RHS->getRawIncludePath();
+           IncludePath == RHS->getRawIncludePath() &&
+           APINotesFile == RHS->getRawAPINotesFile();
   }
 
   unsigned getHashValue() const {
@@ -843,36 +847,45 @@ template <> struct MDNodeKeyImpl<DIModule> {
 template <> struct MDNodeKeyImpl<DITemplateTypeParameter> {
   MDString *Name;
   Metadata *Type;
+  bool IsDefault;
 
-  MDNodeKeyImpl(MDString *Name, Metadata *Type) : Name(Name), Type(Type) {}
+  MDNodeKeyImpl(MDString *Name, Metadata *Type, bool IsDefault)
+      : Name(Name), Type(Type), IsDefault(IsDefault) {}
   MDNodeKeyImpl(const DITemplateTypeParameter *N)
-      : Name(N->getRawName()), Type(N->getRawType()) {}
+      : Name(N->getRawName()), Type(N->getRawType()),
+        IsDefault(N->isDefault()) {}
 
   bool isKeyOf(const DITemplateTypeParameter *RHS) const {
-    return Name == RHS->getRawName() && Type == RHS->getRawType();
+    return Name == RHS->getRawName() && Type == RHS->getRawType() &&
+           IsDefault == RHS->isDefault();
   }
 
-  unsigned getHashValue() const { return hash_combine(Name, Type); }
+  unsigned getHashValue() const { return hash_combine(Name, Type, IsDefault); }
 };
 
 template <> struct MDNodeKeyImpl<DITemplateValueParameter> {
   unsigned Tag;
   MDString *Name;
   Metadata *Type;
+  bool IsDefault;
   Metadata *Value;
 
-  MDNodeKeyImpl(unsigned Tag, MDString *Name, Metadata *Type, Metadata *Value)
-      : Tag(Tag), Name(Name), Type(Type), Value(Value) {}
+  MDNodeKeyImpl(unsigned Tag, MDString *Name, Metadata *Type, bool IsDefault,
+                Metadata *Value)
+      : Tag(Tag), Name(Name), Type(Type), IsDefault(IsDefault), Value(Value) {}
   MDNodeKeyImpl(const DITemplateValueParameter *N)
       : Tag(N->getTag()), Name(N->getRawName()), Type(N->getRawType()),
-        Value(N->getValue()) {}
+        IsDefault(N->isDefault()), Value(N->getValue()) {}
 
   bool isKeyOf(const DITemplateValueParameter *RHS) const {
     return Tag == RHS->getTag() && Name == RHS->getRawName() &&
-           Type == RHS->getRawType() && Value == RHS->getValue();
+           Type == RHS->getRawType() && IsDefault == RHS->isDefault() &&
+           Value == RHS->getValue();
   }
 
-  unsigned getHashValue() const { return hash_combine(Tag, Name, Type, Value); }
+  unsigned getHashValue() const {
+    return hash_combine(Tag, Name, Type, IsDefault, Value);
+  }
 };
 
 template <> struct MDNodeKeyImpl<DIGlobalVariable> {
@@ -1366,9 +1379,6 @@ public:
   /// integer representing the next DWARF path discriminator to assign to
   /// instructions in different blocks at the same location.
   DenseMap<std::pair<const char *, unsigned>, unsigned> DiscriminatorTable;
-
-  int getOrAddScopeRecordIdxEntry(MDNode *N, int ExistingIdx);
-  int getOrAddScopeInlinedAtIdxEntry(MDNode *Scope, MDNode *IA,int ExistingIdx);
 
   /// A set of interned tags for operand bundles.  The StringMap maps
   /// bundle tags to their IDs.

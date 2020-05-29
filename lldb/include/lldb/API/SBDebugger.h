@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLDB_SBDebugger_h_
-#define LLDB_SBDebugger_h_
+#ifndef LLDB_API_SBDEBUGGER_H
+#define LLDB_API_SBDEBUGGER_H
 
 #include <stdio.h>
 
@@ -199,6 +199,10 @@ public:
 
   bool GetUseColor() const;
 
+  bool SetUseSourceCache(bool use_source_cache);
+
+  bool GetUseSourceCache() const;
+
   static bool GetDefaultArchitecture(char *arch_name, size_t arch_name_len);
 
   static bool SetDefaultArchitecture(const char *arch_name);
@@ -319,4 +323,4 @@ private:
 
 } // namespace lldb
 
-#endif // LLDB_SBDebugger_h_
+#endif // LLDB_API_SBDEBUGGER_H

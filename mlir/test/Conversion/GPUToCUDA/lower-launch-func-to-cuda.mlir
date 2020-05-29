@@ -1,4 +1,4 @@
-// RUN: mlir-opt %s --launch-func-to-cuda | FileCheck %s
+// RUN: mlir-opt -allow-unregistered-dialect %s --launch-func-to-cuda | FileCheck %s
 
 module attributes {gpu.container_module} {
 
@@ -6,8 +6,8 @@ module attributes {gpu.container_module} {
   // CHECK: llvm.mlir.global internal constant @[[global:.*]]("CUBIN")
 
   gpu.module @kernel_module attributes {nvvm.cubin = "CUBIN"} {
-    gpu.func @kernel(%arg0: !llvm.float, %arg1: !llvm<"float*">) attributes {gpu.kernel} {
-      gpu.return
+    llvm.func @kernel(%arg0: !llvm.float, %arg1: !llvm<"float*">) attributes {gpu.kernel} {
+      llvm.return
     }
   }
 
@@ -27,7 +27,7 @@ module attributes {gpu.container_module} {
     // CHECK: llvm.call @mcuGetStreamHelper
     // CHECK: llvm.call @mcuLaunchKernel
     // CHECK: llvm.call @mcuStreamSynchronize
-    "gpu.launch_func"(%cst, %cst, %cst, %cst, %cst, %cst, %0, %1) { kernel = "kernel", kernel_module = @kernel_module }
+    "gpu.launch_func"(%cst, %cst, %cst, %cst, %cst, %cst, %0, %1) { kernel = @kernel_module::@kernel }
         : (!llvm.i64, !llvm.i64, !llvm.i64, !llvm.i64, !llvm.i64, !llvm.i64, !llvm.float, !llvm<"float*">) -> ()
 
     llvm.return

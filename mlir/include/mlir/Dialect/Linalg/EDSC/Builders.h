@@ -13,7 +13,9 @@
 #ifndef MLIR_DIALECT_LINALG_EDSC_BUILDERS_H_
 #define MLIR_DIALECT_LINALG_EDSC_BUILDERS_H_
 
-#include "mlir/Dialect/Linalg/EDSC/Intrinsics.h"
+#include "mlir/Dialect/Linalg/IR/LinalgOps.h"
+// TODO(ntv): Needed for SubViewOp::Range, clean this up.
+#include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "mlir/Dialect/Utils/StructuredOpsUtils.h"
 #include "mlir/EDSC/Builders.h"
 #include "mlir/EDSC/Intrinsics.h"
@@ -21,9 +23,17 @@
 #include "mlir/IR/Builders.h"
 
 namespace mlir {
+class AffineForOp;
 class BlockArgument;
+class SubViewOp;
+
+namespace loop {
+class ParallelOp;
+} // namespace loop
 
 namespace edsc {
+class AffineLoopNestBuilder;
+class ParallelLoopNestBuilder;
 
 /// A LoopRangeBuilder is a generic NestedBuilder for loop.for operations.
 /// More specifically it is meant to be used as a temporary object for
@@ -32,11 +42,10 @@ namespace edsc {
 class LoopRangeBuilder : public NestedBuilder {
 public:
   /// Constructs a new loop.for and captures the associated induction
-  /// variable. A ValueHandle pointer is passed as the first argument and is the
+  /// variable. A Value pointer is passed as the first argument and is the
   /// *only* way to capture the loop induction variable.
-  LoopRangeBuilder(ValueHandle *iv, ValueHandle range);
-  LoopRangeBuilder(ValueHandle *iv, Value range);
-  LoopRangeBuilder(ValueHandle *iv, SubViewOp::Range range);
+  LoopRangeBuilder(Value *iv, Value range);
+  LoopRangeBuilder(Value *iv, SubViewOp::Range range);
 
   LoopRangeBuilder(const LoopRangeBuilder &) = delete;
   LoopRangeBuilder(LoopRangeBuilder &&) = default;
@@ -47,7 +56,7 @@ public:
   /// The only purpose of this operator is to serve as a sequence point so that
   /// the evaluation of `fun` (which build IR snippets in a scoped fashion) is
   /// scoped within a LoopRangeBuilder.
-  ValueHandle operator()(std::function<void(void)> fun = nullptr);
+  Value operator()(std::function<void(void)> fun = nullptr);
 };
 
 /// Helper class to sugar building loop.for loop nests from ranges.
@@ -55,13 +64,10 @@ public:
 /// directly. In the current implementation it produces loop.for operations.
 class LoopNestRangeBuilder {
 public:
-  LoopNestRangeBuilder(ArrayRef<edsc::ValueHandle *> ivs,
-                       ArrayRef<edsc::ValueHandle> ranges);
-  LoopNestRangeBuilder(ArrayRef<edsc::ValueHandle *> ivs,
-                       ArrayRef<Value> ranges);
-  LoopNestRangeBuilder(ArrayRef<edsc::ValueHandle *> ivs,
+  LoopNestRangeBuilder(MutableArrayRef<Value> ivs, ArrayRef<Value> ranges);
+  LoopNestRangeBuilder(MutableArrayRef<Value> ivs,
                        ArrayRef<SubViewOp::Range> ranges);
-  edsc::ValueHandle operator()(std::function<void(void)> fun = nullptr);
+  Value operator()(std::function<void(void)> fun = nullptr);
 
 private:
   SmallVector<LoopRangeBuilder, 4> loops;
@@ -71,7 +77,7 @@ private:
 /// ranges.
 template <typename LoopTy> class GenericLoopNestRangeBuilder {
 public:
-  GenericLoopNestRangeBuilder(ArrayRef<edsc::ValueHandle *> ivs,
+  GenericLoopNestRangeBuilder(MutableArrayRef<Value> ivs,
                               ArrayRef<Value> ranges);
   void operator()(std::function<void(void)> fun = nullptr) { (*builder)(fun); }
 
@@ -85,57 +91,6 @@ private:
                                   LoopOrAffineLoopBuilder>;
 
   std::unique_ptr<BuilderType> builder;
-};
-
-enum class IterType { Parallel, Reduction };
-
-inline StringRef toString(IterType t) {
-  switch (t) {
-  case IterType::Parallel:
-    return getParallelIteratorTypeName();
-  case IterType::Reduction:
-    return getReductionIteratorTypeName();
-  }
-  llvm_unreachable("Unsupported IterType");
-}
-
-/// A StructuredIndexed represents an indexable quantity that is either:
-/// 1. a captured value, which is suitable for buffer and tensor operands, or;
-/// 2. a captured type, which is suitable for tensor return values.
-///
-/// A StructuredIndexed itself is indexed and passed to `makeGenericLinalgOp`.
-/// It enable an idiomatic syntax for index expressions such as:
-///
-/// ```
-///      StructuredIndexed A(buffer_or_tensor_value), B(buffer_or_tensor_value),
-///        C(buffer_value_or_tensor_type);
-///      makeGenericLinalgOp({A({m, n}), B({k, n})}, {C({m, n})}, ... );
-/// ```
-struct StructuredIndexed : public ValueHandle {
-  StructuredIndexed(Type type) : ValueHandle(type) {}
-  StructuredIndexed(Value value) : ValueHandle(value) {}
-  StructuredIndexed(ValueHandle valueHandle) : ValueHandle(valueHandle) {}
-  StructuredIndexed operator()(ArrayRef<AffineExpr> indexings) {
-    return StructuredIndexed(*this, indexings);
-  }
-
-  ArrayRef<AffineExpr> getExprs() { return exprs; }
-
-private:
-  StructuredIndexed(Type t, ArrayRef<AffineExpr> indexings)
-      : ValueHandle(t), exprs(indexings.begin(), indexings.end()) {
-    assert(t.isa<RankedTensorType>() && "RankedTensor expected");
-  }
-  StructuredIndexed(Value v, ArrayRef<AffineExpr> indexings)
-      : ValueHandle(v), exprs(indexings.begin(), indexings.end()) {
-    assert((v.getType().isa<MemRefType>() ||
-            v.getType().isa<RankedTensorType>()) &&
-           "MemRef or RankedTensor expected");
-  }
-  StructuredIndexed(ValueHandle vh, ArrayRef<AffineExpr> indexings)
-      : ValueHandle(vh), exprs(indexings.begin(), indexings.end()) {}
-
-  SmallVector<AffineExpr, 4> exprs;
 };
 
 inline void defaultRegionBuilder(ArrayRef<BlockArgument> args) {}
@@ -157,7 +112,7 @@ inline void defaultRegionBuilder(ArrayRef<BlockArgument> args) {}
 /// restriction output tensor results would need to be reordered, which would
 /// result in surprising behavior when combined with region definition.
 Operation *makeGenericLinalgOp(
-    ArrayRef<IterType> iteratorTypes, ArrayRef<StructuredIndexed> inputs,
+    ArrayRef<IteratorType> iteratorTypes, ArrayRef<StructuredIndexed> inputs,
     ArrayRef<StructuredIndexed> outputs,
     function_ref<void(ArrayRef<BlockArgument>)> regionBuilder =
         defaultRegionBuilder,
@@ -165,15 +120,17 @@ Operation *makeGenericLinalgOp(
 
 namespace ops {
 using edsc::StructuredIndexed;
-using edsc::ValueHandle;
-using edsc::intrinsics::linalg_yield;
 
 //===----------------------------------------------------------------------===//
 // EDSC builders for linalg generic operations.
 //===----------------------------------------------------------------------===//
 
-/// Build the body of a region to compute a multiply-accumulate, under the
-/// current ScopedContext, at the current insert point.
+/// Build the body of a region to compute a scalar multiply, under the current
+/// ScopedContext, at the current insert point.
+void mulRegionBuilder(ArrayRef<BlockArgument> args);
+
+/// Build the body of a region to compute a scalar multiply-accumulate, under
+/// the current ScopedContext, at the current insert point.
 void macRegionBuilder(ArrayRef<BlockArgument> args);
 
 /// TODO(ntv): In the future we should tie these implementations to something in
@@ -198,34 +155,39 @@ void macRegionBuilder(ArrayRef<BlockArgument> args);
 /// with in-place semantics and parallelism.
 
 /// Unary pointwise operation (with broadcast) entry point.
-using UnaryPointwiseOpBuilder = function_ref<Value(ValueHandle)>;
-Operation *linalg_pointwise(UnaryPointwiseOpBuilder unaryOp,
-                            StructuredIndexed I, StructuredIndexed O);
+using UnaryPointwiseOpBuilder = function_ref<Value(Value)>;
+Operation *linalg_generic_pointwise(UnaryPointwiseOpBuilder unaryOp,
+                                    StructuredIndexed I, StructuredIndexed O);
 
 /// Build a linalg.pointwise with all `parallel` iterators and a region that
 /// computes `O = tanh(I)`. The client is responsible for specifying the proper
 /// indexings when creating the StructuredIndexed.
-Operation *linalg_pointwise_tanh(StructuredIndexed I, StructuredIndexed O);
+Operation *linalg_generic_pointwise_tanh(StructuredIndexed I,
+                                         StructuredIndexed O);
 
 /// Binary pointwise operation (with broadcast) entry point.
-using BinaryPointwiseOpBuilder = function_ref<Value(ValueHandle, ValueHandle)>;
-Operation *linalg_pointwise(BinaryPointwiseOpBuilder binaryOp,
-                            StructuredIndexed I1, StructuredIndexed I2,
-                            StructuredIndexed O);
+using BinaryPointwiseOpBuilder = function_ref<Value(Value, Value)>;
+Operation *linalg_generic_pointwise(BinaryPointwiseOpBuilder binaryOp,
+                                    StructuredIndexed I1, StructuredIndexed I2,
+                                    StructuredIndexed O);
 
 /// Build a linalg.pointwise with all `parallel` iterators and a region that
 /// computes `O = I1 + I2`. The client is responsible for specifying the proper
 /// indexings when creating the StructuredIndexed.
-Operation *linalg_pointwise_add(StructuredIndexed I1, StructuredIndexed I2,
-                                StructuredIndexed O);
+Operation *linalg_generic_pointwise_add(StructuredIndexed I1,
+                                        StructuredIndexed I2,
+                                        StructuredIndexed O);
 
 /// Build a linalg.pointwise with all `parallel` iterators and a region that
 /// computes `O = max(I1, I2)`. The client is responsible for specifying the
 /// proper indexings when creating the StructuredIndexed.
-Operation *linalg_pointwise_max(StructuredIndexed I1, StructuredIndexed I2,
-                                StructuredIndexed O);
+Operation *linalg_generic_pointwise_max(StructuredIndexed I1,
+                                        StructuredIndexed I2,
+                                        StructuredIndexed O);
 
 // TODO(ntv): Implement more useful pointwise operations on a per-need basis.
+
+using MatmulRegionBuilder = function_ref<void(ArrayRef<BlockArgument> args)>;
 
 /// Build a linalg.generic, under the current ScopedContext, at the current
 /// insert point, that computes:
@@ -234,7 +196,9 @@ Operation *linalg_pointwise_max(StructuredIndexed I1, StructuredIndexed I2,
 ///    |
 ///    |  C(m, n) += A(m, k) * B(k, n)
 /// ```
-Operation *linalg_matmul(ValueHandle vA, ValueHandle vB, ValueHandle vC);
+Operation *
+linalg_generic_matmul(Value vA, Value vB, Value vC,
+                      MatmulRegionBuilder regionBuilder = macRegionBuilder);
 
 /// Build a linalg.generic, under the current ScopedContext, at the current
 /// insert point, that computes:
@@ -244,7 +208,9 @@ Operation *linalg_matmul(ValueHandle vA, ValueHandle vB, ValueHandle vC);
 ///    |  C(m, n) = sum_k(A(m, k) * B(k, n))
 /// ```
 /// and returns the tensor `C`.
-Operation *linalg_matmul(ValueHandle vA, ValueHandle vB, RankedTensorType tC);
+Operation *
+linalg_generic_matmul(Value vA, Value vB, RankedTensorType tC,
+                      MatmulRegionBuilder regionBuilder = mulRegionBuilder);
 
 /// Build a linalg.generic, under the current ScopedContext, at the current
 /// insert point, that computes:
@@ -254,12 +220,16 @@ Operation *linalg_matmul(ValueHandle vA, ValueHandle vB, RankedTensorType tC);
 ///    |  D(m, n) = C(m, n) + sum_k(A(m, k) * B(k, n))
 /// ```
 /// and returns the tensor `D`.
-Operation *linalg_matmul(ValueHandle vA, ValueHandle vB, ValueHandle vC,
-                         RankedTensorType tD);
+Operation *
+linalg_generic_matmul(Value vA, Value vB, Value vC, RankedTensorType tD,
+                      MatmulRegionBuilder regionBuilder = macRegionBuilder);
 
-template <typename Container> Operation *linalg_matmul(Container values) {
+template <typename Container>
+Operation *
+linalg_generic_matmul(Container values,
+                      MatmulRegionBuilder regionBuilder = macRegionBuilder) {
   assert(values.size() == 3 && "Expected exactly 3 values");
-  return linalg_matmul(values[0], values[1], values[2]);
+  return linalg_generic_matmul(values[0], values[1], values[2], regionBuilder);
 }
 
 /// Build a linalg.generic, under the current ScopedContext, at the current
@@ -284,15 +254,17 @@ template <typename Container> Operation *linalg_matmul(Container values) {
 /// For now `...` must be empty (i.e. only 2-D convolutions are supported).
 ///
 // TODO(ntv) Extend convolution rank with some template magic.
-Operation *linalg_conv_nhwc(ValueHandle vI, ValueHandle vW, ValueHandle vO,
-                            ArrayRef<int> strides = {},
-                            ArrayRef<int> dilations = {});
+Operation *linalg_generic_conv_nhwc(Value vI, Value vW, Value vO,
+                                    ArrayRef<int> strides = {},
+                                    ArrayRef<int> dilations = {});
 
 template <typename Container>
-Operation *linalg_conv_nhwc(Container values, ArrayRef<int> strides = {},
-                            ArrayRef<int> dilations = {}) {
+Operation *linalg_generic_conv_nhwc(Container values,
+                                    ArrayRef<int> strides = {},
+                                    ArrayRef<int> dilations = {}) {
   assert(values.size() == 3 && "Expected exactly 3 values");
-  return linalg_conv_nhwc(values[0], values[1], values[2], strides, dilations);
+  return linalg_generic_conv_nhwc(values[0], values[1], values[2], strides,
+                                  dilations);
 }
 
 /// Build a linalg.generic, under the current ScopedContext, at the current
@@ -317,18 +289,19 @@ Operation *linalg_conv_nhwc(Container values, ArrayRef<int> strides = {},
 /// For now `...` must be empty (i.e. only 2-D convolutions are supported).
 ///
 // TODO(ntv) Extend convolution rank with some template magic.
-Operation *linalg_dilated_conv_nhwc(ValueHandle vI, ValueHandle vW,
-                                    ValueHandle vO, int depth_multiplier = 1,
-                                    ArrayRef<int> strides = {},
-                                    ArrayRef<int> dilations = {});
+Operation *linalg_generic_dilated_conv_nhwc(Value vI, Value vW, Value vO,
+                                            int depth_multiplier = 1,
+                                            ArrayRef<int> strides = {},
+                                            ArrayRef<int> dilations = {});
 
 template <typename Container>
-Operation *linalg_dilated_conv_nhwc(Container values, int depth_multiplier,
-                                    ArrayRef<int> strides = {},
-                                    ArrayRef<int> dilations = {}) {
+Operation *linalg_generic_dilated_conv_nhwc(Container values,
+                                            int depth_multiplier,
+                                            ArrayRef<int> strides = {},
+                                            ArrayRef<int> dilations = {}) {
   assert(values.size() == 3 && "Expected exactly 3 values");
-  return linalg_dilated_conv_nhwc(values[0], values[1], values[2],
-                                  depth_multiplier, strides, dilations);
+  return linalg_generic_dilated_conv_nhwc(values[0], values[1], values[2],
+                                          depth_multiplier, strides, dilations);
 }
 
 } // namespace ops

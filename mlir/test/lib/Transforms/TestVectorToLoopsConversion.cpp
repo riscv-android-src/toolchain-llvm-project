@@ -18,17 +18,21 @@ using namespace mlir;
 namespace {
 
 struct TestVectorToLoopsPass
-    : public FunctionPass<TestVectorToLoopsPass> {
+    : public PassWrapper<TestVectorToLoopsPass, FunctionPass> {
   void runOnFunction() override {
     OwningRewritePatternList patterns;
     auto *context = &getContext();
     populateVectorToAffineLoopsConversionPatterns(context, patterns);
-    applyPatternsGreedily(getFunction(), patterns);
+    applyPatternsAndFoldGreedily(getFunction(), patterns);
   }
 };
 
 } // end anonymous namespace
 
-static PassRegistration<TestVectorToLoopsPass>
-    pass("test-convert-vector-to-loops",
-         "Converts vector transfer ops to loops over scalars and vector casts");
+namespace mlir {
+void registerTestVectorToLoopsPass() {
+  PassRegistration<TestVectorToLoopsPass> pass(
+      "test-convert-vector-to-loops",
+      "Converts vector transfer ops to loops over scalars and vector casts");
+}
+} // namespace mlir

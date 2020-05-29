@@ -12,6 +12,7 @@
 
 #include "PPCMCAsmInfo.h"
 #include "llvm/ADT/Triple.h"
+#include <cassert>
 
 using namespace llvm;
 
@@ -50,8 +51,6 @@ PPCELFMCAsmInfo::PPCELFMCAsmInfo(bool is64Bit, const Triple& T) {
   Data64bitsDirective = is64Bit ? "\t.quad\t" : nullptr;
   AssemblerDialect = 1;           // New-Style mnemonics.
   LCOMMDirectiveAlignmentType = LCOMM::ByteAlignment;
-
-  UseIntegratedAssembler = true;
 }
 
 void PPCXCOFFMCAsmInfo::anchor() {}
@@ -62,4 +61,5 @@ PPCXCOFFMCAsmInfo::PPCXCOFFMCAsmInfo(bool Is64Bit, const Triple &T) {
   ZeroDirective = "\t.space\t";
   ZeroDirectiveSupportsNonZeroValue = false;
   SymbolsHaveSMC = true;
+  UseIntegratedAssembler = false;
 }

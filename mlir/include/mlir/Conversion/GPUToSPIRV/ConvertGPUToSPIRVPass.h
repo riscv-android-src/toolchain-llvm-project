@@ -20,12 +20,11 @@
 namespace mlir {
 
 class ModuleOp;
-template <typename T> class OpPassBase;
+template <typename T> class OperationPass;
 
-/// Pass to convert GPU Ops to SPIR-V ops.  Needs the workgroup size as input
-/// since SPIR-V/Vulkan requires the workgroup size to be statically specified.
-std::unique_ptr<OpPassBase<ModuleOp>>
-createConvertGPUToSPIRVPass(ArrayRef<int64_t> workGroupSize);
+/// Pass to convert GPU Ops to SPIR-V ops. For a gpu.func to be converted, it
+/// should have a spv.entry_point_abi attribute.
+std::unique_ptr<OperationPass<ModuleOp>> createConvertGPUToSPIRVPass();
 
 } // namespace mlir
 #endif // MLIR_CONVERSION_GPUTOSPIRV_CONVERTGPUTOSPIRVPASS_H

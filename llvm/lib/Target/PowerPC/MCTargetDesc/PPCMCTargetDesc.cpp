@@ -159,8 +159,8 @@ public:
 
   void emitTCEntry(const MCSymbol &S) override {
     // Creates a R_PPC64_TOC relocation
-    Streamer.EmitValueToAlignment(8);
-    Streamer.EmitSymbolValue(&S, 8);
+    Streamer.emitValueToAlignment(8);
+    Streamer.emitSymbolValue(&S, 8);
   }
 
   void emitMachine(StringRef CPU) override {
@@ -179,13 +179,9 @@ public:
   void emitLocalEntry(MCSymbolELF *S, const MCExpr *LocalOffset) override {
     MCAssembler &MCA = getStreamer().getAssembler();
 
-    int64_t Res;
-    if (!LocalOffset->evaluateAsAbsolute(Res, MCA))
-      report_fatal_error(".localentry expression must be absolute.");
-
-    unsigned Encoded = ELF::encodePPC64LocalEntryOffset(Res);
-    if (Res != ELF::decodePPC64LocalEntryOffset(Encoded))
-      report_fatal_error(".localentry expression cannot be encoded.");
+    // encodePPC64LocalEntryOffset will report an error if it cannot
+    // encode LocalOffset.
+    unsigned Encoded = encodePPC64LocalEntryOffset(LocalOffset);
 
     unsigned Other = S->getOther();
     Other &= ~ELF::STO_PPC64_LOCAL_MASK;
@@ -214,6 +210,10 @@ public:
     for (auto *Sym : UpdateOther)
       if (Sym->isVariable())
         copyLocalEntry(Sym, Sym->getVariableValue());
+
+    // Clear the set of symbols that needs to be updated so the streamer can
+    // be reused without issues.
+    UpdateOther.clear();
   }
 
 private:
@@ -229,6 +229,31 @@ private:
     Other |= RhsSym.getOther() & ELF::STO_PPC64_LOCAL_MASK;
     D->setOther(Other);
     return true;
+  }
+
+  unsigned encodePPC64LocalEntryOffset(const MCExpr *LocalOffset) {
+    MCAssembler &MCA = getStreamer().getAssembler();
+    int64_t Offset;
+    if (!LocalOffset->evaluateAsAbsolute(Offset, MCA))
+      MCA.getContext().reportFatalError(
+          LocalOffset->getLoc(), ".localentry expression must be absolute.");
+
+    switch (Offset) {
+    default:
+      MCA.getContext().reportFatalError(
+          LocalOffset->getLoc(),
+          ".localentry expression is not a valid power of 2.");
+    case 0:
+      return 0;
+    case 1:
+      return 1 << ELF::STO_PPC64_LOCAL_BIT;
+    case 4:
+    case 8:
+    case 16:
+    case 32:
+    case 64:
+      return (int)Log2(Offset) << (int)ELF::STO_PPC64_LOCAL_BIT;
+    }
   }
 };
 
@@ -261,8 +286,8 @@ public:
   void emitTCEntry(const MCSymbol &S) override {
     const MCAsmInfo *MAI = Streamer.getContext().getAsmInfo();
     const unsigned PointerSize = MAI->getCodePointerSize();
-    Streamer.EmitValueToAlignment(PointerSize);
-    Streamer.EmitSymbolValue(&S, PointerSize);
+    Streamer.emitValueToAlignment(PointerSize);
+    Streamer.emitSymbolValue(&S, PointerSize);
   }
 
   void emitMachine(StringRef CPU) override {

@@ -162,12 +162,12 @@ MachineInstrBuilder MachineIRBuilder::buildDbgLabel(const MDNode *Label) {
 
 MachineInstrBuilder MachineIRBuilder::buildDynStackAlloc(const DstOp &Res,
                                                          const SrcOp &Size,
-                                                         unsigned Align) {
+                                                         Align Alignment) {
   assert(Res.getLLTTy(*getMRI()).isPointer() && "expected ptr dst type");
   auto MIB = buildInstr(TargetOpcode::G_DYN_STACKALLOC);
   Res.addDefToMIB(*getMRI(), MIB);
   Size.addSrcToMIB(MIB);
-  MIB.addImm(Align);
+  MIB.addImm(Alignment.value());
   return MIB;
 }
 
@@ -199,14 +199,14 @@ MachineInstrBuilder MachineIRBuilder::buildJumpTable(const LLT PtrTy,
       .addJumpTableIndex(JTI);
 }
 
-void MachineIRBuilder::validateBinaryOp(const LLT &Res, const LLT &Op0,
-                                        const LLT &Op1) {
+void MachineIRBuilder::validateBinaryOp(const LLT Res, const LLT Op0,
+                                        const LLT Op1) {
   assert((Res.isScalar() || Res.isVector()) && "invalid operand type");
   assert((Res == Op0 && Res == Op1) && "type mismatch");
 }
 
-void MachineIRBuilder::validateShiftOp(const LLT &Res, const LLT &Op0,
-                                       const LLT &Op1) {
+void MachineIRBuilder::validateShiftOp(const LLT Res, const LLT Op0,
+                                       const LLT Op1) {
   assert((Res.isScalar() || Res.isVector()) && "invalid operand type");
   assert((Res == Op0) && "type mismatch");
 }
@@ -223,7 +223,7 @@ MachineInstrBuilder MachineIRBuilder::buildPtrAdd(const DstOp &Res,
 
 Optional<MachineInstrBuilder>
 MachineIRBuilder::materializePtrAdd(Register &Res, Register Op0,
-                                    const LLT &ValueTy, uint64_t Value) {
+                                    const LLT ValueTy, uint64_t Value) {
   assert(Res == 0 && "Res is a result argument");
   assert(ValueTy.isScalar()  && "invalid offset type");
 
@@ -390,22 +390,6 @@ MachineInstrBuilder MachineIRBuilder::buildStore(const SrcOp &Val,
   return MIB;
 }
 
-MachineInstrBuilder MachineIRBuilder::buildUAddo(const DstOp &Res,
-                                                 const DstOp &CarryOut,
-                                                 const SrcOp &Op0,
-                                                 const SrcOp &Op1) {
-  return buildInstr(TargetOpcode::G_UADDO, {Res, CarryOut}, {Op0, Op1});
-}
-
-MachineInstrBuilder MachineIRBuilder::buildUAdde(const DstOp &Res,
-                                                 const DstOp &CarryOut,
-                                                 const SrcOp &Op0,
-                                                 const SrcOp &Op1,
-                                                 const SrcOp &CarryIn) {
-  return buildInstr(TargetOpcode::G_UADDE, {Res, CarryOut},
-                    {Op0, Op1, CarryIn});
-}
-
 MachineInstrBuilder MachineIRBuilder::buildAnyExt(const DstOp &Res,
                                                   const SrcOp &Op) {
   return buildInstr(TargetOpcode::G_ANYEXT, Res, Op);
@@ -529,7 +513,7 @@ void MachineIRBuilder::buildSequence(Register Res, ArrayRef<Register> Ops,
 #ifndef NDEBUG
   assert(Ops.size() == Indices.size() && "incompatible args");
   assert(!Ops.empty() && "invalid trivial sequence");
-  assert(std::is_sorted(Indices.begin(), Indices.end()) &&
+  assert(llvm::is_sorted(Indices) &&
          "sequence offsets must be in ascending order");
 
   assert(getMRI()->getType(Res).isValid() && "invalid operand type");
@@ -912,7 +896,7 @@ MachineIRBuilder::buildBlockAddress(Register Res, const BlockAddress *BA) {
   return buildInstr(TargetOpcode::G_BLOCK_ADDR).addDef(Res).addBlockAddress(BA);
 }
 
-void MachineIRBuilder::validateTruncExt(const LLT &DstTy, const LLT &SrcTy,
+void MachineIRBuilder::validateTruncExt(const LLT DstTy, const LLT SrcTy,
                                         bool IsExtend) {
 #ifndef NDEBUG
   if (DstTy.isVector()) {
@@ -931,8 +915,8 @@ void MachineIRBuilder::validateTruncExt(const LLT &DstTy, const LLT &SrcTy,
 #endif
 }
 
-void MachineIRBuilder::validateSelectOp(const LLT &ResTy, const LLT &TstTy,
-                                        const LLT &Op0Ty, const LLT &Op1Ty) {
+void MachineIRBuilder::validateSelectOp(const LLT ResTy, const LLT TstTy,
+                                        const LLT Op0Ty, const LLT Op1Ty) {
 #ifndef NDEBUG
   assert((ResTy.isScalar() || ResTy.isVector() || ResTy.isPointer()) &&
          "invalid operand type");
@@ -975,7 +959,11 @@ MachineInstrBuilder MachineIRBuilder::buildInstr(unsigned Opc,
   case TargetOpcode::G_SMIN:
   case TargetOpcode::G_SMAX:
   case TargetOpcode::G_UMIN:
-  case TargetOpcode::G_UMAX: {
+  case TargetOpcode::G_UMAX:
+  case TargetOpcode::G_UADDSAT:
+  case TargetOpcode::G_SADDSAT:
+  case TargetOpcode::G_USUBSAT:
+  case TargetOpcode::G_SSUBSAT: {
     // All these are binary ops.
     assert(DstOps.size() == 1 && "Invalid Dst");
     assert(SrcOps.size() == 2 && "Invalid Srcs");

@@ -23,7 +23,7 @@ namespace {
 // Extracts fixed-range loops for top-level loop nests with ranges defined in
 // the pass constructor.  Assumes loops are permutable.
 class SimpleParametricLoopTilingPass
-    : public FunctionPass<SimpleParametricLoopTilingPass> {
+    : public PassWrapper<SimpleParametricLoopTilingPass, FunctionPass> {
 public:
   SimpleParametricLoopTilingPass() = default;
   SimpleParametricLoopTilingPass(const SimpleParametricLoopTilingPass &) {}
@@ -48,12 +48,11 @@ public:
 };
 } // end namespace
 
-std::unique_ptr<OpPassBase<FuncOp>>
-mlir::createSimpleParametricTilingPass(ArrayRef<int64_t> outerLoopSizes) {
-  return std::make_unique<SimpleParametricLoopTilingPass>(outerLoopSizes);
+namespace mlir {
+void registerSimpleParametricTilingPass() {
+  PassRegistration<SimpleParametricLoopTilingPass>(
+      "test-extract-fixed-outer-loops",
+      "test application of parametric tiling to the outer loops so that the "
+      "ranges of outer loops become static");
 }
-
-static PassRegistration<SimpleParametricLoopTilingPass>
-    reg("test-extract-fixed-outer-loops",
-        "test application of parametric tiling to the outer loops so that the "
-        "ranges of outer loops become static");
+} // namespace mlir
