@@ -1976,6 +1976,9 @@ static void GetPcSpBp(void *context, uptr *pc, uptr *sp, uptr *bp) {
   *bp = ucontext->uc_mcontext.gregs[11];
   *sp = ucontext->uc_mcontext.gregs[15];
 #elif defined(__riscv)
+  #define REG_PC 64
+  #define REG_SP 2
+  #define REG_S0 7
   ucontext_t *ucontext = (ucontext_t*)context;
   *pc = ucontext->uc_mcontext.__gregs[REG_PC];
   *bp = ucontext->uc_mcontext.__gregs[REG_S0];

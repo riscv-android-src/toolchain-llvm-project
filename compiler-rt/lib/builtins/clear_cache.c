@@ -46,6 +46,13 @@ uintptr_t GetCurrentProcess(void);
 #include <unistd.h>
 #endif
 
+#if defined(__riscv)
+#include <sys/cachectl.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+#endif
+
+
 // The compiler generates calls to __clear_cache() when creating
 // trampoline functions on the stack for use with nested functions.
 // It is expected to invalidate the instruction cache for the
@@ -147,6 +154,11 @@ void __clear_cache(void *start, void *end) {
 
   for (uintptr_t dword = start_dword; dword < end_dword; dword += dword_size)
     __asm__ volatile("flush %0" : : "r"(dword));
+#elif defined(__riscv) && (__riscv_xlen == 64)
+#ifndef __NR_riscv_flush_icache  
+#define __NR_riscv_flush_icache 224+15
+#endif
+  syscall(__NR_riscv_flush_icache, start, end, 1);
 #else
 #if __APPLE__
   // On Darwin, sys_icache_invalidate() provides this functionality

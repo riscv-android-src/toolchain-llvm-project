@@ -150,6 +150,12 @@ std::string Linux::getMultiarchTriple(const Driver &D,
     if (D.getVFS().exists(SysRoot + "/lib/powerpc64le-linux-gnu"))
       return "powerpc64le-linux-gnu";
     break;
+  case llvm::Triple::riscv64: {
+    if (IsAndroid)
+      return "riscv64-linux-android";
+    return "riscv64-linux-gnu";
+    break;
+  }
   case llvm::Triple::sparc:
     if (D.getVFS().exists(SysRoot + "/lib/sparc-linux-gnu"))
       return "sparc-linux-gnu";

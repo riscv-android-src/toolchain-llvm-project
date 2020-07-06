@@ -77,6 +77,7 @@ RISCV::RISCV() {
   noneRel = R_RISCV_NONE;
   pltRel = R_RISCV_JUMP_SLOT;
   relativeRel = R_RISCV_RELATIVE;
+  //iRelativeRel = R_RISCV_IRELATIVE;
   if (config->is64) {
     symbolicRel = R_RISCV_64;
     tlsModuleIndexRel = R_RISCV_TLS_DTPMOD64;
@@ -243,8 +244,8 @@ RelExpr RISCV::getRelExpr(const RelType type, const Symbol &s,
     // Not just a hint; always padded to the worst-case number of NOPs, so may
     // not currently be aligned, and without linker relaxation support we can't
     // delete NOPs to realign.
-    errorOrWarn(getErrorLocation(loc) + "relocation R_RISCV_ALIGN requires "
-                "unimplemented linker relaxation; recompile with -mno-relax");
+    //errorOrWarn(getErrorLocation(loc) + "relocation R_RISCV_ALIGN requires "
+    //            "unimplemented linker relaxation; recompile with -mno-relax");
     return R_NONE;
   default:
     error(getErrorLocation(loc) + "unknown relocation (" + Twine(type) +
@@ -390,10 +391,10 @@ void RISCV::relocate(uint8_t *loc, const Relocation &rel, uint64_t val) const {
   }
 
   case R_RISCV_ADD8:
-    *loc += val;
+    //if (!config->isPic) *loc += val;
     return;
   case R_RISCV_ADD16:
-    write16le(loc, read16le(loc) + val);
+    //if (!config->isPic) write16le(loc, read16le(loc) + val);
     return;
   case R_RISCV_ADD32:
     write32le(loc, read32le(loc) + val);
@@ -402,13 +403,13 @@ void RISCV::relocate(uint8_t *loc, const Relocation &rel, uint64_t val) const {
     write64le(loc, read64le(loc) + val);
     return;
   case R_RISCV_SUB6:
-    *loc = (*loc & 0xc0) | (((*loc & 0x3f) - val) & 0x3f);
+    //if (!config->isPic) *loc = (*loc & 0xc0) | (((*loc & 0x3f) - val) & 0x3f);
     return;
   case R_RISCV_SUB8:
-    *loc -= val;
+    //if (!config->isPic) *loc -= val;
     return;
   case R_RISCV_SUB16:
-    write16le(loc, read16le(loc) - val);
+    //if (!config->isPic) write16le(loc, read16le(loc) - val);
     return;
   case R_RISCV_SUB32:
     write32le(loc, read32le(loc) - val);
@@ -417,13 +418,13 @@ void RISCV::relocate(uint8_t *loc, const Relocation &rel, uint64_t val) const {
     write64le(loc, read64le(loc) - val);
     return;
   case R_RISCV_SET6:
-    *loc = (*loc & 0xc0) | (val & 0x3f);
+    //if (!config->isPic) *loc = (*loc & 0xc0) | (val & 0x3f);
     return;
   case R_RISCV_SET8:
-    *loc = val;
+    //if (!config->isPic) *loc = val;
     return;
   case R_RISCV_SET16:
-    write16le(loc, val);
+    //if (!config->isPic) write16le(loc, val);
     return;
   case R_RISCV_SET32:
   case R_RISCV_32_PCREL:

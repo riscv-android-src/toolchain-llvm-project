@@ -139,6 +139,10 @@ INLINE void ReleaseMemoryPagesToOSAndZeroFill(uptr beg, uptr end) {
 #elif defined(__x86_64__)
 # define __get_tls() \
     ({ void** __v; __asm__("mov %%fs:0, %0" : "=r"(__v)); __v; })
+#elif defined(__riscv64) || defined(__riscv)
+# define __get_tls() \
+    ({ void** __v; __asm__("mv %0, tp" : "=r"(__v)); __v; })
+
 #else
 #error "Unsupported architecture."
 #endif

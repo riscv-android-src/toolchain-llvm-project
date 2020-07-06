@@ -410,6 +410,8 @@ public:
     case llvm::Triple::ppc:
     case llvm::Triple::ppc64:
     case llvm::Triple::ppc64le:
+    case llvm::Triple::riscv64:
+    case llvm::Triple::riscv32:
       this->MCountName = "_mcount";
       break;
     case llvm::Triple::x86:

@@ -563,6 +563,11 @@ bool RISCVExpandPseudo::expandAtomicCmpXchg(
     //   bne dest, cmpval, done
     BuildMI(LoopHeadMBB, DL, TII->get(getLRForRMW(Ordering, Width)), DestReg)
         .addReg(AddrReg);
+    if (Width == 32) {
+        BuildMI(LoopHeadMBB, DL, TII->get(RISCV::ADDIW), CmpValReg)
+            .addReg(CmpValReg)
+	    .addImm(0);
+    }
     BuildMI(LoopHeadMBB, DL, TII->get(RISCV::BNE))
         .addReg(DestReg)
         .addReg(CmpValReg)
@@ -585,6 +590,11 @@ bool RISCVExpandPseudo::expandAtomicCmpXchg(
     Register MaskReg = MI.getOperand(5).getReg();
     BuildMI(LoopHeadMBB, DL, TII->get(getLRForRMW(Ordering, Width)), DestReg)
         .addReg(AddrReg);
+    if (Width == 32) {
+        BuildMI(LoopHeadMBB, DL, TII->get(RISCV::ADDIW), CmpValReg)
+            .addReg(CmpValReg)
+	    .addImm(0);
+    }
     BuildMI(LoopHeadMBB, DL, TII->get(RISCV::AND), ScratchReg)
         .addReg(DestReg)
         .addReg(MaskReg);
