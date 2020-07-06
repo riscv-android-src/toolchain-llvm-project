@@ -888,6 +888,9 @@ SDValue RISCVTargetLowering::lowerGlobalTLSAddress(SDValue Op,
   int64_t Offset = N->getOffset();
   MVT XLenVT = Subtarget.getXLenVT();
 
+  if (DAG.getTarget().useEmulatedTLS())
+    return LowerToTLSEmulatedModel(N, DAG);
+
   TLSModel::Model Model = getTargetMachine().getTLSModel(N->getGlobal());
 
   if (DAG.getMachineFunction().getFunction().getCallingConv() ==
