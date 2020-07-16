@@ -13,6 +13,7 @@
 #ifndef LLVM_LIB_TARGET_HEXAGON_MCTARGETDESC_HEXAGONMCTARGETDESC_H
 #define LLVM_LIB_TARGET_HEXAGON_MCTARGETDESC_HEXAGONMCTARGETDESC_H
 
+#include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/Support/CommandLine.h"
 #include <cstdint>
 #include <string>
@@ -46,7 +47,6 @@
 
 namespace llvm {
 
-struct InstrItinerary;
 struct InstrStage;
 class FeatureBitset;
 class MCAsmBackend;
@@ -60,8 +60,6 @@ class MCTargetOptions;
 class Target;
 class Triple;
 class StringRef;
-class raw_ostream;
-class raw_pwrite_stream;
 
 extern cl::opt<bool> HexagonDisableCompound;
 extern cl::opt<bool> HexagonDisableDuplex;
@@ -82,6 +80,8 @@ namespace Hexagon_MC {
   void addArchSubtarget(MCSubtargetInfo const *STI,
                         StringRef FS);
   unsigned GetELFFlags(const MCSubtargetInfo &STI);
+
+  llvm::ArrayRef<MCPhysReg> GetVectRegRev();
 }
 
 MCCodeEmitter *createHexagonMCCodeEmitter(const MCInstrInfo &MCII,

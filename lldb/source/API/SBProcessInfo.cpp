@@ -25,7 +25,7 @@ SBProcessInfo::SBProcessInfo(const SBProcessInfo &rhs) : m_opaque_up() {
   m_opaque_up = clone(rhs.m_opaque_up);
 }
 
-SBProcessInfo::~SBProcessInfo() {}
+SBProcessInfo::~SBProcessInfo() = default;
 
 SBProcessInfo &SBProcessInfo::operator=(const SBProcessInfo &rhs) {
   LLDB_RECORD_METHOD(lldb::SBProcessInfo &,
@@ -39,7 +39,7 @@ SBProcessInfo &SBProcessInfo::operator=(const SBProcessInfo &rhs) {
 
 ProcessInstanceInfo &SBProcessInfo::ref() {
   if (m_opaque_up == nullptr) {
-    m_opaque_up.reset(new ProcessInstanceInfo());
+    m_opaque_up = std::make_unique<ProcessInstanceInfo>();
   }
   return *m_opaque_up;
 }

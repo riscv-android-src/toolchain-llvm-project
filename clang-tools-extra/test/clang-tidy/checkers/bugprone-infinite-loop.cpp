@@ -70,9 +70,23 @@ void simple_not_infinite1() {
     i++;
   }
 
+  while ((Limit)--) {
+    // Not an error since 'Limit' is updated.
+    i++;
+  }
+
+  while ((Limit) -= 1) {
+    // Not an error since 'Limit' is updated.
+  }
+
   while (int k = Limit) {
     // Not an error since 'Limit' is updated.
     Limit--;
+  }
+
+  while (int k = Limit) {
+    // Not an error since 'Limit' is updated
+    (Limit)--;
   }
 
   while (int k = Limit--) {
@@ -85,6 +99,15 @@ void simple_not_infinite1() {
   } while (i < Limit);
 
   for (i = 0; i < Limit; Limit--) {
+  }
+
+  for (i = 0; i < Limit; (Limit) = Limit - 1) {
+  }
+
+  for (i = 0; i < Limit; (Limit) -= 1) {
+  }
+
+  for (i = 0; i < Limit; --(Limit)) {
   }
 }
 
@@ -353,4 +376,13 @@ void lambda_capture() {
     int *p = &i;
     (*p)++;
   } while (i < Limit);
+}
+
+void evaluatable(bool CondVar) {
+  for (; false && CondVar;) {
+  }
+  while (false && CondVar) {
+  }
+  do {
+  } while (false && CondVar);
 }

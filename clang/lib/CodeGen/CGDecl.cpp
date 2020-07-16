@@ -108,6 +108,7 @@ void CodeGenFunction::EmitDecl(const Decl &D) {
   case Decl::StaticAssert: // static_assert(X, ""); [C++0x]
   case Decl::Label:        // __label__ x;
   case Decl::Import:
+  case Decl::MSGuid:    // __declspec(uuid("..."))
   case Decl::OMPThreadPrivate:
   case Decl::OMPAllocate:
   case Decl::OMPCapturedExpr:
@@ -249,7 +250,7 @@ llvm::Constant *CodeGenModule::getOrCreateStaticVarDecl(
   // variables cannot have an initializer.
   llvm::Constant *Init = nullptr;
   if (Ty.getAddressSpace() == LangAS::opencl_local ||
-      D.hasAttr<CUDASharedAttr>())
+      D.hasAttr<CUDASharedAttr>() || D.hasAttr<LoaderUninitializedAttr>())
     Init = llvm::UndefValue::get(LTy);
   else
     Init = EmitNullConstant(Ty);
@@ -341,7 +342,7 @@ CodeGenFunction::AddInitializerToStaticVarDecl(const VarDecl &D,
   // the global to match the initializer.  (We have to do this
   // because some types, like unions, can't be completely represented
   // in the LLVM type system.)
-  if (GV->getType()->getElementType() != Init->getType()) {
+  if (GV->getValueType() != Init->getType()) {
     llvm::GlobalVariable *OldGV = GV;
 
     GV = new llvm::GlobalVariable(CGM.getModule(), Init->getType(),
@@ -761,10 +762,8 @@ void CodeGenFunction::EmitScalarInit(const Expr *init, const ValueDecl *D,
 
   // If we're emitting a value with lifetime, we have to do the
   // initialization *before* we leave the cleanup scopes.
-  if (const FullExpr *fe = dyn_cast<FullExpr>(init)) {
-    enterFullExpression(fe);
-    init = fe->getSubExpr();
-  }
+  if (const ExprWithCleanups *EWC = dyn_cast<ExprWithCleanups>(init))
+    init = EWC->getSubExpr();
   CodeGenFunction::RunCleanupsScope Scope(*this);
 
   // We have to maintain the illusion that the variable is
@@ -1050,13 +1049,13 @@ static llvm::Constant *constWithPadding(CodeGenModule &CGM, IsPattern isPattern,
   llvm::Type *OrigTy = constant->getType();
   if (const auto STy = dyn_cast<llvm::StructType>(OrigTy))
     return constStructWithPadding(CGM, isPattern, STy, constant);
-  if (auto *STy = dyn_cast<llvm::SequentialType>(OrigTy)) {
+  if (auto *ArrayTy = dyn_cast<llvm::ArrayType>(OrigTy)) {
     llvm::SmallVector<llvm::Constant *, 8> Values;
-    unsigned Size = STy->getNumElements();
+    uint64_t Size = ArrayTy->getNumElements();
     if (!Size)
       return constant;
-    llvm::Type *ElemTy = STy->getElementType();
-    bool ZeroInitializer = constant->isZeroValue();
+    llvm::Type *ElemTy = ArrayTy->getElementType();
+    bool ZeroInitializer = constant->isNullValue();
     llvm::Constant *OpValue, *PaddedOp;
     if (ZeroInitializer) {
       OpValue = llvm::Constant::getNullValue(ElemTy);
@@ -1072,13 +1071,12 @@ static llvm::Constant *constWithPadding(CodeGenModule &CGM, IsPattern isPattern,
     auto *NewElemTy = Values[0]->getType();
     if (NewElemTy == ElemTy)
       return constant;
-    if (OrigTy->isArrayTy()) {
-      auto *ArrayTy = llvm::ArrayType::get(NewElemTy, Size);
-      return llvm::ConstantArray::get(ArrayTy, Values);
-    } else {
-      return llvm::ConstantVector::get(Values);
-    }
+    auto *NewArrayTy = llvm::ArrayType::get(NewElemTy, Size);
+    return llvm::ConstantArray::get(NewArrayTy, Values);
   }
+  // FIXME: Add handling for tail padding in vectors. Vectors don't
+  // have padding between or inside elements, but the total amount of
+  // data can be less than the allocated size.
   return constant;
 }
 
@@ -1402,10 +1400,15 @@ CodeGenFunction::EmitAutoVarAlloca(const VarDecl &D) {
 
   Address address = Address::invalid();
   Address AllocaAddr = Address::invalid();
-  Address OpenMPLocalAddr =
-      getLangOpts().OpenMP
-          ? CGM.getOpenMPRuntime().getAddressOfLocalVariable(*this, &D)
-          : Address::invalid();
+  Address OpenMPLocalAddr = Address::invalid();
+  if (CGM.getLangOpts().OpenMPIRBuilder)
+    OpenMPLocalAddr = OMPBuilderCBHelpers::getAddressOfLocalVariable(*this, &D);
+  else
+    OpenMPLocalAddr =
+        getLangOpts().OpenMP
+            ? CGM.getOpenMPRuntime().getAddressOfLocalVariable(*this, &D)
+            : Address::invalid();
+
   bool NRVO = getLangOpts().ElideConstructors && D.isNRVOVariable();
 
   if (getLangOpts().OpenMP && OpenMPLocalAddr.isValid()) {
@@ -1517,9 +1520,12 @@ CodeGenFunction::EmitAutoVarAlloca(const VarDecl &D) {
         // is rare.
         if (!Bypasses.IsBypassed(&D) &&
             !(!getLangOpts().CPlusPlus && hasLabelBeenSeenInCurrentScope())) {
-          uint64_t size = CGM.getDataLayout().getTypeAllocSize(allocaTy);
+          llvm::TypeSize size =
+              CGM.getDataLayout().getTypeAllocSize(allocaTy);
           emission.SizeForLifetimeMarkers =
-              EmitLifetimeStart(size, AllocaAddr.getPointer());
+              size.isScalable() ? EmitLifetimeStart(-1, AllocaAddr.getPointer())
+                                : EmitLifetimeStart(size.getFixedSize(),
+                                                    AllocaAddr.getPointer());
         }
       } else {
         assert(!emission.useLifetimeMarkers());
@@ -1676,9 +1682,13 @@ void CodeGenFunction::emitZeroOrPatternForAutoVarInit(QualType type,
     case LangOptions::TrivialAutoVarInitKind::Uninitialized:
       llvm_unreachable("Uninitialized handled by caller");
     case LangOptions::TrivialAutoVarInitKind::Zero:
+      if (CGM.stopAutoInit())
+        return;
       emitStoresForZeroInit(CGM, D, Loc, isVolatile, Builder);
       break;
     case LangOptions::TrivialAutoVarInitKind::Pattern:
+      if (CGM.stopAutoInit())
+        return;
       emitStoresForPatternInit(CGM, D, Loc, isVolatile, Builder);
       break;
     }
@@ -1701,6 +1711,8 @@ void CodeGenFunction::emitZeroOrPatternForAutoVarInit(QualType type,
     llvm_unreachable("Uninitialized handled by caller");
 
   case LangOptions::TrivialAutoVarInitKind::Zero:
+    if (CGM.stopAutoInit())
+      return;
     if (!EltSize.isOne())
       SizeVal = Builder.CreateNUWMul(SizeVal, CGM.getSize(EltSize));
     Builder.CreateMemSet(Loc, llvm::ConstantInt::get(Int8Ty, 0), SizeVal,
@@ -1708,6 +1720,8 @@ void CodeGenFunction::emitZeroOrPatternForAutoVarInit(QualType type,
     break;
 
   case LangOptions::TrivialAutoVarInitKind::Pattern: {
+    if (CGM.stopAutoInit())
+      return;
     llvm::Type *ElTy = Loc.getElementType();
     llvm::Constant *Constant = constWithPadding(
         CGM, IsPattern::Yes, initializationPatternFor(CGM, ElTy));
@@ -1866,9 +1880,7 @@ void CodeGenFunction::EmitAutoVarInit(const AutoVarEmission &emission) {
 ///
 /// \param init the initializing expression
 /// \param D the object to act as if we're initializing
-/// \param loc the address to initialize; its type is a pointer
-///   to the LLVM mapping of the object's type
-/// \param alignment the alignment of the address
+/// \param lvalue the lvalue to initialize
 /// \param capturedByInit true if \p D is a __block variable
 ///   whose address is potentially changed by the initializer
 void CodeGenFunction::EmitExprAsInit(const Expr *init, const ValueDecl *D,
@@ -2537,5 +2549,5 @@ void CodeGenModule::EmitOMPDeclareMapper(const OMPDeclareMapperDecl *D,
 }
 
 void CodeGenModule::EmitOMPRequiresDecl(const OMPRequiresDecl *D) {
-  getOpenMPRuntime().checkArchForUnifiedAddressing(D);
+  getOpenMPRuntime().processRequiresDirective(D);
 }

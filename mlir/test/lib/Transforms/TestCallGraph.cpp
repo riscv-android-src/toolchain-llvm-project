@@ -17,14 +17,18 @@
 using namespace mlir;
 
 namespace {
-struct TestCallGraphPass : public ModulePass<TestCallGraphPass> {
-  void runOnModule() {
-    llvm::errs() << "Testing : " << getModule().getAttr("test.name") << "\n";
+struct TestCallGraphPass
+    : public PassWrapper<TestCallGraphPass, OperationPass<ModuleOp>> {
+  void runOnOperation() override {
+    llvm::errs() << "Testing : " << getOperation().getAttr("test.name") << "\n";
     getAnalysis<CallGraph>().print(llvm::errs());
   }
 };
 } // end anonymous namespace
 
-static PassRegistration<TestCallGraphPass>
-    pass("test-print-callgraph",
-         "Print the contents of a constructed callgraph.");
+namespace mlir {
+void registerTestCallGraphPass() {
+  PassRegistration<TestCallGraphPass> pass(
+      "test-print-callgraph", "Print the contents of a constructed callgraph.");
+}
+} // namespace mlir

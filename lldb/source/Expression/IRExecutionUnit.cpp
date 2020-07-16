@@ -265,11 +265,9 @@ void IRExecutionUnit::GetRunnableInfo(Status &error, lldb::addr_t &func_addr,
 
   builder.setEngineKind(llvm::EngineKind::JIT)
       .setErrorStr(&error_string)
-      .setRelocationModel(triple.isOSBinFormatMachO()
-                              ? llvm::Reloc::PIC_
-                              : llvm::Reloc::Static)
-      .setMCJITMemoryManager(
-          std::unique_ptr<MemoryManager>(new MemoryManager(*this)))
+      .setRelocationModel(triple.isOSBinFormatMachO() ? llvm::Reloc::PIC_
+                                                      : llvm::Reloc::Static)
+      .setMCJITMemoryManager(std::make_unique<MemoryManager>(*this))
       .setOptLevel(llvm::CodeGenOpt::Less);
 
   llvm::StringRef mArch;
@@ -404,7 +402,7 @@ void IRExecutionUnit::GetRunnableInfo(Status &error, lldb::addr_t &func_addr,
         ss.PutCString("\n");
       emitNewLine = true;
       ss.PutCString("  ");
-      ss.PutCString(Mangled(failed_lookup).GetDemangledName().AsCString());
+      ss.PutCString(Mangled(failed_lookup).GetDemangledName().GetStringRef());
     }
 
     m_failed_lookups.clear();
@@ -741,19 +739,22 @@ void IRExecutionUnit::CollectFallbackNames(
   for (const SearchSpec &C_spec : C_specs) {
     ConstString name = C_spec.name;
 
-    if (CPlusPlusLanguage::IsCPPMangledName(name.GetCString())) {
-      Mangled mangled_name(name);
-      ConstString demangled_name = mangled_name.GetDemangledName();
-      if (!demangled_name.IsEmpty()) {
-        const char *demangled_cstr = demangled_name.AsCString();
-        const char *lparen_loc = strchr(demangled_cstr, '(');
-        if (lparen_loc) {
-          llvm::StringRef base_name(demangled_cstr,
-                                    lparen_loc - demangled_cstr);
-          fallback_specs.push_back(ConstString(base_name));
-        }
-      }
-    }
+    if (!CPlusPlusLanguage::IsCPPMangledName(name.GetCString()))
+      continue;
+
+    Mangled mangled_name(name);
+    ConstString demangled_name = mangled_name.GetDemangledName();
+    if (demangled_name.IsEmpty())
+      continue;
+
+    const char *demangled_cstr = demangled_name.AsCString();
+    const char *lparen_loc = strchr(demangled_cstr, '(');
+    if (!lparen_loc)
+      continue;
+
+    llvm::StringRef base_name(demangled_cstr,
+                              lparen_loc - demangled_cstr);
+    fallback_specs.push_back(ConstString(base_name));
   }
 }
 
@@ -843,7 +844,7 @@ lldb::addr_t IRExecutionUnit::FindInSymbols(
     };
 
     if (sc.module_sp) {
-      sc.module_sp->FindFunctions(spec.name, nullptr, spec.mask,
+      sc.module_sp->FindFunctions(spec.name, CompilerDeclContext(), spec.mask,
                                   true,  // include_symbols
                                   false, // include_inlines
                                   sc_list);

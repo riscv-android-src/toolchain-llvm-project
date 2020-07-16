@@ -60,6 +60,8 @@ public:
   GlobalOp processGlobal(llvm::GlobalVariable *GV);
 
 private:
+  /// Returns personality of `f` as a FlatSymbolRefAttr.
+  FlatSymbolRefAttr getPersonalityAsAttr(llvm::Function *f);
   /// Imports `bb` into `block`, which must be initially empty.
   LogicalResult processBasicBlock(llvm::BasicBlock *bb, Block *block);
   /// Imports `inst` and populates instMap[inst] with the imported Value.
@@ -104,7 +106,7 @@ private:
   /// Globals are inserted before the first function, if any.
   Block::iterator getGlobalInsertPt() {
     auto i = module.getBody()->begin();
-    while (!isa<LLVMFuncOp>(i) && !isa<ModuleTerminatorOp>(i))
+    while (!isa<LLVMFuncOp, ModuleTerminatorOp>(i))
       ++i;
     return i;
   }
@@ -166,15 +168,16 @@ LLVMType Importer::processType(llvm::Type *type) {
       return nullptr;
     return LLVMType::getArrayTy(elementType, type->getArrayNumElements());
   }
-  case llvm::Type::VectorTyID: {
-    if (type->getVectorIsScalable()) {
-      emitError(unknownLoc) << "scalable vector types not supported";
-      return nullptr;
-    }
-    LLVMType elementType = processType(type->getVectorElementType());
+  case llvm::Type::ScalableVectorTyID: {
+    emitError(unknownLoc) << "scalable vector types not supported";
+    return nullptr;
+  }
+  case llvm::Type::FixedVectorTyID: {
+    auto *typeVTy = llvm::cast<llvm::FixedVectorType>(type);
+    LLVMType elementType = processType(typeVTy->getElementType());
     if (!elementType)
       return nullptr;
-    return LLVMType::getVectorTy(elementType, type->getVectorNumElements());
+    return LLVMType::getVectorTy(elementType, typeVTy->getNumElements());
   }
   case llvm::Type::VoidTyID:
     return LLVMType::getVoidTy(dialect);
@@ -241,7 +244,8 @@ Type Importer::getStdTypeForAttr(LLVMType type) {
 
   // LLVM vectors can only contain scalars.
   if (type.isVectorTy()) {
-    auto numElements = type.getUnderlyingType()->getVectorElementCount();
+    auto numElements = llvm::cast<llvm::VectorType>(type.getUnderlyingType())
+                           ->getElementCount();
     if (numElements.Scalable) {
       emitError(unknownLoc) << "scalable vectors not supported";
       return nullptr;
@@ -267,7 +271,8 @@ Type Importer::getStdTypeForAttr(LLVMType type) {
     if (type.getArrayElementType().isVectorTy()) {
       LLVMType vectorType = type.getArrayElementType();
       auto numElements =
-          vectorType.getUnderlyingType()->getVectorElementCount();
+          llvm::cast<llvm::VectorType>(vectorType.getUnderlyingType())
+              ->getElementCount();
       if (numElements.Scalable) {
         emitError(unknownLoc) << "scalable vectors not supported";
         return nullptr;
@@ -400,6 +405,9 @@ Value Importer::processConstant(llvm::Constant *c) {
     LLVMType type = processType(c->getType());
     if (!type)
       return nullptr;
+    if (auto symbolRef = attr.dyn_cast<FlatSymbolRefAttr>())
+      return instMap[c] = bEntry.create<AddressOfOp>(unknownLoc, type,
+                                                     symbolRef.getValue());
     return instMap[c] = bEntry.create<ConstantOp>(unknownLoc, type, attr);
   }
   if (auto *cn = dyn_cast<llvm::ConstantPointerNull>(c)) {
@@ -410,8 +418,7 @@ Value Importer::processConstant(llvm::Constant *c) {
   }
   if (auto *GV = dyn_cast<llvm::GlobalVariable>(c))
     return bEntry.create<AddressOfOp>(UnknownLoc::get(context),
-                                      processGlobal(GV),
-                                      ArrayRef<NamedAttribute>());
+                                      processGlobal(GV));
 
   if (auto *ce = dyn_cast<llvm::ConstantExpr>(c)) {
     llvm::Instruction *i = ce->getAsInstruction();
@@ -426,6 +433,12 @@ Value Importer::processConstant(llvm::Constant *c) {
     i->deleteValue();
     return instMap[c] = instMap[i];
   }
+  if (auto *ue = dyn_cast<llvm::UndefValue>(c)) {
+    LLVMType type = processType(ue->getType());
+    if (!type)
+      return nullptr;
+    return instMap[c] = bEntry.create<UndefOp>(UnknownLoc::get(context), type);
+  }
   emitError(unknownLoc) << "unhandled constant: " << diag(*c);
   return nullptr;
 }
@@ -438,7 +451,7 @@ Value Importer::processValue(llvm::Value *value) {
   // We don't expect to see instructions in dominator order. If we haven't seen
   // this instruction yet, create an unknown op and remap it later.
   if (isa<llvm::Instruction>(value)) {
-    OperationState state(UnknownLoc::get(context), "unknown");
+    OperationState state(UnknownLoc::get(context), "llvm.unknown");
     LLVMType type = processType(value->getType());
     if (!type)
       return nullptr;
@@ -454,56 +467,60 @@ Value Importer::processValue(llvm::Value *value) {
   return nullptr;
 }
 
+/// Return the MLIR OperationName for the given LLVM opcode.
+static StringRef lookupOperationNameFromOpcode(unsigned opcode) {
 // Maps from LLVM opcode to MLIR OperationName. This is deliberately ordered
 // as in llvm/IR/Instructions.def to aid comprehension and spot missing
 // instructions.
 #define INST(llvm_n, mlir_n)                                                   \
   { llvm::Instruction::llvm_n, LLVM::mlir_n##Op::getOperationName() }
-static const DenseMap<unsigned, StringRef> opcMap = {
-    // Ret is handled specially.
-    // Br is handled specially.
-    // FIXME: switch
-    // FIXME: indirectbr
-    // FIXME: invoke
-    // FIXME: resume
-    // FIXME: unreachable
-    // FIXME: cleanupret
-    // FIXME: catchret
-    // FIXME: catchswitch
-    // FIXME: callbr
-    // FIXME: fneg
-    INST(Add, Add), INST(FAdd, FAdd), INST(Sub, Sub), INST(FSub, FSub),
-    INST(Mul, Mul), INST(FMul, FMul), INST(UDiv, UDiv), INST(SDiv, SDiv),
-    INST(FDiv, FDiv), INST(URem, URem), INST(SRem, SRem), INST(FRem, FRem),
-    INST(Shl, Shl), INST(LShr, LShr), INST(AShr, AShr), INST(And, And),
-    INST(Or, Or), INST(Xor, XOr), INST(Alloca, Alloca), INST(Load, Load),
-    INST(Store, Store),
-    // Getelementptr is handled specially.
-    INST(Ret, Return),
-    // FIXME: fence
-    // FIXME: atomiccmpxchg
-    // FIXME: atomicrmw
-    INST(Trunc, Trunc), INST(ZExt, ZExt), INST(SExt, SExt),
-    INST(FPToUI, FPToUI), INST(FPToSI, FPToSI), INST(UIToFP, UIToFP),
-    INST(SIToFP, SIToFP), INST(FPTrunc, FPTrunc), INST(FPExt, FPExt),
-    INST(PtrToInt, PtrToInt), INST(IntToPtr, IntToPtr), INST(BitCast, Bitcast),
-    INST(AddrSpaceCast, AddrSpaceCast),
-    // FIXME: cleanuppad
-    // FIXME: catchpad
-    // ICmp is handled specially.
-    // FIXME: fcmp
-    // PHI is handled specially.
-    INST(Call, Call),
-    // FIXME: select
-    // FIXME: vaarg
-    // FIXME: extractelement
-    // FIXME: insertelement
-    // FIXME: shufflevector
-    // FIXME: extractvalue
-    // FIXME: insertvalue
-    // FIXME: landingpad
-};
+  static const DenseMap<unsigned, StringRef> opcMap = {
+      // Ret is handled specially.
+      // Br is handled specially.
+      // FIXME: switch
+      // FIXME: indirectbr
+      // FIXME: invoke
+      INST(Resume, Resume),
+      // FIXME: unreachable
+      // FIXME: cleanupret
+      // FIXME: catchret
+      // FIXME: catchswitch
+      // FIXME: callbr
+      // FIXME: fneg
+      INST(Add, Add), INST(FAdd, FAdd), INST(Sub, Sub), INST(FSub, FSub),
+      INST(Mul, Mul), INST(FMul, FMul), INST(UDiv, UDiv), INST(SDiv, SDiv),
+      INST(FDiv, FDiv), INST(URem, URem), INST(SRem, SRem), INST(FRem, FRem),
+      INST(Shl, Shl), INST(LShr, LShr), INST(AShr, AShr), INST(And, And),
+      INST(Or, Or), INST(Xor, XOr), INST(Alloca, Alloca), INST(Load, Load),
+      INST(Store, Store),
+      // Getelementptr is handled specially.
+      INST(Ret, Return), INST(Fence, Fence),
+      // FIXME: atomiccmpxchg
+      // FIXME: atomicrmw
+      INST(Trunc, Trunc), INST(ZExt, ZExt), INST(SExt, SExt),
+      INST(FPToUI, FPToUI), INST(FPToSI, FPToSI), INST(UIToFP, UIToFP),
+      INST(SIToFP, SIToFP), INST(FPTrunc, FPTrunc), INST(FPExt, FPExt),
+      INST(PtrToInt, PtrToInt), INST(IntToPtr, IntToPtr),
+      INST(BitCast, Bitcast), INST(AddrSpaceCast, AddrSpaceCast),
+      // FIXME: cleanuppad
+      // FIXME: catchpad
+      // ICmp is handled specially.
+      // FIXME: fcmp
+      // PHI is handled specially.
+      INST(Freeze, Freeze), INST(Call, Call),
+      // FIXME: select
+      // FIXME: vaarg
+      // FIXME: extractelement
+      // FIXME: insertelement
+      // FIXME: shufflevector
+      // FIXME: extractvalue
+      // FIXME: insertvalue
+      // FIXME: landingpad
+  };
 #undef INST
+
+  return opcMap.lookup(opcode);
+}
 
 static ICmpPredicate getICmpPredicate(llvm::CmpInst::Predicate p) {
   switch (p) {
@@ -531,6 +548,26 @@ static ICmpPredicate getICmpPredicate(llvm::CmpInst::Predicate p) {
     return LLVM::ICmpPredicate::uge;
   }
   llvm_unreachable("incorrect comparison predicate");
+}
+
+static AtomicOrdering getLLVMAtomicOrdering(llvm::AtomicOrdering ordering) {
+  switch (ordering) {
+  case llvm::AtomicOrdering::NotAtomic:
+    return LLVM::AtomicOrdering::not_atomic;
+  case llvm::AtomicOrdering::Unordered:
+    return LLVM::AtomicOrdering::unordered;
+  case llvm::AtomicOrdering::Monotonic:
+    return LLVM::AtomicOrdering::monotonic;
+  case llvm::AtomicOrdering::Acquire:
+    return LLVM::AtomicOrdering::acquire;
+  case llvm::AtomicOrdering::Release:
+    return LLVM::AtomicOrdering::release;
+  case llvm::AtomicOrdering::AcquireRelease:
+    return LLVM::AtomicOrdering::acq_rel;
+  case llvm::AtomicOrdering::SequentiallyConsistent:
+    return LLVM::AtomicOrdering::seq_cst;
+  }
+  llvm_unreachable("incorrect atomic ordering");
 }
 
 // `br` branches to `target`. Return the branch arguments to `br`, in the
@@ -579,6 +616,7 @@ LogicalResult Importer::processInstruction(llvm::Instruction *inst) {
   case llvm::Instruction::Load:
   case llvm::Instruction::Store:
   case llvm::Instruction::Ret:
+  case llvm::Instruction::Resume:
   case llvm::Instruction::Trunc:
   case llvm::Instruction::ZExt:
   case llvm::Instruction::SExt:
@@ -591,8 +629,9 @@ LogicalResult Importer::processInstruction(llvm::Instruction *inst) {
   case llvm::Instruction::PtrToInt:
   case llvm::Instruction::IntToPtr:
   case llvm::Instruction::AddrSpaceCast:
+  case llvm::Instruction::Freeze:
   case llvm::Instruction::BitCast: {
-    OperationState state(loc, opcMap.lookup(inst->getOpcode()));
+    OperationState state(loc, lookupOperationNameFromOpcode(inst->getOpcode()));
     SmallVector<Value, 4> ops;
     ops.reserve(inst->getNumOperands());
     for (auto *op : inst->operand_values()) {
@@ -627,21 +666,29 @@ LogicalResult Importer::processInstruction(llvm::Instruction *inst) {
     auto *brInst = cast<llvm::BranchInst>(inst);
     OperationState state(loc,
                          brInst->isConditional() ? "llvm.cond_br" : "llvm.br");
-    SmallVector<Value, 4> ops;
     if (brInst->isConditional()) {
       Value condition = processValue(brInst->getCondition());
       if (!condition)
         return failure();
-      ops.push_back(condition);
+      state.addOperands(condition);
     }
-    state.addOperands(ops);
-    SmallVector<Block *, 4> succs;
-    for (auto *succ : llvm::reverse(brInst->successors())) {
+
+    std::array<int32_t, 3> operandSegmentSizes = {1, 0, 0};
+    for (int i : llvm::seq<int>(0, brInst->getNumSuccessors())) {
+      auto *succ = brInst->getSuccessor(i);
       SmallVector<Value, 4> blockArguments;
       if (failed(processBranchArgs(brInst, succ, blockArguments)))
         return failure();
-      state.addSuccessor(blocks[succ], blockArguments);
+      state.addSuccessors(blocks[succ]);
+      state.addOperands(blockArguments);
+      operandSegmentSizes[i + 1] = blockArguments.size();
     }
+
+    if (brInst->isConditional()) {
+      state.addAttribute(LLVM::CondBrOp::getOperandSegmentSizeAttr(),
+                         b.getI32VectorAttr(operandSegmentSizes));
+    }
+
     b.createOperation(state);
     return success();
   }
@@ -675,11 +722,11 @@ LogicalResult Importer::processInstruction(llvm::Instruction *inst) {
       op = b.create<CallOp>(loc, tys, b.getSymbolRefAttr(callee->getName()),
                             ops);
     } else {
-      Value calledValue = processValue(ci->getCalledValue());
+      Value calledValue = processValue(ci->getCalledOperand());
       if (!calledValue)
         return failure();
       ops.insert(ops.begin(), calledValue);
-      op = b.create<CallOp>(loc, tys, ops, ArrayRef<NamedAttribute>());
+      op = b.create<CallOp>(loc, tys, ops);
     }
     if (!ci->getType()->isVoidTy())
       v = op->getResult(0);
@@ -692,8 +739,11 @@ LogicalResult Importer::processInstruction(llvm::Instruction *inst) {
     for (unsigned i = 0, ie = lpi->getNumClauses(); i < ie; i++)
       ops.push_back(processConstant(lpi->getClause(i)));
 
-    b.create<LandingpadOp>(loc, processType(lpi->getType()), lpi->isCleanup(),
-                           ops);
+    Type ty = processType(lpi->getType());
+    if (!ty)
+      return failure();
+
+    v = b.create<LandingpadOp>(loc, ty, lpi->isCleanup(), ops);
     return success();
   }
   case llvm::Instruction::Invoke: {
@@ -718,7 +768,7 @@ LogicalResult Importer::processInstruction(llvm::Instruction *inst) {
                               ops, blocks[ii->getNormalDest()], normalArgs,
                               blocks[ii->getUnwindDest()], unwindArgs);
     } else {
-      ops.insert(ops.begin(), processValue(ii->getCalledValue()));
+      ops.insert(ops.begin(), processValue(ii->getCalledOperand()));
       op = b.create<InvokeOp>(loc, tys, ops, blocks[ii->getNormalDest()],
                               normalArgs, blocks[ii->getUnwindDest()],
                               unwindArgs);
@@ -726,6 +776,23 @@ LogicalResult Importer::processInstruction(llvm::Instruction *inst) {
 
     if (!ii->getType()->isVoidTy())
       v = op->getResult(0);
+    return success();
+  }
+  case llvm::Instruction::Fence: {
+    StringRef syncscope;
+    SmallVector<StringRef, 4> ssNs;
+    llvm::LLVMContext &llvmContext = dialect->getLLVMContext();
+    llvm::FenceInst *fence = cast<llvm::FenceInst>(inst);
+    llvmContext.getSyncScopeNames(ssNs);
+    int fenceSyncScopeID = fence->getSyncScopeID();
+    for (unsigned i = 0, e = ssNs.size(); i != e; i++) {
+      if (fenceSyncScopeID == llvmContext.getOrInsertSyncScopeID(ssNs[i])) {
+        syncscope = ssNs[i];
+        break;
+      }
+    }
+    b.create<FenceOp>(loc, getLLVMAtomicOrdering(fence->getOrdering()),
+                      syncscope);
     return success();
   }
   case llvm::Instruction::GetElementPtr: {
@@ -741,10 +808,32 @@ LogicalResult Importer::processInstruction(llvm::Instruction *inst) {
     Type type = processType(inst->getType());
     if (!type)
       return failure();
-    v = b.create<GEPOp>(loc, type, ops, ArrayRef<NamedAttribute>());
+    v = b.create<GEPOp>(loc, type, ops);
     return success();
   }
   }
+}
+
+FlatSymbolRefAttr Importer::getPersonalityAsAttr(llvm::Function *f) {
+  if (!f->hasPersonalityFn())
+    return nullptr;
+
+  llvm::Constant *pf = f->getPersonalityFn();
+
+  // If it directly has a name, we can use it.
+  if (pf->hasName())
+    return b.getSymbolRefAttr(pf->getName());
+
+  // If it doesn't have a name, currently, only function pointers that are
+  // bitcast to i8* are parsed.
+  if (auto ce = dyn_cast<llvm::ConstantExpr>(pf)) {
+    if (ce->getOpcode() == llvm::Instruction::BitCast &&
+        ce->getType() == llvm::Type::getInt8PtrTy(dialect->getLLVMContext())) {
+      if (auto func = dyn_cast<llvm::Function>(ce->getOperand(0)))
+        return b.getSymbolRefAttr(func->getName());
+    }
+  }
+  return FlatSymbolRefAttr();
 }
 
 LogicalResult Importer::processFunction(llvm::Function *f) {
@@ -759,6 +848,13 @@ LogicalResult Importer::processFunction(llvm::Function *f) {
   b.setInsertionPoint(module.getBody(), getFuncInsertPt());
   LLVMFuncOp fop = b.create<LLVMFuncOp>(UnknownLoc::get(context), f->getName(),
                                         functionType);
+
+  if (FlatSymbolRefAttr personality = getPersonalityAsAttr(f))
+    fop.setAttr(b.getIdentifier("personality"), personality);
+  else if (f->hasPersonalityFn())
+    emitWarning(UnknownLoc::get(context),
+                "could not deduce personality, skipping it");
+
   if (f->isDeclaration())
     return success();
 
@@ -830,9 +926,7 @@ OwningModuleRef translateLLVMIRToModule(llvm::SourceMgr &sourceMgr,
   llvm::SMDiagnostic err;
   std::unique_ptr<llvm::Module> llvmModule =
       llvm::parseIR(*sourceMgr.getMemoryBuffer(sourceMgr.getMainFileID()), err,
-                    dialect->getLLVMContext(),
-                    /*UpgradeDebugInfo=*/true,
-                    /*DataLayoutString=*/"");
+                    dialect->getLLVMContext());
   if (!llvmModule) {
     std::string errStr;
     llvm::raw_string_ostream errStream(errStr);
@@ -843,8 +937,11 @@ OwningModuleRef translateLLVMIRToModule(llvm::SourceMgr &sourceMgr,
   return translateLLVMIRToModule(std::move(llvmModule), context);
 }
 
-static TranslateToMLIRRegistration
-    fromLLVM("import-llvm",
-             [](llvm::SourceMgr &sourceMgr, MLIRContext *context) {
-               return translateLLVMIRToModule(sourceMgr, context);
-             });
+namespace mlir {
+void registerFromLLVMIRTranslation() {
+  TranslateToMLIRRegistration fromLLVM(
+      "import-llvm", [](llvm::SourceMgr &sourceMgr, MLIRContext *context) {
+        return ::translateLLVMIRToModule(sourceMgr, context);
+      });
+}
+} // namespace mlir

@@ -75,6 +75,14 @@ StringRef tblgen::Attribute::getReturnType() const {
   return getValueAsString(init);
 }
 
+// Return the type constraint corresponding to the type of this attribute, or
+// None if this is not a TypedAttr.
+llvm::Optional<tblgen::Type> tblgen::Attribute::getValueType() const {
+  if (auto *defInit = dyn_cast<llvm::DefInit>(def->getValueInit("valueType")))
+    return tblgen::Type(defInit->getDef());
+  return llvm::None;
+}
+
 StringRef tblgen::Attribute::getConvertFromStorageCall() const {
   const auto *init = def->getValueInit("convertFromStorage");
   return getValueAsString(init);
@@ -122,6 +130,10 @@ StringRef tblgen::Attribute::getAttrDefName() const {
 StringRef tblgen::Attribute::getDerivedCodeBody() const {
   assert(isDerivedAttr() && "only derived attribute has 'body' field");
   return def->getValueAsString("body");
+}
+
+tblgen::Dialect tblgen::Attribute::getDialect() const {
+  return Dialect(def->getValueAsDef("dialect"));
 }
 
 tblgen::ConstantAttr::ConstantAttr(const DefInit *init) : def(init->getDef()) {
@@ -276,3 +288,5 @@ tblgen::StructAttr::getAllFields() const {
 
   return attributes;
 }
+
+const char *mlir::tblgen::inferTypeOpInterface = "InferTypeOpInterface";

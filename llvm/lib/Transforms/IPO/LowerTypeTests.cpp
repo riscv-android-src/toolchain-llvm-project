@@ -835,11 +835,10 @@ void LowerTypeTestsModule::buildBitSetsFromGlobalVariables(
   uint64_t DesiredPadding = 0;
   for (GlobalTypeMember *G : Globals) {
     auto *GV = cast<GlobalVariable>(G->getGlobal());
-    MaybeAlign Alignment(GV->getAlignment());
-    if (!Alignment)
-      Alignment = Align(DL.getABITypeAlignment(GV->getValueType()));
-    MaxAlign = std::max(MaxAlign, *Alignment);
-    uint64_t GVOffset = alignTo(CurOffset + DesiredPadding, *Alignment);
+    Align Alignment =
+        DL.getValueOrABITypeAlignment(GV->getAlign(), GV->getValueType());
+    MaxAlign = std::max(MaxAlign, Alignment);
+    uint64_t GVOffset = alignTo(CurOffset + DesiredPadding, Alignment);
     GlobalLayout[G] = GVOffset;
     if (GVOffset != 0) {
       uint64_t Padding = GVOffset - CurOffset;
@@ -1712,8 +1711,8 @@ bool LowerTypeTestsModule::runForTesting(Module &M) {
 static bool isDirectCall(Use& U) {
   auto *Usr = dyn_cast<CallInst>(U.getUser());
   if (Usr) {
-    CallSite CS(Usr);
-    if (CS.isCallee(&U))
+    auto *CB = dyn_cast<CallBase>(Usr);
+    if (CB && CB->isCallee(&U))
       return true;
   }
   return false;

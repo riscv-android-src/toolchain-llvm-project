@@ -46,7 +46,6 @@
 #include "lldb/Utility/Log.h"
 #include "lldb/Utility/Logging.h"
 #include "lldb/Utility/RegisterValue.h"
-#include "lldb/Utility/SharingPtr.h"
 #include "lldb/Utility/Stream.h"
 #include "lldb/Utility/StreamString.h"
 #include "lldb/Utility/StringList.h"
@@ -2348,10 +2347,10 @@ bool FormatEntity::FormatFileSpec(const FileSpec &file_spec, Stream &s,
     file_spec.Dump(s.AsRawOstream());
     return true;
   } else if (variable_name.equals(".basename")) {
-    s.PutCString(file_spec.GetFilename().AsCString(""));
+    s.PutCString(file_spec.GetFilename().GetStringRef());
     return true;
   } else if (variable_name.equals(".dirname")) {
-    s.PutCString(file_spec.GetFilename().AsCString(""));
+    s.PutCString(file_spec.GetFilename().GetStringRef());
     return true;
   }
   return false;
@@ -2410,7 +2409,7 @@ void FormatEntity::AutoComplete(CompletionRequest &request) {
 
   llvm::StringRef partial_variable(str.substr(dollar_pos + 2));
   if (partial_variable.empty()) {
-    // Suggest all top level entites as we are just past "${"
+    // Suggest all top level entities as we are just past "${"
     StringList new_matches;
     AddMatches(&g_root, str, llvm::StringRef(), new_matches);
     request.AddCompletions(new_matches);

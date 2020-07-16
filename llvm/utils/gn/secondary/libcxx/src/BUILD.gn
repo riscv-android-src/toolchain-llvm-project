@@ -51,11 +51,6 @@ config("cxx_config") {
     "-Wno-covered-switch-default",
   ]
   cflags_cc = [ "-nostdinc++" ]
-  if (target_os == "win") {
-    cflags_cc += [ "/std:c++11" ]
-  } else {
-    cflags_cc += [ "-std=c++11" ]
-  }
   defines = [ "_LIBCPP_BUILDING_LIBRARY" ]
   if (target_os == "win") {
     cflags += [ "/Zl" ]
@@ -100,7 +95,6 @@ config("cxx_config") {
     } else {
       cflags_cc += [ "-fno-exceptions" ]
     }
-    defines += [ "_LIBCPP_NO_EXCEPTIONS" ]
   }
   if (!libcxx_enable_rtti) {
     if (current_os == "win") {
@@ -115,6 +109,8 @@ config("cxx_config") {
 cxx_sources = [
   "algorithm.cpp",
   "any.cpp",
+  "atomic.cpp",
+  "barrier.cpp",
   "bind.cpp",
   "charconv.cpp",
   "chrono.cpp",
@@ -138,6 +134,7 @@ cxx_sources = [
   "new.cpp",
   "optional.cpp",
   "random.cpp",
+  "random_shuffle.cpp",
   "regex.cpp",
   "shared_mutex.cpp",
   "stdexcept.cpp",
@@ -272,7 +269,6 @@ if (libcxx_enable_experimental) {
   static_library("cxx_experimental") {
     output_dir = runtimes_dir
     output_name = "c++experimental"
-    cflags_cc = [ "-std=c++14" ]
     sources = [
       # Make `gn format` not collapse this, for sync_source_lists_from_cmake.py.
       "experimental/memory_resource.cpp",

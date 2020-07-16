@@ -9,6 +9,7 @@
 #include "MisplacedPointerArithmeticInAllocCheck.h"
 #include "clang/AST/ASTContext.h"
 #include "clang/ASTMatchers/ASTMatchFinder.h"
+#include "clang/Lex/Lexer.h"
 
 using namespace clang::ast_matchers;
 
@@ -18,18 +19,16 @@ namespace bugprone {
 
 void MisplacedPointerArithmeticInAllocCheck::registerMatchers(
     MatchFinder *Finder) {
-  const auto AllocFunc = functionDecl(
-      anyOf(hasName("::malloc"), hasName("std::malloc"), hasName("::alloca"),
-            hasName("::calloc"), hasName("std::calloc"), hasName("::realloc"),
-            hasName("std::realloc")));
+  const auto AllocFunc =
+      functionDecl(hasAnyName("::malloc", "std::malloc", "::alloca", "::calloc",
+                              "std::calloc", "::realloc", "std::realloc"));
 
   const auto AllocFuncPtr =
       varDecl(hasType(isConstQualified()),
               hasInitializer(ignoringParenImpCasts(
                   declRefExpr(hasDeclaration(AllocFunc)))));
 
-  const auto AdditiveOperator =
-      binaryOperator(anyOf(hasOperatorName("+"), hasOperatorName("-")));
+  const auto AdditiveOperator = binaryOperator(hasAnyOperatorName("+", "-"));
 
   const auto IntExpr = expr(hasType(isInteger()));
 

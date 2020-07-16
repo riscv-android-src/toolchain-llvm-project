@@ -12,6 +12,7 @@
 #include "clang/Basic/LangOptions.h"
 #include "clang/Basic/SourceLocation.h"
 #include "clang/Basic/SourceManager.h"
+#include "clang/Lex/Lexer.h"
 #include "llvm/Support/FormatVariadic.h"
 #include <map>
 #include <string>
@@ -94,9 +95,6 @@ static FixItHint getCallFixItHint(const ObjCMessageExpr *Expr,
 }
 
 void AvoidNSObjectNewCheck::registerMatchers(MatchFinder *Finder) {
-  if (!getLangOpts().ObjC)
-    return;
-
   // Add two matchers, to catch calls to +new and implementations of +new.
   Finder->addMatcher(
       objcMessageExpr(isClassMessage(), hasSelector("new")).bind("new_call"),

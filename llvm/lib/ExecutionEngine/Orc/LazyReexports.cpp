@@ -30,36 +30,29 @@ Expected<JITTargetAddress> LazyCallThroughManager::getCallThroughTrampoline(
   if (!Trampoline)
     return Trampoline.takeError();
 
-  Reexports[*Trampoline] = std::make_pair(&SourceJD, std::move(SymbolName));
+  Reexports[*Trampoline] = ReexportsEntry{&SourceJD, std::move(SymbolName)};
   Notifiers[*Trampoline] = std::move(NotifyResolved);
   return *Trampoline;
 }
 
-JITTargetAddress
-LazyCallThroughManager::callThroughToSymbol(JITTargetAddress TrampolineAddr) {
-  JITDylib *SourceJD = nullptr;
-  SymbolStringPtr SymbolName;
+JITTargetAddress LazyCallThroughManager::reportCallThroughError(Error Err) {
+  ES.reportError(std::move(Err));
+  return ErrorHandlerAddr;
+}
 
-  {
-    std::lock_guard<std::mutex> Lock(LCTMMutex);
-    auto I = Reexports.find(TrampolineAddr);
-    if (I == Reexports.end())
-      return ErrorHandlerAddr;
-    SourceJD = I->second.first;
-    SymbolName = I->second.second;
-  }
+Expected<LazyCallThroughManager::ReexportsEntry>
+LazyCallThroughManager::findReexport(JITTargetAddress TrampolineAddr) {
+  std::lock_guard<std::mutex> Lock(LCTMMutex);
+  auto I = Reexports.find(TrampolineAddr);
+  if (I == Reexports.end())
+    return createStringError(inconvertibleErrorCode(),
+                             "Missing reexport for trampoline address %p",
+                             TrampolineAddr);
+  return I->second;
+}
 
-  auto LookupResult = ES.lookup(
-      makeJITDylibSearchOrder(SourceJD, JITDylibLookupFlags::MatchAllSymbols),
-      SymbolName);
-
-  if (!LookupResult) {
-    ES.reportError(LookupResult.takeError());
-    return ErrorHandlerAddr;
-  }
-
-  auto ResolvedAddr = LookupResult->getAddress();
-
+Error LazyCallThroughManager::notifyResolved(JITTargetAddress TrampolineAddr,
+                                             JITTargetAddress ResolvedAddr) {
   NotifyResolvedFunction NotifyResolved;
   {
     std::lock_guard<std::mutex> Lock(LCTMMutex);
@@ -70,14 +63,38 @@ LazyCallThroughManager::callThroughToSymbol(JITTargetAddress TrampolineAddr) {
     }
   }
 
-  if (NotifyResolved) {
-    if (auto Err = NotifyResolved(ResolvedAddr)) {
-      ES.reportError(std::move(Err));
-      return ErrorHandlerAddr;
-    }
-  }
+  return NotifyResolved ? NotifyResolved(ResolvedAddr) : Error::success();
+}
 
-  return ResolvedAddr;
+void LazyCallThroughManager::resolveTrampolineLandingAddress(
+    JITTargetAddress TrampolineAddr,
+    NotifyLandingResolvedFunction NotifyLandingResolved) {
+
+  auto Entry = findReexport(TrampolineAddr);
+  if (!Entry)
+    return NotifyLandingResolved(reportCallThroughError(Entry.takeError()));
+
+  ES.lookup(
+      LookupKind::Static,
+      makeJITDylibSearchOrder(Entry->SourceJD,
+                              JITDylibLookupFlags::MatchAllSymbols),
+      SymbolLookupSet({Entry->SymbolName}), SymbolState::Ready,
+      [this, TrampolineAddr, SymbolName = Entry->SymbolName,
+       NotifyLandingResolved = std::move(NotifyLandingResolved)](
+          Expected<SymbolMap> Result) mutable {
+        if (Result) {
+          assert(Result->size() == 1 && "Unexpected result size");
+          assert(Result->count(SymbolName) && "Unexpected result value");
+          JITTargetAddress LandingAddr = (*Result)[SymbolName].getAddress();
+
+          if (auto Err = notifyResolved(TrampolineAddr, LandingAddr))
+            NotifyLandingResolved(reportCallThroughError(std::move(Err)));
+          else
+            NotifyLandingResolved(LandingAddr);
+        } else
+          NotifyLandingResolved(reportCallThroughError(Result.takeError()));
+      },
+      NoDependenciesToRegister);
 }
 
 Expected<std::unique_ptr<LazyCallThroughManager>>
@@ -123,10 +140,9 @@ LazyReexportsMaterializationUnit::LazyReexportsMaterializationUnit(
     LazyCallThroughManager &LCTManager, IndirectStubsManager &ISManager,
     JITDylib &SourceJD, SymbolAliasMap CallableAliases, ImplSymbolMap *SrcJDLoc,
     VModuleKey K)
-    : MaterializationUnit(extractFlags(CallableAliases), std::move(K)),
+    : MaterializationUnit(extractFlags(CallableAliases), nullptr, std::move(K)),
       LCTManager(LCTManager), ISManager(ISManager), SourceJD(SourceJD),
-      CallableAliases(std::move(CallableAliases)),
-      AliaseeTable(SrcJDLoc) {}
+      CallableAliases(std::move(CallableAliases)), AliaseeTable(SrcJDLoc) {}
 
 StringRef LazyReexportsMaterializationUnit::getName() const {
   return "<Lazy Reexports>";

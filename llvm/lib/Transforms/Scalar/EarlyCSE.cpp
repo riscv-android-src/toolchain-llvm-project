@@ -41,6 +41,7 @@
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/PassManager.h"
 #include "llvm/IR/PatternMatch.h"
+#include "llvm/IR/Statepoint.h"
 #include "llvm/IR/Type.h"
 #include "llvm/IR/Use.h"
 #include "llvm/IR/Value.h"
@@ -54,6 +55,7 @@
 #include "llvm/Support/RecyclingAllocator.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Scalar.h"
+#include "llvm/Transforms/Utils/AssumeBundleBuilder.h"
 #include "llvm/Transforms/Utils/GuardUtils.h"
 #include "llvm/Transforms/Utils/Local.h"
 #include <cassert>
@@ -114,7 +116,7 @@ struct SimpleValue {
            isa<CmpInst>(Inst) || isa<SelectInst>(Inst) ||
            isa<ExtractElementInst>(Inst) || isa<InsertElementInst>(Inst) ||
            isa<ShuffleVectorInst>(Inst) || isa<ExtractValueInst>(Inst) ||
-           isa<InsertValueInst>(Inst);
+           isa<InsertValueInst>(Inst) || isa<FreezeInst>(Inst);
   }
 };
 
@@ -152,13 +154,50 @@ static bool matchSelectWithOptionalNotCond(Value *V, Value *&Cond, Value *&A,
     std::swap(A, B);
   }
 
-  // Set flavor if we find a match, or set it to unknown otherwise; in
-  // either case, return true to indicate that this is a select we can
-  // process.
-  if (auto *CmpI = dyn_cast<ICmpInst>(Cond))
-    Flavor = matchDecomposedSelectPattern(CmpI, A, B, A, B).Flavor;
-  else
-    Flavor = SPF_UNKNOWN;
+  // Match canonical forms of abs/nabs/min/max. We are not using ValueTracking's
+  // more powerful matchSelectPattern() because it may rely on instruction flags
+  // such as "nsw". That would be incompatible with the current hashing
+  // mechanism that may remove flags to increase the likelihood of CSE.
+
+  // These are the canonical forms of abs(X) and nabs(X) created by instcombine:
+  // %N = sub i32 0, %X
+  // %C = icmp slt i32 %X, 0
+  // %ABS = select i1 %C, i32 %N, i32 %X
+  //
+  // %N = sub i32 0, %X
+  // %C = icmp slt i32 %X, 0
+  // %NABS = select i1 %C, i32 %X, i32 %N
+  Flavor = SPF_UNKNOWN;
+  CmpInst::Predicate Pred;
+  if (match(Cond, m_ICmp(Pred, m_Specific(B), m_ZeroInt())) &&
+      Pred == ICmpInst::ICMP_SLT && match(A, m_Neg(m_Specific(B)))) {
+    // ABS: B < 0 ? -B : B
+    Flavor = SPF_ABS;
+    return true;
+  }
+  if (match(Cond, m_ICmp(Pred, m_Specific(A), m_ZeroInt())) &&
+      Pred == ICmpInst::ICMP_SLT && match(B, m_Neg(m_Specific(A)))) {
+    // NABS: A < 0 ? A : -A
+    Flavor = SPF_NABS;
+    return true;
+  }
+
+  if (!match(Cond, m_ICmp(Pred, m_Specific(A), m_Specific(B)))) {
+    // Check for commuted variants of min/max by swapping predicate.
+    // If we do not match the standard or commuted patterns, this is not a
+    // recognized form of min/max, but it is still a select, so return true.
+    if (!match(Cond, m_ICmp(Pred, m_Specific(B), m_Specific(A))))
+      return true;
+    Pred = ICmpInst::getSwappedPredicate(Pred);
+  }
+
+  switch (Pred) {
+  case CmpInst::ICMP_UGT: Flavor = SPF_UMAX; break;
+  case CmpInst::ICMP_ULT: Flavor = SPF_UMIN; break;
+  case CmpInst::ICMP_SGT: Flavor = SPF_SMAX; break;
+  case CmpInst::ICMP_SLT: Flavor = SPF_SMIN; break;
+  default: break;
+  }
 
   return true;
 }
@@ -231,6 +270,9 @@ static unsigned getHashValueImpl(SimpleValue Val) {
   if (CastInst *CI = dyn_cast<CastInst>(Inst))
     return hash_combine(CI->getOpcode(), CI->getType(), CI->getOperand(0));
 
+  if (FreezeInst *FI = dyn_cast<FreezeInst>(Inst))
+    return hash_combine(FI->getOpcode(), FI->getOperand(0));
+
   if (const ExtractValueInst *EVI = dyn_cast<ExtractValueInst>(Inst))
     return hash_combine(EVI->getOpcode(), EVI->getOperand(0),
                         hash_combine_range(EVI->idx_begin(), EVI->idx_end()));
@@ -242,7 +284,8 @@ static unsigned getHashValueImpl(SimpleValue Val) {
 
   assert((isa<CallInst>(Inst) || isa<GetElementPtrInst>(Inst) ||
           isa<ExtractElementInst>(Inst) || isa<InsertElementInst>(Inst) ||
-          isa<ShuffleVectorInst>(Inst) || isa<UnaryOperator>(Inst)) &&
+          isa<ShuffleVectorInst>(Inst) || isa<UnaryOperator>(Inst) ||
+          isa<FreezeInst>(Inst)) &&
          "Invalid/unknown instruction");
 
   // Mix in the opcode.
@@ -414,6 +457,14 @@ template <> struct DenseMapInfo<CallValue> {
 
 unsigned DenseMapInfo<CallValue>::getHashValue(CallValue Val) {
   Instruction *Inst = Val.Inst;
+
+  // gc.relocate is 'special' call: its second and third operands are
+  // not real values, but indices into statepoint's argument list.
+  // Get values they point to.
+  if (const GCRelocateInst *GCR = dyn_cast<GCRelocateInst>(Inst))
+    return hash_combine(GCR->getOpcode(), GCR->getOperand(0),
+                        GCR->getBasePtr(), GCR->getDerivedPtr());
+
   // Hash all of the operands as pointers and mix in the opcode.
   return hash_combine(
       Inst->getOpcode(),
@@ -424,6 +475,14 @@ bool DenseMapInfo<CallValue>::isEqual(CallValue LHS, CallValue RHS) {
   Instruction *LHSI = LHS.Inst, *RHSI = RHS.Inst;
   if (LHS.isSentinel() || RHS.isSentinel())
     return LHSI == RHSI;
+
+  // See comment above in `getHashValue()`.
+  if (const GCRelocateInst *GCR1 = dyn_cast<GCRelocateInst>(LHSI))
+    if (const GCRelocateInst *GCR2 = dyn_cast<GCRelocateInst>(RHSI))
+      return GCR1->getOperand(0) == GCR2->getOperand(0) &&
+             GCR1->getBasePtr() == GCR2->getBasePtr() &&
+             GCR1->getDerivedPtr() == GCR2->getDerivedPtr();
+
   return LHSI->isIdenticalTo(RHSI);
 }
 
@@ -561,8 +620,8 @@ private:
   public:
     StackNode(ScopedHTType &AvailableValues, LoadHTType &AvailableLoads,
               InvariantHTType &AvailableInvariants, CallHTType &AvailableCalls,
-              unsigned cg, DomTreeNode *n, DomTreeNode::iterator child,
-              DomTreeNode::iterator end)
+              unsigned cg, DomTreeNode *n, DomTreeNode::const_iterator child,
+              DomTreeNode::const_iterator end)
         : CurrentGeneration(cg), ChildGeneration(cg), Node(n), ChildIter(child),
           EndIter(end),
           Scopes(AvailableValues, AvailableLoads, AvailableInvariants,
@@ -576,7 +635,7 @@ private:
     unsigned childGeneration() { return ChildGeneration; }
     void childGeneration(unsigned generation) { ChildGeneration = generation; }
     DomTreeNode *node() { return Node; }
-    DomTreeNode::iterator childIter() { return ChildIter; }
+    DomTreeNode::const_iterator childIter() { return ChildIter; }
 
     DomTreeNode *nextChild() {
       DomTreeNode *child = *ChildIter;
@@ -584,7 +643,7 @@ private:
       return child;
     }
 
-    DomTreeNode::iterator end() { return EndIter; }
+    DomTreeNode::const_iterator end() { return EndIter; }
     bool isProcessed() { return Processed; }
     void process() { Processed = true; }
 
@@ -592,8 +651,8 @@ private:
     unsigned CurrentGeneration;
     unsigned ChildGeneration;
     DomTreeNode *Node;
-    DomTreeNode::iterator ChildIter;
-    DomTreeNode::iterator EndIter;
+    DomTreeNode::const_iterator ChildIter;
+    DomTreeNode::const_iterator EndIter;
     NodeScope Scopes;
     bool Processed = false;
   };
@@ -906,7 +965,8 @@ bool EarlyCSE::processNode(DomTreeNode *Node) {
         continue;
       }
 
-      salvageDebugInfoOrMarkUndef(Inst);
+      salvageKnowledge(&Inst, &AC);
+      salvageDebugInfo(Inst);
       removeMSSA(Inst);
       Inst.eraseFromParent();
       Changed = true;
@@ -972,6 +1032,7 @@ bool EarlyCSE::processNode(DomTreeNode *Node) {
                 cast<ConstantInt>(KnownCond)->isOne()) {
               LLVM_DEBUG(dbgs()
                          << "EarlyCSE removing guard: " << Inst << '\n');
+              salvageKnowledge(&Inst, &AC);
               removeMSSA(Inst);
               Inst.eraseFromParent();
               Changed = true;
@@ -1007,6 +1068,7 @@ bool EarlyCSE::processNode(DomTreeNode *Node) {
           Changed = true;
         }
         if (isInstructionTriviallyDead(&Inst, &TLI)) {
+          salvageKnowledge(&Inst, &AC);
           removeMSSA(Inst);
           Inst.eraseFromParent();
           Changed = true;
@@ -1032,6 +1094,7 @@ bool EarlyCSE::processNode(DomTreeNode *Node) {
         if (auto *I = dyn_cast<Instruction>(V))
           I->andIRFlags(&Inst);
         Inst.replaceAllUsesWith(V);
+        salvageKnowledge(&Inst, &AC);
         removeMSSA(Inst);
         Inst.eraseFromParent();
         Changed = true;
@@ -1092,6 +1155,7 @@ bool EarlyCSE::processNode(DomTreeNode *Node) {
           }
           if (!Inst.use_empty())
             Inst.replaceAllUsesWith(Op);
+          salvageKnowledge(&Inst, &AC);
           removeMSSA(Inst);
           Inst.eraseFromParent();
           Changed = true;
@@ -1135,6 +1199,7 @@ bool EarlyCSE::processNode(DomTreeNode *Node) {
         }
         if (!Inst.use_empty())
           Inst.replaceAllUsesWith(InVal.first);
+        salvageKnowledge(&Inst, &AC);
         removeMSSA(Inst);
         Inst.eraseFromParent();
         Changed = true;
@@ -1187,6 +1252,7 @@ bool EarlyCSE::processNode(DomTreeNode *Node) {
           LLVM_DEBUG(dbgs() << "Skipping due to debug counter\n");
           continue;
         }
+        salvageKnowledge(&Inst, &AC);
         removeMSSA(Inst);
         Inst.eraseFromParent();
         Changed = true;
@@ -1222,6 +1288,7 @@ bool EarlyCSE::processNode(DomTreeNode *Node) {
             if (!DebugCounter::shouldExecute(CSECounter)) {
               LLVM_DEBUG(dbgs() << "Skipping due to debug counter\n");
             } else {
+              salvageKnowledge(&Inst, &AC);
               removeMSSA(*LastStore);
               LastStore->eraseFromParent();
               Changed = true;

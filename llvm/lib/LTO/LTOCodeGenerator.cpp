@@ -134,10 +134,12 @@ void LTOCodeGenerator::initializeLTOPasses() {
   initializeSimpleInlinerPass(R);
   initializePruneEHPass(R);
   initializeGlobalDCELegacyPassPass(R);
+  initializeOpenMPOptLegacyPassPass(R);
   initializeArgPromotionPass(R);
   initializeJumpThreadingPass(R);
   initializeSROALegacyPassPass(R);
   initializeAttributorLegacyPassPass(R);
+  initializeAttributorCGSCCLegacyPassPass(R);
   initializePostOrderFunctionAttrsLegacyPassPass(R);
   initializeReversePostOrderFunctionAttrsLegacyPassPass(R);
   initializeGlobalsAAWrapperPassPass(R);
@@ -630,9 +632,9 @@ bool LTOCodeGenerator::compileOptimized(ArrayRef<raw_pwrite_stream *> Out) {
   return true;
 }
 
-void LTOCodeGenerator::setCodeGenDebugOptions(ArrayRef<const char *> Options) {
+void LTOCodeGenerator::setCodeGenDebugOptions(ArrayRef<StringRef> Options) {
   for (StringRef Option : Options)
-    CodegenOptions.push_back(std::string(Option));
+    CodegenOptions.push_back(Option.str());
 }
 
 void LTOCodeGenerator::parseCodeGenDebugOptions() {

@@ -16,7 +16,7 @@
 #ifndef MLIR_TRANSFORMS_UTILS_H
 #define MLIR_TRANSFORMS_UTILS_H
 
-#include "mlir/Dialect/StandardOps/Ops.h"
+#include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "mlir/IR/AffineMap.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
@@ -56,7 +56,7 @@ class OpBuilder;
 //  d1, d2) -> (d0 - d1, d2), and %ii will be the extra operand. Without any
 //  extra operands, note that 'indexRemap' would just be applied to existing
 //  indices (%i, %j).
-//  TODO(bondhugula): allow extraIndices to be added at any position.
+//  TODO: allow extraIndices to be added at any position.
 LogicalResult replaceAllMemRefUsesWith(Value oldMemRef, Value newMemRef,
                                        ArrayRef<Value> extraIndices = {},
                                        AffineMap indexRemap = AffineMap(),

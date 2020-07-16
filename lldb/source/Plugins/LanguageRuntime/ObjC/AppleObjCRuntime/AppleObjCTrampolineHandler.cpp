@@ -318,7 +318,7 @@ void AppleObjCTrampolineHandler::AppleObjCVTables::VTableRegion::SetUpRegion() {
   const uint16_t descriptor_size = data.GetU16(&offset);
   const size_t num_descriptors = data.GetU32(&offset);
 
-  m_next_region = data.GetPointer(&offset);
+  m_next_region = data.GetAddress(&offset);
 
   // If the header size is 0, that means we've come in too early before this
   // data is set up.
@@ -547,7 +547,7 @@ bool AppleObjCTrampolineHandler::AppleObjCVTables::RefreshTrampolines(
     error = argument_values.GetValueAtIndex(0)->GetValueAsData(&exe_ctx, data,
                                                                nullptr);
     lldb::offset_t offset = 0;
-    lldb::addr_t region_addr = data.GetPointer(&offset);
+    lldb::addr_t region_addr = data.GetAddress(&offset);
 
     if (region_addr != 0)
       vtable_handler->ReadRegions(region_addr);
@@ -787,7 +787,8 @@ AppleObjCTrampolineHandler::AppleObjCTrampolineHandler(
   }
 
   // Build our vtable dispatch handler here:
-  m_vtables_up.reset(new AppleObjCVTables(process_sp, m_objc_module_sp));
+  m_vtables_up =
+      std::make_unique<AppleObjCVTables>(process_sp, m_objc_module_sp);
   if (m_vtables_up)
     m_vtables_up->ReadRegions();
 }

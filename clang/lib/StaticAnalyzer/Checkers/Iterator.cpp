@@ -128,22 +128,52 @@ bool isAccessOperator(OverloadedOperatorKind OK) {
          isDecrementOperator(OK) || isRandomIncrOrDecrOperator(OK);
 }
 
+bool isAccessOperator(UnaryOperatorKind OK) {
+  return isDereferenceOperator(OK) || isIncrementOperator(OK) ||
+         isDecrementOperator(OK);
+}
+
+bool isAccessOperator(BinaryOperatorKind OK) {
+  return isDereferenceOperator(OK) || isRandomIncrOrDecrOperator(OK);
+}
+
 bool isDereferenceOperator(OverloadedOperatorKind OK) {
   return OK == OO_Star || OK == OO_Arrow || OK == OO_ArrowStar ||
          OK == OO_Subscript;
+}
+
+bool isDereferenceOperator(UnaryOperatorKind OK) {
+  return OK == UO_Deref;
+}
+
+bool isDereferenceOperator(BinaryOperatorKind OK) {
+  return OK == BO_PtrMemI;
 }
 
 bool isIncrementOperator(OverloadedOperatorKind OK) {
   return OK == OO_PlusPlus;
 }
 
+bool isIncrementOperator(UnaryOperatorKind OK) {
+  return OK == UO_PreInc || OK == UO_PostInc;
+}
+
 bool isDecrementOperator(OverloadedOperatorKind OK) {
   return OK == OO_MinusMinus;
+}
+
+bool isDecrementOperator(UnaryOperatorKind OK) {
+  return OK == UO_PreDec || OK == UO_PostDec;
 }
 
 bool isRandomIncrOrDecrOperator(OverloadedOperatorKind OK) {
   return OK == OO_Plus || OK == OO_PlusEqual || OK == OO_Minus ||
          OK == OO_MinusEqual;
+}
+
+bool isRandomIncrOrDecrOperator(BinaryOperatorKind OK) {
+  return OK == BO_Add || OK == BO_AddAssign ||
+         OK == BO_Sub || OK == BO_SubAssign;
 }
 
 const ContainerData *getContainerData(ProgramStateRef State,
@@ -200,22 +230,29 @@ ProgramStateRef advancePosition(ProgramStateRef State, const SVal &Iter,
 
   auto &SymMgr = State->getStateManager().getSymbolManager();
   auto &SVB = State->getStateManager().getSValBuilder();
+  auto &BVF = State->getStateManager().getBasicVals();
 
   assert ((Op == OO_Plus || Op == OO_PlusEqual ||
            Op == OO_Minus || Op == OO_MinusEqual) &&
           "Advance operator must be one of +, -, += and -=.");
   auto BinOp = (Op == OO_Plus || Op == OO_PlusEqual) ? BO_Add : BO_Sub;
-  if (const auto IntDist = Distance.getAs<nonloc::ConcreteInt>()) {
-    // For concrete integers we can calculate the new position
-    const auto NewPos =
-      Pos->setTo(SVB.evalBinOp(State, BinOp,
-                               nonloc::SymbolVal(Pos->getOffset()),
-                               *IntDist, SymMgr.getType(Pos->getOffset()))
-                 .getAsSymbol());
-    return setIteratorPosition(State, Iter, NewPos);
-  }
+  const auto IntDistOp = Distance.getAs<nonloc::ConcreteInt>();
+  if (!IntDistOp)
+    return nullptr;
 
-  return nullptr;
+  // For concrete integers we can calculate the new position
+  nonloc::ConcreteInt IntDist = *IntDistOp;
+
+  if (IntDist.getValue().isNegative()) {
+    IntDist = nonloc::ConcreteInt(BVF.getValue(-IntDist.getValue()));
+    BinOp = (BinOp == BO_Add) ? BO_Sub : BO_Add;
+  }
+  const auto NewPos =
+    Pos->setTo(SVB.evalBinOp(State, BinOp,
+                             nonloc::SymbolVal(Pos->getOffset()),
+                             IntDist, SymMgr.getType(Pos->getOffset()))
+               .getAsSymbol());
+  return setIteratorPosition(State, Iter, NewPos);
 }
 
 // This function tells the analyzer's engine that symbols produced by our

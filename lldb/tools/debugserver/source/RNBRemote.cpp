@@ -1643,7 +1643,9 @@ rnb_err_t RNBRemote::HandlePacket_qLaunchSuccess(const char *p) {
     return SendPacket("OK");
   std::ostringstream ret_str;
   std::string status_str;
-  ret_str << "E" << m_ctx.LaunchStatusAsString(status_str);
+  std::string error_quoted = binary_encode_string
+               (m_ctx.LaunchStatusAsString(status_str));
+  ret_str << "E" << error_quoted;
 
   return SendPacket(ret_str.str());
 }
@@ -2677,8 +2679,9 @@ std::string cstring_to_asciihex_string(const char *str) {
   std::string hex_str;
   hex_str.reserve (strlen (str) * 2);
   while (str && *str) {
+    uint8_t c = *str++;
     char hexbuf[5];
-    snprintf (hexbuf, sizeof(hexbuf), "%02x", *str++);
+    snprintf (hexbuf, sizeof(hexbuf), "%02x", c);
     hex_str += hexbuf;
   }
   return hex_str;
@@ -3663,30 +3666,6 @@ static bool process_does_not_exist (nub_process_t pid) {
   return true; // process does not exist
 }
 
-static bool attach_failed_due_to_sip (nub_process_t pid) {
-  bool retval = false;
-#if defined(__APPLE__) &&                                                      \
-  (__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__ >= 101000)
-
-  // csr_check(CSR_ALLOW_TASK_FOR_PID) will be nonzero if System Integrity
-  // Protection is in effect.
-  if (csr_check(CSR_ALLOW_TASK_FOR_PID) == 0) 
-    return false;
-
-  if (rootless_allows_task_for_pid(pid) == 0)
-    retval = true;
-
-  int csops_flags = 0;
-  int csops_ret = ::csops(pid, CS_OPS_STATUS, &csops_flags,
-                       sizeof(csops_flags));
-  if (csops_ret != -1 && (csops_flags & CS_RESTRICT)) {
-    retval = true;
-  }
-#endif
-
-  return retval;
-}
-
 // my_uid and process_uid are only initialized if this function
 // returns true -- that there was a uid mismatch -- and those
 // id's may want to be used in the error message.
@@ -3741,12 +3720,17 @@ static bool process_is_already_being_debugged (nub_process_t pid) {
 // for debug permission by popping up a dialog box and attach
 // may fail outright).
 static bool login_session_has_gui_access () {
+  // I believe this API only works on macOS.
+#if TARGET_OS_OSX == 0
+  return true;
+#else
   auditinfo_addr_t info;
   getaudit_addr(&info, sizeof(info));
   if (info.ai_flags & AU_SESSION_FLAG_HAS_GRAPHIC_ACCESS)
     return true;
   else
     return false;
+#endif
 }
 
 // Checking for 
@@ -3766,6 +3750,7 @@ static bool login_session_has_gui_access () {
 // $ security authorizationdb read system.privilege.taskport.debug
 
 static bool developer_mode_enabled () {
+  // This API only exists on macOS.
 #if TARGET_OS_OSX == 0
   return true;
 #else
@@ -4059,17 +4044,20 @@ rnb_err_t RNBRemote::HandlePacket_v(const char *p) {
                                            "processes.");
           return SendPacket(return_message.c_str());
         }
-        if (attach_failed_due_to_sip (pid_attaching_to)) {
-          DNBLogError("Attach failed because of SIP protection.");
-          std::string return_message = "E96;";
-          return_message += cstring_to_asciihex_string("cannot attach "
-                            "to process due to System Integrity Protection");
-          return SendPacket(return_message.c_str());
-        }
       }
 
       std::string error_explainer = "attach failed";
       if (err_str[0] != '\0') {
+        // This is not a super helpful message for end users
+        if (strcmp (err_str, "unable to start the exception thread") == 0) {
+          snprintf (err_str, sizeof (err_str) - 1,
+                    "Not allowed to attach to process.  Look in the console "
+                    "messages (Console.app), near the debugserver entries "
+                    "when the attached failed.  The subsystem that denied "
+                    "the attach permission will likely have logged an "
+                    "informative message about why it was denied.");
+          err_str[sizeof (err_str) - 1] = '\0';
+        }
         error_explainer += " (";
         error_explainer += err_str;
         error_explainer += ")";
@@ -4920,6 +4908,8 @@ rnb_err_t RNBRemote::HandlePacket_qHostInfo(const char *p) {
     strm << "ostype:watchos;";
 #elif defined(TARGET_OS_BRIDGE) && TARGET_OS_BRIDGE == 1
     strm << "ostype:bridgeos;";
+#elif defined(TARGET_OS_OSX) && TARGET_OS_OSX == 1
+    strm << "ostype:macosx;";
 #else
     strm << "ostype:ios;";
 #endif
@@ -6348,7 +6338,7 @@ rnb_err_t RNBRemote::HandlePacket_qProcessInfo(const char *p) {
   if (addr_size > 0) {
     rep << "ptrsize:" << std::dec << addr_size << ';';
 
-#if (defined(__x86_64__) || defined(__i386__))
+#if defined(TARGET_OS_OSX) && TARGET_OS_OSX == 1
     // Try and get the OS type by looking at the load commands in the main
     // executable and looking for a LC_VERSION_MIN load command. This is the
     // most reliable way to determine the "ostype" value when on desktop.
@@ -6378,7 +6368,7 @@ rnb_err_t RNBRemote::HandlePacket_qProcessInfo(const char *p) {
         load_command_addr = load_command_addr + lc.cmdsize;
       }
     }
-#endif // when compiling this on x86 targets
+#endif // TARGET_OS_OSX
   }
 
   // If we weren't able to find the OS in a LC_VERSION_MIN load command, try
@@ -6395,6 +6385,8 @@ rnb_err_t RNBRemote::HandlePacket_qProcessInfo(const char *p) {
       rep << "ostype:watchos;";
 #elif defined(TARGET_OS_BRIDGE) && TARGET_OS_BRIDGE == 1
       rep << "ostype:bridgeos;";
+#elif defined(TARGET_OS_OSX) && TARGET_OS_OSX == 1
+      rep << "ostype:macosx;";
 #else
       rep << "ostype:ios;";
 #endif

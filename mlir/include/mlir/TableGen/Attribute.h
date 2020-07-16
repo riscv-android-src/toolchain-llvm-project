@@ -25,6 +25,8 @@ class Record;
 
 namespace mlir {
 namespace tblgen {
+class Dialect;
+class Type;
 
 // Wrapper class with helper methods for accessing attribute constraints defined
 // in TableGen.
@@ -53,6 +55,10 @@ public:
 
   // Returns the return type for this attribute.
   StringRef getReturnType() const;
+
+  // Return the type constraint corresponding to the type of this attribute, or
+  // None if this is not a TypedAttr.
+  llvm::Optional<Type> getValueType() const;
 
   // Returns the template getter method call which reads this attribute's
   // storage and returns the value as of the desired return type.
@@ -100,6 +106,9 @@ public:
   // Returns the code body for derived attribute. Aborts if this is not a
   // derived attribute.
   StringRef getDerivedCodeBody() const;
+
+  // Returns the dialect for the attribute if defined.
+  Dialect getDialect() const;
 };
 
 // Wrapper class providing helper methods for accessing MLIR constant attribute
@@ -220,6 +229,9 @@ public:
 
   std::vector<StructFieldAttr> getAllFields() const;
 };
+
+// Name of infer type op interface.
+extern const char *inferTypeOpInterface;
 
 } // end namespace tblgen
 } // end namespace mlir

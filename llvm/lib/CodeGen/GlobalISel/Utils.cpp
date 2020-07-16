@@ -12,6 +12,7 @@
 #include "llvm/CodeGen/GlobalISel/Utils.h"
 #include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/Twine.h"
+#include "llvm/CodeGen/GlobalISel/GISelChangeObserver.h"
 #include "llvm/CodeGen/GlobalISel/RegisterBankInfo.h"
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
@@ -41,8 +42,7 @@ Register llvm::constrainOperandRegClass(
     const MachineFunction &MF, const TargetRegisterInfo &TRI,
     MachineRegisterInfo &MRI, const TargetInstrInfo &TII,
     const RegisterBankInfo &RBI, MachineInstr &InsertPt,
-    const TargetRegisterClass &RegClass, const MachineOperand &RegMO,
-    unsigned OpIdx) {
+    const TargetRegisterClass &RegClass, const MachineOperand &RegMO) {
   Register Reg = RegMO.getReg();
   // Assume physical registers are properly constrained.
   assert(Register::isVirtualRegister(Reg) && "PhysReg not implemented");
@@ -62,6 +62,15 @@ Register llvm::constrainOperandRegClass(
       BuildMI(MBB, std::next(InsertIt), InsertPt.getDebugLoc(),
               TII.get(TargetOpcode::COPY), Reg)
           .addReg(ConstrainedReg);
+    }
+  } else {
+    if (GISelChangeObserver *Observer = MF.getObserver()) {
+      if (!RegMO.isDef()) {
+        MachineInstr *RegDef = MRI.getVRegDef(Reg);
+        Observer->changedInstr(*RegDef);
+      }
+      Observer->changingAllUsesOfReg(MRI, Reg);
+      Observer->finishedChangingAllUsesOfReg();
     }
   }
   return ConstrainedReg;
@@ -105,7 +114,7 @@ Register llvm::constrainOperandRegClass(
     return Reg;
   }
   return constrainOperandRegClass(MF, TRI, MRI, TII, RBI, InsertPt, *RegClass,
-                                  RegMO, OpIdx);
+                                  RegMO);
 }
 
 bool llvm::constrainSelectedInstRegOperands(MachineInstr &I,
@@ -155,6 +164,20 @@ bool llvm::constrainSelectedInstRegOperands(MachineInstr &I,
   return true;
 }
 
+bool llvm::canReplaceReg(Register DstReg, Register SrcReg,
+                         MachineRegisterInfo &MRI) {
+  // Give up if either DstReg or SrcReg  is a physical register.
+  if (DstReg.isPhysical() || SrcReg.isPhysical())
+    return false;
+  // Give up if the types don't match.
+  if (MRI.getType(DstReg) != MRI.getType(SrcReg))
+    return false;
+  // Replace if either DstReg has no constraints or the register
+  // constraints match.
+  return !MRI.getRegClassOrRegBank(DstReg) ||
+         MRI.getRegClassOrRegBank(DstReg) == MRI.getRegClassOrRegBank(SrcReg);
+}
+
 bool llvm::isTriviallyDead(const MachineInstr &MI,
                            const MachineRegisterInfo &MRI) {
   // If we can move an instruction, we can remove it.  Otherwise, it has
@@ -175,20 +198,35 @@ bool llvm::isTriviallyDead(const MachineInstr &MI,
   return true;
 }
 
+static void reportGISelDiagnostic(DiagnosticSeverity Severity,
+                                  MachineFunction &MF,
+                                  const TargetPassConfig &TPC,
+                                  MachineOptimizationRemarkEmitter &MORE,
+                                  MachineOptimizationRemarkMissed &R) {
+  bool IsFatal = Severity == DS_Error &&
+                 TPC.isGlobalISelAbortEnabled();
+  // Print the function name explicitly if we don't have a debug location (which
+  // makes the diagnostic less useful) or if we're going to emit a raw error.
+  if (!R.getLocation().isValid() || IsFatal)
+    R << (" (in function: " + MF.getName() + ")").str();
+
+  if (IsFatal)
+    report_fatal_error(R.getMsg());
+  else
+    MORE.emit(R);
+}
+
+void llvm::reportGISelWarning(MachineFunction &MF, const TargetPassConfig &TPC,
+                              MachineOptimizationRemarkEmitter &MORE,
+                              MachineOptimizationRemarkMissed &R) {
+  reportGISelDiagnostic(DS_Warning, MF, TPC, MORE, R);
+}
+
 void llvm::reportGISelFailure(MachineFunction &MF, const TargetPassConfig &TPC,
                               MachineOptimizationRemarkEmitter &MORE,
                               MachineOptimizationRemarkMissed &R) {
   MF.getProperties().set(MachineFunctionProperties::Property::FailedISel);
-
-  // Print the function name explicitly if we don't have a debug location (which
-  // makes the diagnostic less useful) or if we're going to emit a raw error.
-  if (!R.getLocation().isValid() || TPC.isGlobalISelAbortEnabled())
-    R << (" (in function: " + MF.getName() + ")").str();
-
-  if (TPC.isGlobalISelAbortEnabled())
-    report_fatal_error(R.getMsg());
-  else
-    MORE.emit(R);
+  reportGISelDiagnostic(DS_Error, MF, TPC, MORE, R);
 }
 
 void llvm::reportGISelFailure(MachineFunction &MF, const TargetPassConfig &TPC,
@@ -358,54 +396,59 @@ APFloat llvm::getAPFloatFromSize(double Val, unsigned Size) {
   return APF;
 }
 
-Optional<APInt> llvm::ConstantFoldBinOp(unsigned Opcode, const unsigned Op1,
-                                        const unsigned Op2,
+Optional<APInt> llvm::ConstantFoldBinOp(unsigned Opcode, const Register Op1,
+                                        const Register Op2,
                                         const MachineRegisterInfo &MRI) {
-  auto MaybeOp1Cst = getConstantVRegVal(Op1, MRI);
   auto MaybeOp2Cst = getConstantVRegVal(Op2, MRI);
-  if (MaybeOp1Cst && MaybeOp2Cst) {
-    LLT Ty = MRI.getType(Op1);
-    APInt C1(Ty.getSizeInBits(), *MaybeOp1Cst, true);
-    APInt C2(Ty.getSizeInBits(), *MaybeOp2Cst, true);
-    switch (Opcode) {
-    default:
+  if (!MaybeOp2Cst)
+    return None;
+
+  auto MaybeOp1Cst = getConstantVRegVal(Op1, MRI);
+  if (!MaybeOp1Cst)
+    return None;
+
+  LLT Ty = MRI.getType(Op1);
+  APInt C1(Ty.getSizeInBits(), *MaybeOp1Cst, true);
+  APInt C2(Ty.getSizeInBits(), *MaybeOp2Cst, true);
+  switch (Opcode) {
+  default:
+    break;
+  case TargetOpcode::G_ADD:
+    return C1 + C2;
+  case TargetOpcode::G_AND:
+    return C1 & C2;
+  case TargetOpcode::G_ASHR:
+    return C1.ashr(C2);
+  case TargetOpcode::G_LSHR:
+    return C1.lshr(C2);
+  case TargetOpcode::G_MUL:
+    return C1 * C2;
+  case TargetOpcode::G_OR:
+    return C1 | C2;
+  case TargetOpcode::G_SHL:
+    return C1 << C2;
+  case TargetOpcode::G_SUB:
+    return C1 - C2;
+  case TargetOpcode::G_XOR:
+    return C1 ^ C2;
+  case TargetOpcode::G_UDIV:
+    if (!C2.getBoolValue())
       break;
-    case TargetOpcode::G_ADD:
-      return C1 + C2;
-    case TargetOpcode::G_AND:
-      return C1 & C2;
-    case TargetOpcode::G_ASHR:
-      return C1.ashr(C2);
-    case TargetOpcode::G_LSHR:
-      return C1.lshr(C2);
-    case TargetOpcode::G_MUL:
-      return C1 * C2;
-    case TargetOpcode::G_OR:
-      return C1 | C2;
-    case TargetOpcode::G_SHL:
-      return C1 << C2;
-    case TargetOpcode::G_SUB:
-      return C1 - C2;
-    case TargetOpcode::G_XOR:
-      return C1 ^ C2;
-    case TargetOpcode::G_UDIV:
-      if (!C2.getBoolValue())
-        break;
-      return C1.udiv(C2);
-    case TargetOpcode::G_SDIV:
-      if (!C2.getBoolValue())
-        break;
-      return C1.sdiv(C2);
-    case TargetOpcode::G_UREM:
-      if (!C2.getBoolValue())
-        break;
-      return C1.urem(C2);
-    case TargetOpcode::G_SREM:
-      if (!C2.getBoolValue())
-        break;
-      return C1.srem(C2);
-    }
+    return C1.udiv(C2);
+  case TargetOpcode::G_SDIV:
+    if (!C2.getBoolValue())
+      break;
+    return C1.sdiv(C2);
+  case TargetOpcode::G_UREM:
+    if (!C2.getBoolValue())
+      break;
+    return C1.urem(C2);
+  case TargetOpcode::G_SREM:
+    if (!C2.getBoolValue())
+      break;
+    return C1.srem(C2);
   }
+
   return None;
 }
 
@@ -434,7 +477,19 @@ bool llvm::isKnownNeverNaN(Register Val, const MachineRegisterInfo &MRI,
   return false;
 }
 
-Optional<APInt> llvm::ConstantFoldExtOp(unsigned Opcode, const unsigned Op1,
+Align llvm::inferAlignFromPtrInfo(MachineFunction &MF,
+                                  const MachinePointerInfo &MPO) {
+  auto PSV = MPO.V.dyn_cast<const PseudoSourceValue *>();
+  if (auto FSPV = dyn_cast_or_null<FixedStackPseudoSourceValue>(PSV)) {
+    MachineFrameInfo &MFI = MF.getFrameInfo();
+    return commonAlignment(MFI.getObjectAlign(FSPV->getFrameIndex()),
+                           MPO.Offset);
+  }
+
+  return Align(1);
+}
+
+Optional<APInt> llvm::ConstantFoldExtOp(unsigned Opcode, const Register Op1,
                                         uint64_t Imm,
                                         const MachineRegisterInfo &MRI) {
   auto MaybeOp1Cst = getConstantVRegVal(Op1, MRI);
@@ -453,4 +508,56 @@ Optional<APInt> llvm::ConstantFoldExtOp(unsigned Opcode, const unsigned Op1,
 
 void llvm::getSelectionDAGFallbackAnalysisUsage(AnalysisUsage &AU) {
   AU.addPreserved<StackProtector>();
+}
+
+LLT llvm::getLCMType(LLT Ty0, LLT Ty1) {
+  if (!Ty0.isVector() && !Ty1.isVector()) {
+    unsigned Mul = Ty0.getSizeInBits() * Ty1.getSizeInBits();
+    int GCDSize = greatestCommonDivisor(Ty0.getSizeInBits(),
+                                        Ty1.getSizeInBits());
+    return LLT::scalar(Mul / GCDSize);
+  }
+
+  if (Ty0.isVector() && !Ty1.isVector()) {
+    assert(Ty0.getElementType() == Ty1 && "not yet handled");
+    return Ty0;
+  }
+
+  if (Ty1.isVector() && !Ty0.isVector()) {
+    assert(Ty1.getElementType() == Ty0 && "not yet handled");
+    return Ty1;
+  }
+
+  if (Ty0.isVector() && Ty1.isVector()) {
+    assert(Ty0.getElementType() == Ty1.getElementType() && "not yet handled");
+
+    int GCDElts = greatestCommonDivisor(Ty0.getNumElements(),
+                                        Ty1.getNumElements());
+
+    int Mul = Ty0.getNumElements() * Ty1.getNumElements();
+    return LLT::vector(Mul / GCDElts, Ty0.getElementType());
+  }
+
+  llvm_unreachable("not yet handled");
+}
+
+LLT llvm::getGCDType(LLT OrigTy, LLT TargetTy) {
+  if (OrigTy.isVector() && TargetTy.isVector()) {
+    assert(OrigTy.getElementType() == TargetTy.getElementType());
+    int GCD = greatestCommonDivisor(OrigTy.getNumElements(),
+                                    TargetTy.getNumElements());
+    return LLT::scalarOrVector(GCD, OrigTy.getElementType());
+  }
+
+  if (OrigTy.isVector() && !TargetTy.isVector()) {
+    assert(OrigTy.getElementType() == TargetTy);
+    return TargetTy;
+  }
+
+  assert(!OrigTy.isVector() && !TargetTy.isVector() &&
+         "GCD type of vector and scalar not implemented");
+
+  int GCD = greatestCommonDivisor(OrigTy.getSizeInBits(),
+                                  TargetTy.getSizeInBits());
+  return LLT::scalar(GCD);
 }

@@ -251,7 +251,7 @@ public:
   }
 
 
-  void EmitCommonSymbolSorted(MCSymbol *Symbol, uint64_t Size,
+  void emitCommonSymbolSorted(MCSymbol *Symbol, uint64_t Size,
                               unsigned ByteAlignment,
                               unsigned AccessSize) override {
     HexagonMCELFStreamer &HexagonELFStreamer =
@@ -260,7 +260,7 @@ public:
                                                  AccessSize);
   }
 
-  void EmitLocalCommonSymbolSorted(MCSymbol *Symbol, uint64_t Size,
+  void emitLocalCommonSymbolSorted(MCSymbol *Symbol, uint64_t Size,
                                    unsigned ByteAlignment,
                                    unsigned AccessSize) override {
     HexagonMCELFStreamer &HexagonELFStreamer =
@@ -290,9 +290,8 @@ static MCAsmInfo *createHexagonMCAsmInfo(const MCRegisterInfo &MRI,
   MCAsmInfo *MAI = new HexagonMCAsmInfo(TT);
 
   // VirtualFP = (R30 + #0).
-  MCCFIInstruction Inst =
-      MCCFIInstruction::createDefCfa(nullptr,
-          MRI.getDwarfRegNum(Hexagon::R30, true), 0);
+  MCCFIInstruction Inst = MCCFIInstruction::cfiDefCfa(
+      nullptr, MRI.getDwarfRegNum(Hexagon::R30, true), 0);
   MAI->addInitialFrameState(Inst);
 
   return MAI;
@@ -530,6 +529,10 @@ unsigned Hexagon_MC::GetELFFlags(const MCSubtargetInfo &STI) {
   auto F = ElfFlags.find(STI.getCPU());
   assert(F != ElfFlags.end() && "Unrecognized Architecture");
   return F->second;
+}
+
+llvm::ArrayRef<MCPhysReg> Hexagon_MC::GetVectRegRev() {
+  return makeArrayRef(VectRegRev);
 }
 
 namespace {

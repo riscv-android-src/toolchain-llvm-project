@@ -20,9 +20,11 @@ UseUsingCheck::UseUsingCheck(StringRef Name, ClangTidyContext *Context)
     : ClangTidyCheck(Name, Context),
       IgnoreMacros(Options.getLocalOrGlobal("IgnoreMacros", true)) {}
 
+void UseUsingCheck::storeOptions(ClangTidyOptions::OptionMap &Opts) {
+  Options.store(Opts, "IgnoreMacros", IgnoreMacros);
+}
+
 void UseUsingCheck::registerMatchers(MatchFinder *Finder) {
-  if (!getLangOpts().CPlusPlus11)
-    return;
   Finder->addMatcher(typedefDecl(unless(isInstantiated())).bind("typedef"),
                      this);
   // This matcher used to find tag declarations in source code within typedefs.
@@ -60,6 +62,7 @@ void UseUsingCheck::check(const MatchFinder::MatchResult &Result) {
   printPolicy.SuppressScope = true;
   printPolicy.ConstantArraySizeAsWritten = true;
   printPolicy.UseVoidForZeroParams = false;
+  printPolicy.PrintInjectedClassNameWithArguments = false;
 
   std::string Type = MatchedDecl->getUnderlyingType().getAsString(printPolicy);
   std::string Name = MatchedDecl->getNameAsString();
@@ -112,7 +115,6 @@ void UseUsingCheck::check(const MatchFinder::MatchResult &Result) {
   std::string Replacement = Using + Name + " = " + Type;
   Diag << FixItHint::CreateReplacement(ReplaceRange, Replacement);
 }
-
 } // namespace modernize
 } // namespace tidy
 } // namespace clang

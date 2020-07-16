@@ -335,5 +335,17 @@ size_t ConstString::StaticMemorySize() {
 void llvm::format_provider<ConstString>::format(const ConstString &CS,
                                                 llvm::raw_ostream &OS,
                                                 llvm::StringRef Options) {
-  format_provider<StringRef>::format(CS.AsCString(), OS, Options);
+  format_provider<StringRef>::format(CS.GetStringRef(), OS, Options);
+}
+
+void llvm::yaml::ScalarTraits<ConstString>::output(const ConstString &Val,
+                                                   void *, raw_ostream &Out) {
+  Out << Val.GetStringRef();
+}
+
+llvm::StringRef
+llvm::yaml::ScalarTraits<ConstString>::input(llvm::StringRef Scalar, void *,
+                                             ConstString &Val) {
+  Val = ConstString(Scalar);
+  return {};
 }

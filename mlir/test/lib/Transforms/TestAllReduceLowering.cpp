@@ -18,15 +18,19 @@ using namespace mlir;
 
 namespace {
 struct TestAllReduceLoweringPass
-    : public ModulePass<TestAllReduceLoweringPass> {
-  void runOnModule() override {
+    : public PassWrapper<TestAllReduceLoweringPass, OperationPass<ModuleOp>> {
+  void runOnOperation() override {
     OwningRewritePatternList patterns;
     populateGpuRewritePatterns(&getContext(), patterns);
-    applyPatternsGreedily(getModule(), patterns);
+    applyPatternsAndFoldGreedily(getOperation(), patterns);
   }
 };
 } // namespace
 
-static PassRegistration<TestAllReduceLoweringPass>
-    pass("test-all-reduce-lowering",
-         "Lowers gpu.all-reduce ops within the GPU dialect.");
+namespace mlir {
+void registerTestAllReduceLoweringPass() {
+  PassRegistration<TestAllReduceLoweringPass> pass(
+      "test-all-reduce-lowering",
+      "Lowers gpu.all-reduce ops within the GPU dialect.");
+}
+} // namespace mlir

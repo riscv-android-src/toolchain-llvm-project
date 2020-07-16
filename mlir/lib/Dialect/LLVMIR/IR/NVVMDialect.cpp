@@ -131,7 +131,7 @@ static LogicalResult verify(MmaOp op) {
                                              f32Ty, f32Ty, f32Ty, f32Ty, f32Ty,
                                              f32Ty, f32Ty, f32Ty} &&
       op.getType() == f32x8StructTy && alayout.getValue() == "row" &&
-      blayout.getValue() == "row") {
+      blayout.getValue() == "col") {
     return success();
   }
   return op.emitOpError("unimplemented mma.sync variant");
@@ -141,7 +141,7 @@ static LogicalResult verify(MmaOp op) {
 // NVVMDialect initialization, type parsing, and registration.
 //===----------------------------------------------------------------------===//
 
-// TODO(herhut): This should be the llvm.nvvm dialect once this is supported.
+// TODO: This should be the llvm.nvvm dialect once this is supported.
 NVVMDialect::NVVMDialect(MLIRContext *context) : Dialect("nvvm", context) {
   addOperations<
 #define GET_OP_LIST
@@ -159,4 +159,3 @@ namespace NVVM {
 } // namespace NVVM
 } // namespace mlir
 
-static DialectRegistration<NVVMDialect> nvvmDialect;

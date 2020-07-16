@@ -26,7 +26,8 @@ def Linalg_Dialect : Dialect {
 
     Additional [Linalg Dialect
     Documentation](https://mlir.llvm.org/docs/Dialects/Linalg) and a
-    [Rationale Document](https://mlir.llvm.org/docs/RationaleLinalgDialect) are
+    [Rationale
+    Document](https://mlir.llvm.org/docs/Rationale/RationaleLinalgDialect) are
     are also available and should be read first before going in the details of
     the op semantics.
   }];
@@ -34,6 +35,6 @@ def Linalg_Dialect : Dialect {
 
 // Whether a type is a RangeType.
 def LinalgIsRangeTypePred : CPred<"$_self.isa<RangeType>()">;
-def Range : Type<LinalgIsRangeTypePred, "range">;
+def Range : DialectType<Linalg_Dialect, LinalgIsRangeTypePred, "range">;
 
 #endif // LINALG_BASE

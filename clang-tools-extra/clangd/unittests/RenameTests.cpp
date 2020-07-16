@@ -13,6 +13,7 @@
 #include "TestTU.h"
 #include "index/Ref.h"
 #include "refactor/Rename.h"
+#include "support/TestTracer.h"
 #include "clang/Tooling/Core/Replacement.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/MemoryBuffer.h"
@@ -24,9 +25,11 @@ namespace clang {
 namespace clangd {
 namespace {
 
+using testing::ElementsAre;
 using testing::Eq;
-using testing::Pair;
 using testing::IsEmpty;
+using testing::Pair;
+using testing::SizeIs;
 using testing::UnorderedElementsAre;
 using testing::UnorderedElementsAreArray;
 
@@ -137,6 +140,17 @@ TEST(RenameTest, WithinFileRename) {
         };
       )cpp",
 
+      // Rename template class constructor.
+      R"cpp(
+        class [[F^oo]] {
+          template<typename T>
+          [[Fo^o]]();
+
+          template<typename T>
+          [[F^oo]](T t);
+        };
+      )cpp",
+
       // Class in template argument.
       R"cpp(
         class [[F^oo]] {};
@@ -189,6 +203,13 @@ TEST(RenameTest, WithinFileRename) {
           [[Foo]]<bool> y;
           [[Foo]]<int*> z;
         }
+      )cpp",
+
+      // Incomplete class specializations
+      R"cpp(
+        template <typename T>
+        class [[Fo^o]] {};
+        void func([[Foo]]<int>);
       )cpp",
 
       // Template class instantiations.
@@ -440,6 +461,35 @@ TEST(RenameTest, WithinFileRename) {
         template <template<typename> class Z> struct Bar { };
         template <> struct Bar<[[Foo]]> {};
       )cpp",
+
+      // Designated initializer.
+      R"cpp(
+        struct Bar {
+          int [[Fo^o]];
+        };
+        Bar bar { .[[^Foo]] = 42 };
+      )cpp",
+
+      // Nested designated initializer.
+      R"cpp(
+        struct Baz {
+          int Field;
+        };
+        struct Bar {
+          Baz [[Fo^o]];
+        };
+        // FIXME:    v selecting here results in renaming Field.
+        Bar bar { .[[Foo]].Field = 42 };
+      )cpp",
+      R"cpp(
+        struct Baz {
+          int [[Fiel^d]];
+        };
+        struct Bar {
+          Baz Foo;
+        };
+        Bar bar { .Foo.[[^Field]] = 42 };
+      )cpp",
   };
   for (llvm::StringRef T : Tests) {
     SCOPED_TRACE(T);
@@ -540,9 +590,17 @@ TEST(RenameTest, Renameable) {
          void fo^o() {})cpp",
        "used outside main file", !HeaderFile, nullptr /*no index*/},
 
-      {R"cpp(// disallow rename on blacklisted symbols (e.g. std symbols)
+      {R"cpp(// disallow rename on excluded symbols (e.g. std symbols)
          namespace std {
          class str^ing {};
+         }
+       )cpp",
+       "not a supported kind", !HeaderFile, Index},
+      {R"cpp(// disallow rename on excluded symbols (e.g. std symbols)
+         namespace std {
+         inline namespace __u {
+         class str^ing {};
+         }
          }
        )cpp",
        "not a supported kind", !HeaderFile, Index},
@@ -630,7 +688,7 @@ TEST(RenameTest, MainFileReferencesOnly) {
             expectedResult(Code, NewName));
 }
 
-TEST(RenameTest, ProtobufSymbolIsBlacklisted) {
+TEST(RenameTest, ProtobufSymbolIsExcluded) {
   Annotations Code("Prot^obuf buf;");
   auto TU = TestTU::withCode(Code.code());
   TU.HeaderCode =
@@ -674,8 +732,13 @@ TEST(CrossFileRenameTests, DirtyBuffer) {
   TestTU TU = TestTU::withCode(MainCode.code());
   auto AST = TU.build();
   llvm::StringRef NewName = "newName";
-  auto Results = rename({MainCode.point(), NewName, AST, MainFilePath,
-                         Index.get(), /*CrossFile=*/true, GetDirtyBuffer});
+  auto Results = rename({MainCode.point(),
+                         NewName,
+                         AST,
+                         MainFilePath,
+                         Index.get(),
+                         {/*CrossFile=*/true},
+                         GetDirtyBuffer});
   ASSERT_TRUE(bool(Results)) << Results.takeError();
   EXPECT_THAT(
       applyEdits(std::move(*Results)),
@@ -690,8 +753,13 @@ TEST(CrossFileRenameTests, DirtyBuffer) {
   // Set a file "bar.cc" on disk.
   TU.AdditionalFiles["bar.cc"] = std::string(BarCode.code());
   AST = TU.build();
-  Results = rename({MainCode.point(), NewName, AST, MainFilePath, Index.get(),
-                    /*CrossFile=*/true, GetDirtyBuffer});
+  Results = rename({MainCode.point(),
+                    NewName,
+                    AST,
+                    MainFilePath,
+                    Index.get(),
+                    {/*CrossFile=*/true},
+                    GetDirtyBuffer});
   ASSERT_TRUE(bool(Results)) << Results.takeError();
   EXPECT_THAT(
       applyEdits(std::move(*Results)),
@@ -721,8 +789,13 @@ TEST(CrossFileRenameTests, DirtyBuffer) {
                        Callback) const override {}
     size_t estimateMemoryUsage() const override { return 0; }
   } PIndex;
-  Results = rename({MainCode.point(), NewName, AST, MainFilePath, &PIndex,
-                    /*CrossFile=*/true, GetDirtyBuffer});
+  Results = rename({MainCode.point(),
+                    NewName,
+                    AST,
+                    MainFilePath,
+                    &PIndex,
+                    {/*CrossFile=*/true},
+                    GetDirtyBuffer});
   EXPECT_FALSE(Results);
   EXPECT_THAT(llvm::toString(Results.takeError()),
               testing::HasSubstr("too many occurrences"));
@@ -766,8 +839,12 @@ TEST(CrossFileRenameTests, DeduplicateRefsFromIndex) {
     Ref ReturnedRef;
   } DIndex(XRefInBarCC);
   llvm::StringRef NewName = "newName";
-  auto Results = rename({MainCode.point(), NewName, AST, MainFilePath, &DIndex,
-                         /*CrossFile=*/true});
+  auto Results = rename({MainCode.point(),
+                         NewName,
+                         AST,
+                         MainFilePath,
+                         &DIndex,
+                         {/*CrossFile=*/true}});
   ASSERT_TRUE(bool(Results)) << Results.takeError();
   EXPECT_THAT(
       applyEdits(std::move(*Results)),
@@ -800,6 +877,23 @@ TEST(CrossFileRenameTests, WithUpToDateIndex) {
 
         void func() {
           [[Foo]] foo;
+        }
+      )cpp",
+      },
+      {
+          // class templates.
+          R"cpp(
+        template <typename T>
+        class [[Foo]] {};
+        // FIXME: explicit template specializations are not supported due the
+        // clangd index limitations.
+        template <>
+        class Foo<double> {};
+      )cpp",
+          R"cpp(
+        #include "foo.h"
+        void func() {
+          [[F^oo]]<int> foo;
         }
       )cpp",
       },
@@ -925,19 +1019,19 @@ TEST(CrossFileRenameTests, WithUpToDateIndex) {
       },
   };
 
-  for (const auto& T : Cases) {
+  trace::TestTracer Tracer;
+  for (const auto &T : Cases) {
     SCOPED_TRACE(T.FooH);
     Annotations FooH(T.FooH);
     Annotations FooCC(T.FooCC);
     std::string FooHPath = testPath("foo.h");
     std::string FooCCPath = testPath("foo.cc");
 
-    MockFSProvider FS;
+    MockFS FS;
     FS.Files[FooHPath] = std::string(FooH.code());
     FS.Files[FooCCPath] = std::string(FooCC.code());
 
     auto ServerOpts = ClangdServer::optsForTest();
-    ServerOpts.CrossFileRename = true;
     ServerOpts.BuildDynamicSymbolIndex = true;
     ClangdServer Server(CDB, FS, ServerOpts);
 
@@ -948,8 +1042,10 @@ TEST(CrossFileRenameTests, WithUpToDateIndex) {
 
     llvm::StringRef NewName = "NewName";
     for (const auto &RenamePos : FooH.points()) {
-      auto FileEditsList =
-          llvm::cantFail(runRename(Server, FooHPath, RenamePos, NewName));
+      EXPECT_THAT(Tracer.takeMetric("rename_files"), SizeIs(0));
+      auto FileEditsList = llvm::cantFail(runRename(
+          Server, FooHPath, RenamePos, NewName, {/*CrossFile=*/true}));
+      EXPECT_THAT(Tracer.takeMetric("rename_files"), ElementsAre(2));
       EXPECT_THAT(
           applyEdits(std::move(FileEditsList)),
           UnorderedElementsAre(

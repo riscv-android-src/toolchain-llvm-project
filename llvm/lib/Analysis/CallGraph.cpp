@@ -10,7 +10,9 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Config/llvm-config.h"
+#include "llvm/IR/AbstractCallSite.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/PassManager.h"
@@ -30,10 +32,11 @@ using namespace llvm;
 
 CallGraph::CallGraph(Module &M)
     : M(M), ExternalCallingNode(getOrInsertFunction(nullptr)),
-      CallsExternalNode(std::make_unique<CallGraphNode>(nullptr)) {
-  // Add every function to the call graph.
+      CallsExternalNode(std::make_unique<CallGraphNode>(this, nullptr)) {
+  // Add every interesting function to the call graph.
   for (Function &F : M)
-    addToCallGraph(&F);
+    if (!isDbgInfoIntrinsic(F.getIntrinsicID()))
+      addToCallGraph(&F);
 }
 
 CallGraph::CallGraph(CallGraph &&Arg)
@@ -42,6 +45,11 @@ CallGraph::CallGraph(CallGraph &&Arg)
       CallsExternalNode(std::move(Arg.CallsExternalNode)) {
   Arg.FunctionMap.clear();
   Arg.ExternalCallingNode = nullptr;
+
+  // Update parent CG for all call graph's nodes.
+  CallsExternalNode->CG = this;
+  for (auto &P : FunctionMap)
+    P.second->CG = this;
 }
 
 CallGraph::~CallGraph() {
@@ -74,6 +82,12 @@ void CallGraph::addToCallGraph(Function *F) {
   if (!F->hasLocalLinkage() || F->hasAddressTaken())
     ExternalCallingNode->addCalledFunction(nullptr, Node);
 
+  populateCallGraphNode(Node);
+}
+
+void CallGraph::populateCallGraphNode(CallGraphNode *Node) {
+  Function *F = Node->getFunction();
+
   // If this function is not defined in this translation unit, it could call
   // anything.
   if (F->isDeclaration() && !F->isIntrinsic())
@@ -91,6 +105,11 @@ void CallGraph::addToCallGraph(Function *F) {
           Node->addCalledFunction(Call, CallsExternalNode.get());
         else if (!Callee->isIntrinsic())
           Node->addCalledFunction(Call, getOrInsertFunction(Callee));
+
+        // Add reference to callback functions.
+        forEachCallbackFunction(*Call, [=](Function *CB) {
+          Node->addCalledFunction(nullptr, getOrInsertFunction(CB));
+        });
       }
     }
 }
@@ -120,6 +139,16 @@ void CallGraph::print(raw_ostream &OS) const {
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
 LLVM_DUMP_METHOD void CallGraph::dump() const { print(dbgs()); }
 #endif
+
+void CallGraph::ReplaceExternalCallEdge(CallGraphNode *Old,
+                                        CallGraphNode *New) {
+  for (auto &CR : ExternalCallingNode->CalledFunctions)
+    if (CR.second == Old) {
+      CR.second->DropRef();
+      CR.second = New;
+      CR.second->AddRef();
+    }
+}
 
 // removeFunctionFromModule - Unlink the function from this module, returning
 // it.  Because this removes the function from the module, the call graph node
@@ -160,7 +189,7 @@ CallGraphNode *CallGraph::getOrInsertFunction(const Function *F) {
     return CGN.get();
 
   assert((!F || F->getParent() == &M) && "Function not in current module!");
-  CGN = std::make_unique<CallGraphNode>(const_cast<Function *>(F));
+  CGN = std::make_unique<CallGraphNode>(this, const_cast<Function *>(F));
   return CGN.get();
 }
 
@@ -196,10 +225,15 @@ LLVM_DUMP_METHOD void CallGraphNode::dump() const { print(dbgs()); }
 void CallGraphNode::removeCallEdgeFor(CallBase &Call) {
   for (CalledFunctionsVector::iterator I = CalledFunctions.begin(); ; ++I) {
     assert(I != CalledFunctions.end() && "Cannot find callsite to remove!");
-    if (I->first == &Call) {
+    if (I->first && *I->first == &Call) {
       I->second->DropRef();
       *I = CalledFunctions.back();
       CalledFunctions.pop_back();
+
+      // Remove all references to callback functions if there are any.
+      forEachCallbackFunction(Call, [=](Function *CB) {
+        removeOneAbstractEdgeTo(CG->getOrInsertFunction(CB));
+      });
       return;
     }
   }
@@ -224,7 +258,7 @@ void CallGraphNode::removeOneAbstractEdgeTo(CallGraphNode *Callee) {
   for (CalledFunctionsVector::iterator I = CalledFunctions.begin(); ; ++I) {
     assert(I != CalledFunctions.end() && "Cannot find callee to remove!");
     CallRecord &CR = *I;
-    if (CR.second == Callee && CR.first == nullptr) {
+    if (CR.second == Callee && !CR.first) {
       Callee->DropRef();
       *I = CalledFunctions.back();
       CalledFunctions.pop_back();
@@ -240,11 +274,19 @@ void CallGraphNode::replaceCallEdge(CallBase &Call, CallBase &NewCall,
                                     CallGraphNode *NewNode) {
   for (CalledFunctionsVector::iterator I = CalledFunctions.begin(); ; ++I) {
     assert(I != CalledFunctions.end() && "Cannot find callsite to remove!");
-    if (I->first == &Call) {
+    if (I->first && *I->first == &Call) {
       I->second->DropRef();
       I->first = &NewCall;
       I->second = NewNode;
       NewNode->AddRef();
+
+      // Refresh callback references.
+      forEachCallbackFunction(Call, [=](Function *CB) {
+        removeOneAbstractEdgeTo(CG->getOrInsertFunction(CB));
+      });
+      forEachCallbackFunction(NewCall, [=](Function *CB) {
+        addCalledFunction(nullptr, CG->getOrInsertFunction(CB));
+      });
       return;
     }
   }

@@ -30,8 +30,6 @@ struct WebAssemblyFunctionInfo;
 /// This class is derived from MachineFunctionInfo and contains private
 /// WebAssembly-specific information for each MachineFunction.
 class WebAssemblyFunctionInfo final : public MachineFunctionInfo {
-  MachineFunction &MF;
-
   std::vector<MVT> Params;
   std::vector<MVT> Results;
   std::vector<MVT> Locals;
@@ -66,7 +64,7 @@ class WebAssemblyFunctionInfo final : public MachineFunctionInfo {
   bool CFGStackified = false;
 
 public:
-  explicit WebAssemblyFunctionInfo(MachineFunction &MF) : MF(MF) {}
+  explicit WebAssemblyFunctionInfo(MachineFunction &MF) {}
   ~WebAssemblyFunctionInfo() override;
   void initializeBaseYamlFields(const yaml::WebAssemblyFunctionInfo &YamlMFI);
 
@@ -113,8 +111,8 @@ public:
 
   static const unsigned UnusedReg = -1u;
 
-  void stackifyVReg(unsigned VReg) {
-    assert(MF.getRegInfo().getUniqueVRegDef(VReg));
+  void stackifyVReg(MachineRegisterInfo &MRI, unsigned VReg) {
+    assert(MRI.getUniqueVRegDef(VReg));
     auto I = Register::virtReg2Index(VReg);
     if (I >= VRegStackified.size())
       VRegStackified.resize(I + 1);
@@ -132,7 +130,7 @@ public:
     return VRegStackified.test(I);
   }
 
-  void initWARegs();
+  void initWARegs(MachineRegisterInfo &MRI);
   void setWAReg(unsigned VReg, unsigned WAReg) {
     assert(WAReg != UnusedReg);
     auto I = Register::virtReg2Index(VReg);
@@ -159,9 +157,10 @@ void computeLegalValueVTs(const Function &F, const TargetMachine &TM, Type *Ty,
                           SmallVectorImpl<MVT> &ValueVTs);
 
 // Compute the signature for a given FunctionType (Ty). Note that it's not the
-// signature for F (F is just used to get varous context)
-void computeSignatureVTs(const FunctionType *Ty, const Function &F,
-                         const TargetMachine &TM, SmallVectorImpl<MVT> &Params,
+// signature for ContextFunc (ContextFunc is just used to get varous context)
+void computeSignatureVTs(const FunctionType *Ty, const Function *TargetFunc,
+                         const Function &ContextFunc, const TargetMachine &TM,
+                         SmallVectorImpl<MVT> &Params,
                          SmallVectorImpl<MVT> &Results);
 
 void valTypesFromMVTs(const ArrayRef<MVT> &In,

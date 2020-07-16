@@ -144,6 +144,20 @@ def simm12 : Operand<XLenVT>, ImmLeaf<XLenVT, [{return isInt<12>(Imm);}]> {
   let OperandNamespace = "RISCVOp";
 }
 
+// A 12-bit signed immediate plus one where the imm range will be -2047~2048.
+def simm12_plus1 : Operand<XLenVT>, ImmLeaf<XLenVT,
+  [{return (isInt<12>(Imm) && Imm != -2048) || Imm == 2048;}]> {
+  let ParserMatchClass = SImmAsmOperand<12>;
+  let EncoderMethod = "getImmOpValue";
+  let DecoderMethod = "decodeSImmOperand<12>";
+  let MCOperandPredicate = [{
+    int64_t Imm;
+    if (MCOp.evaluateAsConstantImm(Imm))
+      return (isInt<12>(Imm) && Imm != -2048) || Imm == 2048;
+    return MCOp.isBareSymbolRef();
+  }];
+}
+
 // A 13-bit signed immediate where the least significant bit is zero.
 def simm13_lsb0 : Operand<OtherVT> {
   let ParserMatchClass = SImmAsmOperand<13, "Lsb0">;
@@ -296,6 +310,12 @@ def HI20 : SDNodeXForm<imm, [{
                                    SDLoc(N), N->getValueType(0));
 }]>;
 
+// Return the negation of an immediate value.
+def NegImm : SDNodeXForm<imm, [{
+  return CurDAG->getTargetConstant(-N->getSExtValue(), SDLoc(N),
+                                   N->getValueType(0));
+}]>;
+
 //===----------------------------------------------------------------------===//
 // Instruction Formats
 //===----------------------------------------------------------------------===//
@@ -311,7 +331,7 @@ class BranchCC_rri<bits<3> funct3, string opcodestr>
     : RVInstB<funct3, OPC_BRANCH, (outs),
               (ins GPR:$rs1, GPR:$rs2, simm13_lsb0:$imm12),
               opcodestr, "$rs1, $rs2, $imm12">,
-      Sched<[WriteJmp]> {
+      Sched<[WriteJmp, ReadJmp, ReadJmp]> {
   let isBranch = 1;
   let isTerminator = 1;
 }
@@ -569,6 +589,18 @@ def SFENCE_VMA : RVInstR<0b0001001, 0b000, OPC_SYSTEM, (outs),
 }
 
 //===----------------------------------------------------------------------===//
+// Debug instructions
+//===----------------------------------------------------------------------===//
+
+let isBarrier = 1, isReturn = 1, isTerminator = 1 in {
+def DRET : Priv<"dret", 0b0111101>, Sched<[]> {
+  let rd = 0;
+  let rs1 = 0;
+  let rs2 = 0b10010;
+}
+} // isBarrier = 1, isReturn = 1, isTerminator = 1
+
+//===----------------------------------------------------------------------===//
 // Assembler Pseudo Instructions (User-Level ISA, Version 2.2, Chapter 20)
 //===----------------------------------------------------------------------===//
 
@@ -764,7 +796,7 @@ def : MnemonicAlias<"sbreak", "ebreak">;
 //
 // Naming convention: For 'generic' pattern classes, we use the naming
 // convention PatTy1Ty2. For pattern classes which offer a more complex
-// expension, prefix the class name, e.g. BccPat.
+// expansion, prefix the class name, e.g. BccPat.
 //===----------------------------------------------------------------------===//
 
 /// Generic pattern classes
@@ -857,12 +889,12 @@ def : PatGprSimm12<setult, SLTIU>;
 // handled by a RISC-V instruction.
 def : Pat<(seteq GPR:$rs1, 0), (SLTIU GPR:$rs1, 1)>;
 def : Pat<(seteq GPR:$rs1, GPR:$rs2), (SLTIU (XOR GPR:$rs1, GPR:$rs2), 1)>;
-def : Pat<(seteq GPR:$rs1, simm12:$imm12),
-          (SLTIU (XORI GPR:$rs1, simm12:$imm12), 1)>;
+def : Pat<(seteq GPR:$rs1, simm12_plus1:$imm12),
+          (SLTIU (ADDI GPR:$rs1, (NegImm simm12_plus1:$imm12)), 1)>;
 def : Pat<(setne GPR:$rs1, 0), (SLTU X0, GPR:$rs1)>;
 def : Pat<(setne GPR:$rs1, GPR:$rs2), (SLTU X0, (XOR GPR:$rs1, GPR:$rs2))>;
-def : Pat<(setne GPR:$rs1, simm12:$imm12),
-          (SLTU X0, (XORI GPR:$rs1, simm12:$imm12))>;
+def : Pat<(setne GPR:$rs1, simm12_plus1:$imm12),
+          (SLTU X0, (ADDI GPR:$rs1, (NegImm simm12_plus1:$imm12)))>;
 def : Pat<(setugt GPR:$rs1, GPR:$rs2), (SLTU GPR:$rs2, GPR:$rs1)>;
 def : Pat<(setuge GPR:$rs1, GPR:$rs2), (XORI (SLTU GPR:$rs1, GPR:$rs2), 1)>;
 def : Pat<(setule GPR:$rs1, GPR:$rs2), (XORI (SLTU GPR:$rs2, GPR:$rs1), 1)>;
@@ -1144,3 +1176,5 @@ include "RISCVInstrInfoA.td"
 include "RISCVInstrInfoF.td"
 include "RISCVInstrInfoD.td"
 include "RISCVInstrInfoC.td"
+include "RISCVInstrInfoB.td"
+include "RISCVInstrInfoV.td"

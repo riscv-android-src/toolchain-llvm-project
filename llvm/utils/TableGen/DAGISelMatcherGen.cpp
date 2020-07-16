@@ -707,14 +707,36 @@ void MatcherGen::EmitResultLeafAsOperand(const TreePatternNode *N,
     if (Def->isSubClassOf("RegisterOperand"))
       Def = Def->getValueAsDef("RegClass");
     if (Def->isSubClassOf("RegisterClass")) {
-      std::string Value = getQualifiedName(Def) + "RegClassID";
-      AddMatcher(new EmitStringIntegerMatcher(Value, MVT::i32));
-      ResultOps.push_back(NextRecordedOperandNo++);
+      // If the register class has an enum integer value greater than 127, the
+      // encoding overflows the limit of 7 bits, which precludes the use of
+      // StringIntegerMatcher. In this case, fallback to using IntegerMatcher.
+      const CodeGenRegisterClass &RC =
+          CGP.getTargetInfo().getRegisterClass(Def);
+      if (RC.EnumValue <= 127) {
+        std::string Value = getQualifiedName(Def) + "RegClassID";
+        AddMatcher(new EmitStringIntegerMatcher(Value, MVT::i32));
+        ResultOps.push_back(NextRecordedOperandNo++);
+      } else {
+        AddMatcher(new EmitIntegerMatcher(RC.EnumValue, MVT::i32));
+        ResultOps.push_back(NextRecordedOperandNo++);
+      }
       return;
     }
 
     // Handle a subregister index. This is used for INSERT_SUBREG etc.
     if (Def->isSubClassOf("SubRegIndex")) {
+      const CodeGenRegBank &RB = CGP.getTargetInfo().getRegBank();
+      // If we have more than 127 subreg indices the encoding can overflow
+      // 7 bit and we cannot use StringInteger.
+      if (RB.getSubRegIndices().size() > 127) {
+        const CodeGenSubRegIndex *I = RB.findSubRegIdx(Def);
+        assert(I && "Cannot find subreg index by name!");
+        if (I->EnumValue > 127) {
+          AddMatcher(new EmitIntegerMatcher(I->EnumValue, MVT::i32));
+          ResultOps.push_back(NextRecordedOperandNo++);
+          return;
+        }
+      }
       std::string Value = getQualifiedName(Def);
       AddMatcher(new EmitStringIntegerMatcher(Value, MVT::i32));
       ResultOps.push_back(NextRecordedOperandNo++);

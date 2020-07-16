@@ -157,7 +157,7 @@ void BareMetal::AddCXXStdlibLibArgs(const ArgList &Args,
 void BareMetal::AddLinkRuntimeLib(const ArgList &Args,
                                   ArgStringList &CmdArgs) const {
   CmdArgs.push_back(Args.MakeArgString("-lclang_rt.builtins-" +
-                                       getTriple().getArchName() + ".a"));
+                                       getTriple().getArchName()));
 }
 
 void baremetal::Linker::ConstructJob(Compilation &C, const JobAction &JA,
@@ -191,7 +191,7 @@ void baremetal::Linker::ConstructJob(Compilation &C, const JobAction &JA,
   CmdArgs.push_back("-o");
   CmdArgs.push_back(Output.getFilename());
 
-  C.addCommand(std::make_unique<Command>(JA, *this,
-                                          Args.MakeArgString(TC.GetLinkerPath()),
-                                          CmdArgs, Inputs));
+  C.addCommand(std::make_unique<Command>(JA, *this, ResponseFileSupport::None(),
+                                         Args.MakeArgString(TC.GetLinkerPath()),
+                                         CmdArgs, Inputs));
 }

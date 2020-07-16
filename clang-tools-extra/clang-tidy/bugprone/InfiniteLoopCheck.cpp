@@ -10,8 +10,10 @@
 #include "clang/AST/ASTContext.h"
 #include "clang/ASTMatchers/ASTMatchFinder.h"
 #include "clang/Analysis/Analyses/ExprMutationAnalyzer.h"
+#include "../utils/Aliasing.h"
 
 using namespace clang::ast_matchers;
+using clang::tidy::utils::hasPtrOrReferenceInFunc;
 
 namespace clang {
 namespace tidy {
@@ -22,54 +24,6 @@ loopEndingStmt(internal::Matcher<Stmt> Internal) {
   return stmt(anyOf(breakStmt(Internal), returnStmt(Internal),
                     gotoStmt(Internal), cxxThrowExpr(Internal),
                     callExpr(Internal, callee(functionDecl(isNoReturn())))));
-}
-
-/// Return whether `S` is a reference to the declaration of `Var`.
-static bool isAccessForVar(const Stmt *S, const VarDecl *Var) {
-  if (const auto *DRE = dyn_cast<DeclRefExpr>(S))
-    return DRE->getDecl() == Var;
-
-  return false;
-}
-
-/// Return whether `Var` has a pointer or reference in `S`.
-static bool isPtrOrReferenceForVar(const Stmt *S, const VarDecl *Var) {
-  if (const auto *DS = dyn_cast<DeclStmt>(S)) {
-    for (const Decl *D : DS->getDeclGroup()) {
-      if (const auto *LeftVar = dyn_cast<VarDecl>(D)) {
-        if (LeftVar->hasInit() && LeftVar->getType()->isReferenceType()) {
-          return isAccessForVar(LeftVar->getInit(), Var);
-        }
-      }
-    }
-  } else if (const auto *UnOp = dyn_cast<UnaryOperator>(S)) {
-    if (UnOp->getOpcode() == UO_AddrOf)
-      return isAccessForVar(UnOp->getSubExpr(), Var);
-  }
-
-  return false;
-}
-
-/// Return whether `Var` has a pointer or reference in `S`.
-static bool hasPtrOrReferenceInStmt(const Stmt *S, const VarDecl *Var) {
-  if (isPtrOrReferenceForVar(S, Var))
-    return true;
-
-  for (const Stmt *Child : S->children()) {
-    if (!Child)
-      continue;
-
-    if (hasPtrOrReferenceInStmt(Child, Var))
-      return true;
-  }
-
-  return false;
-}
-
-/// Return whether `Var` has a pointer or reference in `Func`.
-static bool hasPtrOrReferenceInFunc(const FunctionDecl *Func,
-                                    const VarDecl *Var) {
-  return hasPtrOrReferenceInStmt(Func->getBody(), Var);
 }
 
 /// Return whether `Var` was changed in `LoopStmt`.
@@ -152,6 +106,15 @@ static std::string getCondVarNames(const Stmt *Cond) {
   return Result;
 }
 
+static bool isKnownFalse(const Expr &Cond, const ASTContext &Ctx) {
+  if (Cond.isValueDependent())
+    return false;
+  bool Result = false;
+  if (Cond.EvaluateAsBooleanCondition(Result, Ctx))
+    return !Result;
+  return false;
+}
+
 void InfiniteLoopCheck::registerMatchers(MatchFinder *Finder) {
   const auto LoopCondition = allOf(
       hasCondition(
@@ -169,6 +132,9 @@ void InfiniteLoopCheck::check(const MatchFinder::MatchResult &Result) {
   const auto *Cond = Result.Nodes.getNodeAs<Expr>("condition");
   const auto *LoopStmt = Result.Nodes.getNodeAs<Stmt>("loop-stmt");
   const auto *Func = Result.Nodes.getNodeAs<FunctionDecl>("func");
+
+  if (isKnownFalse(*Cond, *Result.Context))
+    return;
 
   bool ShouldHaveConditionVariables = true;
   if (const auto *While = dyn_cast<WhileStmt>(LoopStmt)) {

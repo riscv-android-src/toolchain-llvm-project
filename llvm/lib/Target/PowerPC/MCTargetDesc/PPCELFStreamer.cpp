@@ -44,17 +44,8 @@ PPCELFStreamer::PPCELFStreamer(MCContext &Context,
                     std::move(Emitter)), LastLabel(NULL) {
 }
 
-void PPCELFStreamer::EmitInstruction(const MCInst &Inst,
-                                     const MCSubtargetInfo &STI) {
-  PPCMCCodeEmitter *Emitter =
-      static_cast<PPCMCCodeEmitter*>(getAssembler().getEmitterPtr());
-
-  // Special handling is only for prefixed instructions.
-  if (!Emitter->isPrefixedInstruction(Inst)) {
-    MCELFStreamer::EmitInstruction(Inst, STI);
-    return;
-  }
-
+void PPCELFStreamer::emitPrefixedInstruction(const MCInst &Inst,
+                                             const MCSubtargetInfo &STI) {
   // Prefixed instructions must not cross a 64-byte boundary (i.e. prefix is
   // before the boundary and the remaining 4-bytes are after the boundary). In
   // order to achieve this, a nop is added prior to any such boundary-crossing
@@ -65,13 +56,13 @@ void PPCELFStreamer::EmitInstruction(const MCInst &Inst,
   // all of the nops required as part of the alignment operation. In the cases
   // when no nops are added then The fragment is still created but it remains
   // empty.
-  EmitCodeAlignment(64, 4);
+  emitCodeAlignment(64, 4);
 
   // Emit the instruction.
   // Since the previous emit created a new fragment then adding this instruction
   // also forces the addition of a new fragment. Inst is now the first
   // instruction in that new fragment.
-  MCELFStreamer::EmitInstruction(Inst, STI);
+  MCELFStreamer::emitInstruction(Inst, STI);
 
   // The above instruction is forced to start a new fragment because it
   // comes after a code alignment fragment. Get that new fragment.
@@ -93,10 +84,23 @@ void PPCELFStreamer::EmitInstruction(const MCInst &Inst,
   }
 }
 
-void PPCELFStreamer::EmitLabel(MCSymbol *Symbol, SMLoc Loc) {
+void PPCELFStreamer::emitInstruction(const MCInst &Inst,
+                                     const MCSubtargetInfo &STI) {
+  PPCMCCodeEmitter *Emitter =
+      static_cast<PPCMCCodeEmitter*>(getAssembler().getEmitterPtr());
+
+  // Special handling is only for prefixed instructions.
+  if (!Emitter->isPrefixedInstruction(Inst)) {
+    MCELFStreamer::emitInstruction(Inst, STI);
+    return;
+  }
+  emitPrefixedInstruction(Inst, STI);
+}
+
+void PPCELFStreamer::emitLabel(MCSymbol *Symbol, SMLoc Loc) {
   LastLabel = Symbol;
   LastLabelLoc = Loc;
-  MCELFStreamer::EmitLabel(Symbol);
+  MCELFStreamer::emitLabel(Symbol);
 }
 
 MCELFStreamer *llvm::createPPCELFStreamer(

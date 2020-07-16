@@ -25,7 +25,6 @@ class VESubtarget;
 
 class VEInstrInfo : public VEGenInstrInfo {
   const VERegisterInfo RI;
-  const VESubtarget &Subtarget;
   virtual void anchor();
 
 public:
@@ -76,10 +75,13 @@ public:
                             const TargetRegisterInfo *TRI) const override;
   /// } Stack Spill & Reload
 
+  Register getGlobalBaseReg(MachineFunction *MF) const;
+
   // Lower pseudo instructions after register allocation.
   bool expandPostRAPseudo(MachineInstr &MI) const override;
 
   bool expandExtendStackPseudo(MachineInstr &MI) const;
+  bool expandGetStackTopPseudo(MachineInstr &MI) const;
 };
 
 } // namespace llvm

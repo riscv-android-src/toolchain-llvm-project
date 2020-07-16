@@ -184,7 +184,7 @@ bool ELFAsmParser::ParseDirectiveSymbolAttribute(StringRef Directive, SMLoc) {
 
       MCSymbol *Sym = getContext().getOrCreateSymbol(Name);
 
-      getStreamer().EmitSymbolAttribute(Sym, Attr);
+      getStreamer().emitSymbolAttribute(Sym, Attr);
 
       if (getLexer().is(AsmToken::EndOfStatement))
         break;
@@ -634,20 +634,33 @@ EndStmt:
       }
   }
 
-  MCSection *ELFSection = getContext().getELFSection(
+  MCSectionELF *Section = getContext().getELFSection(
       SectionName, Type, Flags, Size, GroupName, UniqueID, LinkedToSym);
-  getStreamer().SwitchSection(ELFSection, Subsection);
+  getStreamer().SwitchSection(Section, Subsection);
+  // x86-64 psABI names SHT_X86_64_UNWIND as the canonical type for .eh_frame,
+  // but GNU as emits SHT_PROGBITS .eh_frame for .cfi_* directives. Don't error
+  // for SHT_PROGBITS .eh_frame
+  if (Section->getType() != Type &&
+      !(SectionName == ".eh_frame" && Type == ELF::SHT_PROGBITS))
+    Error(loc, "changed section type for " + SectionName + ", expected: 0x" +
+                   utohexstr(Section->getType()));
+  if (Section->getFlags() != Flags)
+    Error(loc, "changed section flags for " + SectionName + ", expected: 0x" +
+                   utohexstr(Section->getFlags()));
+  if (Section->getEntrySize() != Size)
+    Error(loc, "changed section entsize for " + SectionName +
+                   ", expected: " + Twine(Section->getEntrySize()));
 
   if (getContext().getGenDwarfForAssembly()) {
-    bool InsertResult = getContext().addGenDwarfSection(ELFSection);
+    bool InsertResult = getContext().addGenDwarfSection(Section);
     if (InsertResult) {
       if (getContext().getDwarfVersion() <= 2)
         Warning(loc, "DWARF2 only supports one section per compilation unit");
 
-      if (!ELFSection->getBeginSymbol()) {
+      if (!Section->getBeginSymbol()) {
         MCSymbol *SectionStartSymbol = getContext().createTempSymbol();
-        getStreamer().EmitLabel(SectionStartSymbol);
-        ELFSection->setBeginSymbol(SectionStartSymbol);
+        getStreamer().emitLabel(SectionStartSymbol);
+        Section->setBeginSymbol(SectionStartSymbol);
       }
     }
   }
@@ -729,7 +742,7 @@ bool ELFAsmParser::ParseDirectiveType(StringRef, SMLoc) {
     return TokError("unexpected token in '.type' directive");
   Lex();
 
-  getStreamer().EmitSymbolAttribute(Sym, Attr);
+  getStreamer().emitSymbolAttribute(Sym, Attr);
 
   return false;
 }
@@ -748,7 +761,7 @@ bool ELFAsmParser::ParseDirectiveIdent(StringRef, SMLoc) {
     return TokError("unexpected token in '.ident' directive");
   Lex();
 
-  getStreamer().EmitIdent(Data);
+  getStreamer().emitIdent(Data);
   return false;
 }
 
@@ -797,12 +810,12 @@ bool ELFAsmParser::ParseDirectiveVersion(StringRef, SMLoc) {
 
   getStreamer().PushSection();
   getStreamer().SwitchSection(Note);
-  getStreamer().EmitIntValue(Data.size()+1, 4); // namesz.
-  getStreamer().EmitIntValue(0, 4);             // descsz = 0 (no description).
-  getStreamer().EmitIntValue(1, 4);             // type = NT_VERSION.
-  getStreamer().EmitBytes(Data);                // name.
-  getStreamer().EmitIntValue(0, 1);             // terminate the string.
-  getStreamer().EmitValueToAlignment(4);        // ensure 4 byte alignment.
+  getStreamer().emitInt32(Data.size() + 1); // namesz
+  getStreamer().emitInt32(0);               // descsz = 0 (no description).
+  getStreamer().emitInt32(1);               // type = NT_VERSION
+  getStreamer().emitBytes(Data);            // name
+  getStreamer().emitInt8(0);                // NUL
+  getStreamer().emitValueToAlignment(4);
   getStreamer().PopSection();
   return false;
 }
@@ -829,7 +842,7 @@ bool ELFAsmParser::ParseDirectiveWeakref(StringRef, SMLoc) {
 
   MCSymbol *Sym = getContext().getOrCreateSymbol(Name);
 
-  getStreamer().EmitWeakReference(Alias, Sym);
+  getStreamer().emitWeakReference(Alias, Sym);
   return false;
 }
 
@@ -849,45 +862,8 @@ bool ELFAsmParser::ParseDirectiveSubsection(StringRef, SMLoc) {
   return false;
 }
 
-/// ParseDirectiveCGProfile
-///  ::= .cg_profile identifier, identifier, <number>
-bool ELFAsmParser::ParseDirectiveCGProfile(StringRef, SMLoc) {
-  StringRef From;
-  SMLoc FromLoc = getLexer().getLoc();
-  if (getParser().parseIdentifier(From))
-    return TokError("expected identifier in directive");
-
-  if (getLexer().isNot(AsmToken::Comma))
-    return TokError("expected a comma");
-  Lex();
-
-  StringRef To;
-  SMLoc ToLoc = getLexer().getLoc();
-  if (getParser().parseIdentifier(To))
-    return TokError("expected identifier in directive");
-
-  if (getLexer().isNot(AsmToken::Comma))
-    return TokError("expected a comma");
-  Lex();
-
-  int64_t Count;
-  if (getParser().parseIntToken(
-          Count, "expected integer count in '.cg_profile' directive"))
-    return true;
-
-  if (getLexer().isNot(AsmToken::EndOfStatement))
-    return TokError("unexpected token in directive");
-
-  MCSymbol *FromSym = getContext().getOrCreateSymbol(From);
-  MCSymbol *ToSym = getContext().getOrCreateSymbol(To);
-
-  getStreamer().emitCGProfileEntry(
-      MCSymbolRefExpr::create(FromSym, MCSymbolRefExpr::VK_None, getContext(),
-                              FromLoc),
-      MCSymbolRefExpr::create(ToSym, MCSymbolRefExpr::VK_None, getContext(),
-                              ToLoc),
-      Count);
-  return false;
+bool ELFAsmParser::ParseDirectiveCGProfile(StringRef S, SMLoc Loc) {
+  return MCAsmParserExtension::ParseDirectiveCGProfile(S, Loc);
 }
 
 namespace llvm {

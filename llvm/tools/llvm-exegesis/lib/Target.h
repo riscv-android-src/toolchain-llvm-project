@@ -20,6 +20,7 @@
 #include "BenchmarkRunner.h"
 #include "Error.h"
 #include "LlvmState.h"
+#include "PerfHelper.h"
 #include "SnippetGenerator.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/CodeGen/TargetPassConfig.h"
@@ -27,6 +28,7 @@
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCRegisterInfo.h"
+#include "llvm/Support/Error.h"
 
 namespace llvm {
 namespace exegesis {
@@ -64,6 +66,10 @@ class ExegesisTarget {
 public:
   explicit ExegesisTarget(ArrayRef<CpuAndPfmCounters> CpuPfmCounters)
       : CpuPfmCounters(CpuPfmCounters) {}
+
+  // Targets can use this to create target-specific perf counters.
+  virtual Expected<std::unique_ptr<pfm::Counter>>
+  createCounter(StringRef CounterName, const LLVMState &State) const;
 
   // Targets can use this to add target-specific passes in assembleToStream();
   virtual void addTargetSpecificPasses(PassManagerBase &PM) const {}
@@ -126,15 +132,26 @@ public:
     return true;
   }
 
+  // For some instructions, it is interesting to measure how it's performance
+  // characteristics differ depending on it's operands.
+  // This allows us to produce all the interesting variants.
+  virtual std::vector<InstructionTemplate>
+  generateInstructionVariants(const Instruction &Instr,
+                              unsigned MaxConfigsPerOpcode) const {
+    // By default, we're happy with whatever randomizer will give us.
+    return {&Instr};
+  }
+
   // Creates a snippet generator for the given mode.
   std::unique_ptr<SnippetGenerator>
   createSnippetGenerator(InstructionBenchmark::ModeE Mode,
                          const LLVMState &State,
                          const SnippetGenerator::Options &Opts) const;
   // Creates a benchmark runner for the given mode.
-  Expected<std::unique_ptr<BenchmarkRunner>>
-  createBenchmarkRunner(InstructionBenchmark::ModeE Mode,
-                        const LLVMState &State) const;
+  Expected<std::unique_ptr<BenchmarkRunner>> createBenchmarkRunner(
+      InstructionBenchmark::ModeE Mode, const LLVMState &State,
+      InstructionBenchmark::ResultAggregationModeE ResultAggMode =
+          InstructionBenchmark::Min) const;
 
   // Returns the ExegesisTarget for the given triple or nullptr if the target
   // does not exist.
@@ -160,9 +177,11 @@ private:
   std::unique_ptr<SnippetGenerator> virtual createParallelSnippetGenerator(
       const LLVMState &State, const SnippetGenerator::Options &Opts) const;
   std::unique_ptr<BenchmarkRunner> virtual createLatencyBenchmarkRunner(
-      const LLVMState &State, InstructionBenchmark::ModeE Mode) const;
+      const LLVMState &State, InstructionBenchmark::ModeE Mode,
+      InstructionBenchmark::ResultAggregationModeE ResultAggMode) const;
   std::unique_ptr<BenchmarkRunner> virtual createUopsBenchmarkRunner(
-      const LLVMState &State) const;
+      const LLVMState &State,
+      InstructionBenchmark::ResultAggregationModeE ResultAggMode) const;
 
   const ExegesisTarget *Next = nullptr;
   const ArrayRef<CpuAndPfmCounters> CpuPfmCounters;

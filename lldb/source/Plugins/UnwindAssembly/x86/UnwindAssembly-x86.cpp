@@ -30,6 +30,8 @@
 using namespace lldb;
 using namespace lldb_private;
 
+LLDB_PLUGIN_DEFINE_ADV(UnwindAssembly_x86, UnwindAssemblyX86)
+
 //  UnwindAssemblyParser_x86 method definitions
 
 UnwindAssembly_x86::UnwindAssembly_x86(const ArchSpec &arch)
@@ -139,7 +141,7 @@ bool UnwindAssembly_x86::AugmentUnwindPlanFromCallSite(
           // and we don't need to modify it at all.
 
           if (first_row_pc_loc.GetOffset() == -wordsize) {
-            do_augment_unwindplan = false;
+            return true;
           }
         }
       }

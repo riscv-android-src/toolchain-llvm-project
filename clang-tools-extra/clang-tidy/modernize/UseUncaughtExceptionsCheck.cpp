@@ -9,6 +9,7 @@
 #include "UseUncaughtExceptionsCheck.h"
 #include "clang/AST/ASTContext.h"
 #include "clang/ASTMatchers/ASTMatchFinder.h"
+#include "clang/Lex/Lexer.h"
 
 using namespace clang::ast_matchers;
 
@@ -17,9 +18,6 @@ namespace tidy {
 namespace modernize {
 
 void UseUncaughtExceptionsCheck::registerMatchers(MatchFinder *Finder) {
-  if (!getLangOpts().CPlusPlus17)
-    return;
-
   std::string MatchText = "::std::uncaught_exception";
 
   // Using declaration: warning and fix-it.

@@ -6,14 +6,14 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef liblldb_ABIMacOSX_i386_h_
-#define liblldb_ABIMacOSX_i386_h_
+#ifndef LLDB_SOURCE_PLUGINS_ABI_X86_ABIMACOSX_I386_H
+#define LLDB_SOURCE_PLUGINS_ABI_X86_ABIMACOSX_I386_H
 
+#include "Plugins/ABI/X86/ABIX86.h"
 #include "lldb/Core/Value.h"
-#include "lldb/Target/ABI.h"
 #include "lldb/lldb-private.h"
 
-class ABIMacOSX_i386 : public lldb_private::ABI {
+class ABIMacOSX_i386 : public ABIX86 {
 public:
   ~ABIMacOSX_i386() override = default;
 
@@ -45,7 +45,7 @@ public:
   //
   // To work around this, we relax that alignment to be just word-size
   // (4-bytes).
-  // Whitelisting the trap handlers for user space would be easy (_sigtramp) but
+  // Allowing the trap handlers for user space would be easy (_sigtramp) but
   // in other environments there can be a large number of different functions
   // involved in async traps.
   //
@@ -64,9 +64,6 @@ public:
     // Just make sure the address is a valid 32 bit address.
     return pc <= UINT32_MAX;
   }
-
-  const lldb_private::RegisterInfo *
-  GetRegisterInfoArray(uint32_t &count) override;
 
   // Static Functions
 
@@ -91,12 +88,13 @@ protected:
 
   bool RegisterIsCalleeSaved(const lldb_private::RegisterInfo *reg_info);
 
-private:
-  ABIMacOSX_i386(lldb::ProcessSP process_sp,
-                 std::unique_ptr<llvm::MCRegisterInfo> info_up)
-      : lldb_private::ABI(std::move(process_sp), std::move(info_up)) {
-    // Call CreateInstance instead.
+  std::string GetMCName(std::string name) override {
+    MapRegisterName(name, "stmm", "st");
+    return name;
   }
+
+private:
+  using ABIX86::ABIX86; // Call CreateInstance instead.
 };
 
-#endif // liblldb_ABIMacOSX_i386_h_
+#endif // LLDB_SOURCE_PLUGINS_ABI_X86_ABIMACOSX_I386_H

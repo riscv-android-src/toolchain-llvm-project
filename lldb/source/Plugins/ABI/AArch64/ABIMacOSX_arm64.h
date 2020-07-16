@@ -6,14 +6,14 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef liblldb_ABIMacOSX_arm64_h_
-#define liblldb_ABIMacOSX_arm64_h_
+#ifndef LLDB_SOURCE_PLUGINS_ABI_AARCH64_ABIMACOSX_ARM64_H
+#define LLDB_SOURCE_PLUGINS_ABI_AARCH64_ABIMACOSX_ARM64_H
 
-#include "lldb/Target/ABI.h"
+#include "Plugins/ABI/AArch64/ABIAArch64.h"
 #include "lldb/Utility/ConstString.h"
 #include "lldb/lldb-private.h"
 
-class ABIMacOSX_arm64 : public lldb_private::ABI {
+class ABIMacOSX_arm64 : public ABIAArch64 {
 public:
   ~ABIMacOSX_arm64() override = default;
 
@@ -42,7 +42,7 @@ public:
   //
   // To work around this, we relax that alignment to be just word-size
   // (8-bytes).
-  // Whitelisting the trap handlers for user space would be easy (_sigtramp) but
+  // Allowing the trap handlers for user space would be easy (_sigtramp) but
   // in other environments there can be a large number of different functions
   // involved in async traps.
   bool CallFrameAddressIsValid(lldb::addr_t cfa) override {
@@ -61,9 +61,6 @@ public:
     // Anything else if fair game..
     return true;
   }
-
-  const lldb_private::RegisterInfo *
-  GetRegisterInfoArray(uint32_t &count) override;
 
   // Static Functions
 
@@ -93,11 +90,7 @@ protected:
                            lldb_private::CompilerType &ast_type) const override;
 
 private:
-  ABIMacOSX_arm64(lldb::ProcessSP process_sp,
-                  std::unique_ptr<llvm::MCRegisterInfo> info_up)
-      : lldb_private::ABI(std::move(process_sp), std::move(info_up)) {
-    // Call CreateInstance instead.
-  }
+  using ABIAArch64::ABIAArch64; // Call CreateInstance instead.
 };
 
-#endif // liblldb_ABIMacOSX_arm64_h_
+#endif // LLDB_SOURCE_PLUGINS_ABI_AARCH64_ABIMACOSX_ARM64_H

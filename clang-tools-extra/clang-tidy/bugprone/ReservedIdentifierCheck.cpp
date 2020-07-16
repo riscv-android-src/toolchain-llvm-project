@@ -11,8 +11,11 @@
 #include "../utils/OptionsUtils.h"
 #include "clang/AST/ASTContext.h"
 #include "clang/ASTMatchers/ASTMatchFinder.h"
+#include "clang/Lex/Token.h"
 #include <algorithm>
 #include <cctype>
+
+// FixItHint
 
 using namespace clang::ast_matchers;
 
@@ -45,6 +48,7 @@ ReservedIdentifierCheck::ReservedIdentifierCheck(StringRef Name,
           Options.get("AllowedIdentifiers", ""))) {}
 
 void ReservedIdentifierCheck::storeOptions(ClangTidyOptions::OptionMap &Opts) {
+  RenamerClangTidyCheck::storeOptions(Opts);
   Options.store(Opts, "Invert", Invert);
   Options.store(Opts, "AllowedIdentifiers",
                 utils::options::serializeStringList(AllowedIdentifiers));

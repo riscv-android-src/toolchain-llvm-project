@@ -266,7 +266,8 @@ static bool importFunctions(const char *argv0, Module &DestModule) {
   auto CachedModuleLoader = [&](StringRef Identifier) {
     return ModuleLoaderCache.takeModule(std::string(Identifier));
   };
-  FunctionImporter Importer(*Index, CachedModuleLoader);
+  FunctionImporter Importer(*Index, CachedModuleLoader,
+                            /*ClearDSOLocalOnDeclarations=*/false);
   ExitOnErr(Importer.importFunctions(DestModule, ImportList));
 
   return true;
@@ -313,7 +314,8 @@ static bool linkFiles(const char *argv0, LLVMContext &Context, Linker &L,
       }
 
       // Promotion
-      if (renameModuleForThinLTO(*M, *Index))
+      if (renameModuleForThinLTO(*M, *Index,
+                                 /*ClearDSOLocalOnDeclarations=*/false))
         return true;
     }
 
@@ -397,7 +399,7 @@ int main(int argc, char **argv) {
     errs() << "Writing bitcode...\n";
   if (OutputAssembly) {
     Composite->print(Out.os(), nullptr, PreserveAssemblyUseListOrder);
-  } else if (Force || !CheckBitcodeOutputToConsole(Out.os(), true))
+  } else if (Force || !CheckBitcodeOutputToConsole(Out.os()))
     WriteBitcodeToFile(*Composite, Out.os(), PreserveBitcodeUseListOrder);
 
   // Declare success.

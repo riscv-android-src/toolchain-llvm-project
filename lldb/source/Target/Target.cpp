@@ -113,6 +113,8 @@ Target::Target(Debugger &debugger, const ArchSpec &target_arch,
              target_arch.GetArchitectureName(),
              target_arch.GetTriple().getTriple().c_str());
   }
+
+  UpdateLaunchInfoFromProperties();
 }
 
 Target::~Target() {
@@ -127,12 +129,13 @@ void Target::PrimeFromDummyTarget(Target *target) {
 
   m_stop_hooks = target->m_stop_hooks;
 
-  for (BreakpointSP breakpoint_sp : target->m_breakpoint_list.Breakpoints()) {
+  for (const auto &breakpoint_sp : target->m_breakpoint_list.Breakpoints()) {
     if (breakpoint_sp->IsInternal())
       continue;
 
-    BreakpointSP new_bp(new Breakpoint(*this, *breakpoint_sp.get()));
-    AddBreakpoint(new_bp, false);
+    BreakpointSP new_bp(
+        Breakpoint::CopyFromBreakpoint(shared_from_this(), *breakpoint_sp));
+    AddBreakpoint(std::move(new_bp), false);
   }
 
   for (auto bp_name_entry : target->m_breakpoint_names) {
@@ -621,7 +624,7 @@ BreakpointSP Target::CreateBreakpoint(SearchFilterSP &filter_sp,
     const bool hardware = request_hardware || GetRequireHardwareBreakpoints();
     bp_sp.reset(new Breakpoint(*this, filter_sp, resolver_sp, hardware,
                                resolve_indirect_symbols));
-    resolver_sp->SetBreakpoint(bp_sp.get());
+    resolver_sp->SetBreakpoint(bp_sp);
     AddBreakpoint(bp_sp, internal);
   }
   return bp_sp;
@@ -1108,8 +1111,8 @@ Status Target::CreateBreakpointsFromFile(const FileSpec &file,
         !Breakpoint::SerializedBreakpointMatchesNames(bkpt_data_sp, names))
       continue;
 
-    BreakpointSP bkpt_sp =
-        Breakpoint::CreateFromStructuredData(*this, bkpt_data_sp, error);
+    BreakpointSP bkpt_sp = Breakpoint::CreateFromStructuredData(
+        shared_from_this(), bkpt_data_sp, error);
     if (!error.Success()) {
       error.SetErrorStringWithFormat(
           "Error restoring breakpoint %zu from %s: %s.", i,
@@ -2455,7 +2458,7 @@ lldb::addr_t Target::GetBreakableLoadAddress(lldb::addr_t addr) {
 
 SourceManager &Target::GetSourceManager() {
   if (!m_source_manager_up)
-    m_source_manager_up.reset(new SourceManager(shared_from_this()));
+    m_source_manager_up = std::make_unique<SourceManager>(shared_from_this());
   return *m_source_manager_up;
 }
 
@@ -2553,7 +2556,7 @@ void Target::RunStopHooks() {
   if (!any_active_hooks)
     return;
 
-  CommandReturnObject result;
+  CommandReturnObject result(m_debugger.GetUseColor());
 
   std::vector<ExecutionContext> exc_ctx_with_reasons;
   std::vector<SymbolContext> sym_ctx_with_reasons;
@@ -2957,11 +2960,6 @@ Status Target::Launch(ProcessLaunchInfo &launch_info, Stream *stream) {
       }
     }
     m_process_sp->RestoreProcessEvents();
-  } else {
-    Status error2;
-    error2.SetErrorStringWithFormat("process launch failed: %s",
-                                    error.AsCString());
-    error = error2;
   }
   return error;
 }
@@ -3139,7 +3137,7 @@ Target::StopHook::StopHook(const StopHook &rhs)
       m_thread_spec_up(), m_active(rhs.m_active),
       m_auto_continue(rhs.m_auto_continue) {
   if (rhs.m_thread_spec_up)
-    m_thread_spec_up.reset(new ThreadSpec(*rhs.m_thread_spec_up));
+    m_thread_spec_up = std::make_unique<ThreadSpec>(*rhs.m_thread_spec_up);
 }
 
 Target::StopHook::~StopHook() = default;
@@ -3346,16 +3344,13 @@ enum {
 
 class TargetOptionValueProperties : public OptionValueProperties {
 public:
-  TargetOptionValueProperties(ConstString name)
-      : OptionValueProperties(name), m_target(nullptr), m_got_host_env(false) {}
+  TargetOptionValueProperties(ConstString name) : OptionValueProperties(name) {}
 
   // This constructor is used when creating TargetOptionValueProperties when it
   // is part of a new lldb_private::Target instance. It will copy all current
   // global property values as needed
-  TargetOptionValueProperties(Target *target,
-                              const TargetPropertiesSP &target_properties_sp)
-      : OptionValueProperties(*target_properties_sp->GetValueProperties()),
-        m_target(target), m_got_host_env(false) {}
+  TargetOptionValueProperties(const TargetPropertiesSP &target_properties_sp)
+      : OptionValueProperties(*target_properties_sp->GetValueProperties()) {}
 
   const Property *GetPropertyAtIndex(const ExecutionContext *exe_ctx,
                                      bool will_modify,
@@ -3363,9 +3358,6 @@ public:
     // When getting the value for a key from the target options, we will always
     // try and grab the setting from the current target if there is one. Else
     // we just use the one from this instance.
-    if (idx == ePropertyEnvVars)
-      GetHostEnvironmentIfNeeded();
-
     if (exe_ctx) {
       Target *target = exe_ctx->GetTargetPtr();
       if (target) {
@@ -3378,49 +3370,14 @@ public:
     }
     return ProtectedGetPropertyAtIndex(idx);
   }
-
-  lldb::TargetSP GetTargetSP() { return m_target->shared_from_this(); }
-
-protected:
-  void GetHostEnvironmentIfNeeded() const {
-    if (!m_got_host_env) {
-      if (m_target) {
-        m_got_host_env = true;
-        const uint32_t idx = ePropertyInheritEnv;
-        if (GetPropertyAtIndexAsBoolean(
-                nullptr, idx, g_target_properties[idx].default_uint_value != 0)) {
-          PlatformSP platform_sp(m_target->GetPlatform());
-          if (platform_sp) {
-            Environment env = platform_sp->GetEnvironment();
-            OptionValueDictionary *env_dict =
-                GetPropertyAtIndexAsOptionValueDictionary(nullptr,
-                                                          ePropertyEnvVars);
-            if (env_dict) {
-              const bool can_replace = false;
-              for (const auto &KV : env) {
-                // Don't allow existing keys to be replaced with ones we get
-                // from the platform environment
-                env_dict->SetValueForKey(
-                    ConstString(KV.first()),
-                    OptionValueSP(new OptionValueString(KV.second.c_str())),
-                    can_replace);
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-  Target *m_target;
-  mutable bool m_got_host_env;
 };
 
 // TargetProperties
-#define LLDB_PROPERTIES_experimental
+#define LLDB_PROPERTIES_target_experimental
 #include "TargetProperties.inc"
 
 enum {
-#define LLDB_PROPERTIES_experimental
+#define LLDB_PROPERTIES_target_experimental
 #include "TargetPropertiesEnum.inc"
 };
 
@@ -3434,15 +3391,15 @@ public:
 TargetExperimentalProperties::TargetExperimentalProperties()
     : Properties(OptionValuePropertiesSP(
           new TargetExperimentalOptionValueProperties())) {
-  m_collection_sp->Initialize(g_experimental_properties);
+  m_collection_sp->Initialize(g_target_experimental_properties);
 }
 
 // TargetProperties
 TargetProperties::TargetProperties(Target *target)
-    : Properties(), m_launch_info() {
+    : Properties(), m_launch_info(), m_target(target) {
   if (target) {
     m_collection_sp = std::make_shared<TargetOptionValueProperties>(
-        target, Target::GetGlobalProperties());
+        Target::GetGlobalProperties());
 
     // Set callbacks to update launch_info whenever "settins set" updated any
     // of these properties
@@ -3452,6 +3409,10 @@ TargetProperties::TargetProperties(Target *target)
         ePropertyRunArgs, [this] { RunArgsValueChangedCallback(); });
     m_collection_sp->SetValueChangedCallback(
         ePropertyEnvVars, [this] { EnvVarsValueChangedCallback(); });
+    m_collection_sp->SetValueChangedCallback(
+        ePropertyUnsetEnvVars, [this] { EnvVarsValueChangedCallback(); });
+    m_collection_sp->SetValueChangedCallback(
+        ePropertyInheritEnv, [this] { EnvVarsValueChangedCallback(); });
     m_collection_sp->SetValueChangedCallback(
         ePropertyInputPath, [this] { InputPathValueChangedCallback(); });
     m_collection_sp->SetValueChangedCallback(
@@ -3466,29 +3427,19 @@ TargetProperties::TargetProperties(Target *target)
     m_collection_sp->SetValueChangedCallback(
         ePropertyDisableSTDIO, [this] { DisableSTDIOValueChangedCallback(); });
 
-    m_experimental_properties_up.reset(new TargetExperimentalProperties());
+    m_experimental_properties_up =
+        std::make_unique<TargetExperimentalProperties>();
     m_collection_sp->AppendProperty(
         ConstString(Properties::GetExperimentalSettingsName()),
         ConstString("Experimental settings - setting these won't produce "
                     "errors if the setting is not present."),
         true, m_experimental_properties_up->GetValueProperties());
-
-    // Update m_launch_info once it was created
-    Arg0ValueChangedCallback();
-    RunArgsValueChangedCallback();
-    // EnvVarsValueChangedCallback(); // FIXME: cause segfault in
-    // Target::GetPlatform()
-    InputPathValueChangedCallback();
-    OutputPathValueChangedCallback();
-    ErrorPathValueChangedCallback();
-    DetachOnErrorValueChangedCallback();
-    DisableASLRValueChangedCallback();
-    DisableSTDIOValueChangedCallback();
   } else {
     m_collection_sp =
         std::make_shared<TargetOptionValueProperties>(ConstString("target"));
     m_collection_sp->Initialize(g_target_properties);
-    m_experimental_properties_up.reset(new TargetExperimentalProperties());
+    m_experimental_properties_up =
+        std::make_unique<TargetExperimentalProperties>();
     m_collection_sp->AppendProperty(
         ConstString(Properties::GetExperimentalSettingsName()),
         ConstString("Experimental settings - setting these won't produce "
@@ -3501,6 +3452,18 @@ TargetProperties::TargetProperties(Target *target)
 }
 
 TargetProperties::~TargetProperties() = default;
+
+void TargetProperties::UpdateLaunchInfoFromProperties() {
+  Arg0ValueChangedCallback();
+  RunArgsValueChangedCallback();
+  EnvVarsValueChangedCallback();
+  InputPathValueChangedCallback();
+  OutputPathValueChangedCallback();
+  ErrorPathValueChangedCallback();
+  DetachOnErrorValueChangedCallback();
+  DisableASLRValueChangedCallback();
+  DisableSTDIOValueChangedCallback();
+}
 
 bool TargetProperties::GetInjectLocalVariables(
     ExecutionContext *exe_ctx) const {
@@ -3643,19 +3606,43 @@ void TargetProperties::SetRunArguments(const Args &args) {
   m_launch_info.GetArguments() = args;
 }
 
+Environment TargetProperties::ComputeEnvironment() const {
+  Environment env;
+
+  if (m_target &&
+      m_collection_sp->GetPropertyAtIndexAsBoolean(
+          nullptr, ePropertyInheritEnv,
+          g_target_properties[ePropertyInheritEnv].default_uint_value != 0)) {
+    if (auto platform_sp = m_target->GetPlatform()) {
+      Environment platform_env = platform_sp->GetEnvironment();
+      for (const auto &KV : platform_env)
+        env[KV.first()] = KV.second;
+    }
+  }
+
+  Args property_unset_env;
+  m_collection_sp->GetPropertyAtIndexAsArgs(nullptr, ePropertyUnsetEnvVars,
+                                            property_unset_env);
+  for (const auto &var : property_unset_env)
+    env.erase(var.ref());
+
+  Args property_env;
+  m_collection_sp->GetPropertyAtIndexAsArgs(nullptr, ePropertyEnvVars,
+                                            property_env);
+  for (const auto &KV : Environment(property_env))
+    env[KV.first()] = KV.second;
+
+  return env;
+}
+
 Environment TargetProperties::GetEnvironment() const {
-  // TODO: Get rid of the Args intermediate step
-  Args env;
-  const uint32_t idx = ePropertyEnvVars;
-  m_collection_sp->GetPropertyAtIndexAsArgs(nullptr, idx, env);
-  return Environment(env);
+  return ComputeEnvironment();
 }
 
 void TargetProperties::SetEnvironment(Environment env) {
   // TODO: Get rid of the Args intermediate step
   const uint32_t idx = ePropertyEnvVars;
   m_collection_sp->SetPropertyAtIndexFromArgs(nullptr, idx, Args(env));
-  m_launch_info.GetEnvironment() = std::move(env);
 }
 
 bool TargetProperties::GetSkipPrologue() const {
@@ -3725,6 +3712,12 @@ bool TargetProperties::GetEnableAutoApplyFixIts() const {
   const uint32_t idx = ePropertyAutoApplyFixIts;
   return m_collection_sp->GetPropertyAtIndexAsBoolean(
       nullptr, idx, g_target_properties[idx].default_uint_value != 0);
+}
+
+uint64_t TargetProperties::GetNumberOfRetriesWithFixits() const {
+  const uint32_t idx = ePropertyRetriesWithFixIts;
+  return m_collection_sp->GetPropertyAtIndexAsUInt64(
+      nullptr, idx, g_target_properties[idx].default_uint_value);
 }
 
 bool TargetProperties::GetEnableNotifyAboutFixIts() const {
@@ -3973,7 +3966,7 @@ void TargetProperties::RunArgsValueChangedCallback() {
 }
 
 void TargetProperties::EnvVarsValueChangedCallback() {
-  m_launch_info.GetEnvironment() = GetEnvironment();
+  m_launch_info.GetEnvironment() = ComputeEnvironment();
 }
 
 void TargetProperties::InputPathValueChangedCallback() {
@@ -4065,7 +4058,7 @@ Target::TargetEventData::GetModuleListFromEvent(const Event *event_ptr) {
   return module_list;
 }
 
-std::recursive_mutex &Target::GetAPIMutex() { 
+std::recursive_mutex &Target::GetAPIMutex() {
   if (GetProcessSP() && GetProcessSP()->CurrentThreadIsPrivateStateThread())
     return m_private_mutex;
   else
