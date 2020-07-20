@@ -32,6 +32,42 @@ void SymbolTable::removeSymbols(
       std::end(Symbols));
 }
 
+void Object::updateLoadCommandIndexes() {
+  // Update indices of special load commands
+  for (size_t Index = 0, Size = LoadCommands.size(); Index < Size; ++Index) {
+    LoadCommand &LC = LoadCommands[Index];
+    switch (LC.MachOLoadCommand.load_command_data.cmd) {
+    case MachO::LC_SYMTAB:
+      SymTabCommandIndex = Index;
+      break;
+    case MachO::LC_DYSYMTAB:
+      DySymTabCommandIndex = Index;
+      break;
+    case MachO::LC_DYLD_INFO:
+    case MachO::LC_DYLD_INFO_ONLY:
+      DyLdInfoCommandIndex = Index;
+      break;
+    case MachO::LC_DATA_IN_CODE:
+      DataInCodeCommandIndex = Index;
+      break;
+    case MachO::LC_FUNCTION_STARTS:
+      FunctionStartsCommandIndex = Index;
+      break;
+    }
+  }
+}
+
+Error Object::removeLoadCommands(
+    function_ref<bool(const LoadCommand &)> ToRemove) {
+  auto It = std::stable_partition(
+      LoadCommands.begin(), LoadCommands.end(),
+      [&](const LoadCommand &LC) { return !ToRemove(LC); });
+  LoadCommands.erase(It, LoadCommands.end());
+
+  updateLoadCommandIndexes();
+  return Error::success();
+}
+
 Error Object::removeSections(
     function_ref<bool(const std::unique_ptr<Section> &)> ToRemove) {
   DenseMap<uint32_t, const Section *> OldIndexToSection;
@@ -60,13 +96,13 @@ Error Object::removeSections(
   for (const LoadCommand &LC : LoadCommands)
     for (const std::unique_ptr<Section> &Sec : LC.Sections)
       for (const RelocationInfo &R : Sec->Relocations)
-        if (R.Symbol && DeadSymbols.count(R.Symbol))
+        if (R.Symbol && *R.Symbol && DeadSymbols.count(*R.Symbol))
           return createStringError(std::errc::invalid_argument,
                                    "symbol '%s' defined in section with index "
                                    "'%u' cannot be removed because it is "
                                    "referenced by a relocation in section '%s'",
-                                   R.Symbol->Name.c_str(),
-                                   *(R.Symbol->section()),
+                                   (*R.Symbol)->Name.c_str(),
+                                   *((*R.Symbol)->section()),
                                    Sec->CanonicalName.c_str());
   SymTable.removeSymbols(IsDead);
   for (std::unique_ptr<SymbolEntry> &S : SymTable.Symbols)

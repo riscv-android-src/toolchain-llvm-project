@@ -25,31 +25,29 @@ def BranchOpInterface : OpInterface<"BranchOpInterface"> {
     This interface provides information for branching terminator operations,
     i.e. terminator operations with successors.
   }];
+  let cppNamespace = "::mlir";
+
   let methods = [
     InterfaceMethod<[{
-        Returns a set of values that correspond to the arguments to the
+        Returns a mutable range of operands that correspond to the arguments of
         successor at the given index. Returns None if the operands to the
         successor are non-materialized values, i.e. they are internal to the
         operation.
       }],
-      "Optional<OperandRange>", "getSuccessorOperands", (ins "unsigned":$index)
+      "Optional<MutableOperandRange>", "getMutableSuccessorOperands",
+      (ins "unsigned":$index)
     >,
     InterfaceMethod<[{
-        Return true if this operation can erase an operand to a successor block.
+        Returns a range of operands that correspond to the arguments of
+        successor at the given index. Returns None if the operands to the
+        successor are non-materialized values, i.e. they are internal to the
+        operation.
       }],
-      "bool", "canEraseSuccessorOperand"
-    >,
-    InterfaceMethod<[{
-        Erase the operand at `operandIndex` from the `index`-th successor. This
-        should only be called if `canEraseSuccessorOperand` returns true.
-      }],
-      "void", "eraseSuccessorOperand",
-      (ins "unsigned":$index, "unsigned":$operandIndex), [{}],
-      /*defaultImplementation=*/[{
+      "Optional<OperandRange>", "getSuccessorOperands",
+      (ins "unsigned":$index), [{}], [{
         ConcreteOp *op = static_cast<ConcreteOp *>(this);
-        Optional<OperandRange> operands = op->getSuccessorOperands(index);
-        assert(operands && "unable to query operands for successor");
-        detail::eraseBranchSuccessorOperand(*operands, operandIndex, *op);
+        auto operands = op->getMutableSuccessorOperands(index);
+        return operands ? Optional<OperandRange>(*operands) : llvm::None;
       }]
     >,
     InterfaceMethod<[{
@@ -59,10 +57,10 @@ def BranchOpInterface : OpInterface<"BranchOpInterface"> {
       }],
       "Optional<BlockArgument>", "getSuccessorBlockArgument",
       (ins "unsigned":$operandIndex), [{
-        Operation *opaqueOp = op;
+        Operation *opaqueOp = $_op;
         for (unsigned i = 0, e = opaqueOp->getNumSuccessors(); i != e; ++i) {
           if (Optional<BlockArgument> arg = detail::getBranchSuccessorArgument(
-                op.getSuccessorOperands(i), operandIndex,
+                $_op.getSuccessorOperands(i), operandIndex,
                 opaqueOp->getSuccessor(i)))
             return arg;
         }
@@ -100,6 +98,8 @@ def RegionBranchOpInterface : OpInterface<"RegionBranchOpInterface"> {
     branching behavior between held regions, i.e. this interface allows for
     expressing control flow information for region holding operations.
   }];
+  let cppNamespace = "::mlir";
+
   let methods = [
     InterfaceMethod<[{
         Returns the operands of this operation used as the entry arguments when

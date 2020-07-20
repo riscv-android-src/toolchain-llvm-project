@@ -116,6 +116,143 @@ TEST(HighlightsTest, All) {
   }
 }
 
+TEST(HighlightsTest, ControlFlow) {
+  const char *Tests[] = {
+      R"cpp(
+        // Highlight same-function returns.
+        int fib(unsigned n) {
+          if (n <= 1) [[ret^urn]] 1;
+          [[return]] fib(n - 1) + fib(n - 2);
+
+          // Returns from other functions not highlighted.
+          auto Lambda = [] { return; };
+          class LocalClass { void x() { return; } };
+        }
+      )cpp",
+
+      R"cpp(
+        #define FAIL() return false
+        #define DO(x) { x; }
+        bool foo(int n) {
+          if (n < 0) [[FAIL]]();
+          DO([[re^turn]] true)
+        }
+      )cpp",
+
+      R"cpp(
+        // Highlight loop control flow
+        int magic() {
+          int counter = 0;
+          [[^for]] (char c : "fruit loops!") {
+            if (c == ' ') [[continue]];
+            counter += c;
+            if (c == '!') [[break]];
+            if (c == '?') [[return]] -1;
+          }
+          return counter;
+        }
+      )cpp",
+
+      R"cpp(
+        // Highlight loop and same-loop control flow
+        void nonsense() {
+          [[while]] (true) {
+            if (false) [[bre^ak]];
+            switch (1) break;
+            [[continue]];
+          }
+        }
+      )cpp",
+
+      R"cpp(
+        // Highlight switch for break (but not other breaks).
+        void describe(unsigned n) {
+          [[switch]](n) {
+          case 0:
+            break;
+          [[default]]:
+            [[^break]];
+          }
+        }
+      )cpp",
+
+      R"cpp(
+        // Highlight case and exits for switch-break (but not other cases).
+        void describe(unsigned n) {
+          [[switch]](n) {
+          case 0:
+            break;
+          [[case]] 1:
+          [[default]]:
+            [[return]];
+            [[^break]];
+          }
+        }
+      )cpp",
+
+      R"cpp(
+        // Highlight exits and switch for case
+        void describe(unsigned n) {
+          [[switch]](n) {
+          case 0:
+            break;
+          [[case]] 1:
+          [[d^efault]]:
+            [[return]];
+            [[break]];
+          }
+        }
+      )cpp",
+
+      R"cpp(
+        // Highlight nothing for switch.
+        void describe(unsigned n) {
+          s^witch(n) {
+          case 0:
+            break;
+          case 1:
+          default:
+            return;
+            break;
+          }
+        }
+      )cpp",
+
+      R"cpp(
+        // FIXME: match exception type against catch blocks
+        int catchy() {
+          try {                     // wrong: highlight try with matching catch
+            try {                   // correct: has no matching catch
+              [[thr^ow]] "oh no!";
+            } catch (int) { }       // correct: catch doesn't match type
+            [[return]] -1;          // correct: exits the matching catch
+          } catch (const char*) { } // wrong: highlight matching catch
+          [[return]] 42;            // wrong: throw doesn't exit function
+        }
+      )cpp",
+
+      R"cpp(
+        // Loop highlights goto exiting the loop, but not jumping within it.
+        void jumpy() {
+          [[wh^ile]](1) {
+            up:
+            if (0) [[goto]] out;
+            goto up;
+          }
+          out: return;
+        }
+      )cpp",
+  };
+  for (const char *Test : Tests) {
+    Annotations T(Test);
+    auto TU = TestTU::withCode(T.code());
+    TU.ExtraArgs.push_back("-fexceptions"); // FIXME: stop testing on PS4.
+    auto AST = TU.build();
+    EXPECT_THAT(findDocumentHighlights(AST, T.point()), HighlightsFrom(T))
+        << Test;
+  }
+}
+
 MATCHER_P3(Sym, Name, Decl, DefOrNone, "") {
   llvm::Optional<Range> Def = DefOrNone;
   if (Name != arg.Name) {
@@ -663,16 +800,6 @@ TEST(LocateSymbol, Textual) {
         int myFunction(int);
         // Not triggered for token which survived preprocessing.
         int var = m^yFunction();
-      )cpp",
-      R"cpp(// Dependent type
-        struct Foo {
-          void uniqueMethodName();
-        };
-        template <typename T>
-        void f(T t) {
-          // Not triggered for token which survived preprocessing.
-          t->u^niqueMethodName();
-        }
       )cpp"};
 
   for (const char *Test : Tests) {
@@ -692,8 +819,8 @@ TEST(LocateSymbol, Textual) {
       ADD_FAILURE() << "No word touching point!" << Test;
       continue;
     }
-    auto Results =
-        locateSymbolTextually(*Word, AST, Index.get(), testPath(TU.Filename));
+    auto Results = locateSymbolTextually(*Word, AST, Index.get(),
+                                         testPath(TU.Filename), ASTNodeKind());
 
     if (!WantDecl) {
       EXPECT_THAT(Results, IsEmpty()) << Test;
@@ -778,30 +905,36 @@ TEST(LocateSymbol, Ambiguous) {
                                    Sym("baz", T.range("StaticOverload2"))));
 }
 
-TEST(LocateSymbol, TextualAmbiguous) {
-  auto T = Annotations(R"cpp(
+TEST(LocateSymbol, TextualDependent) {
+  // Put the declarations in the header to make sure we are
+  // finding them via the index heuristic and not the
+  // nearby-ident heuristic.
+  Annotations Header(R"cpp(
         struct Foo {
           void $FooLoc[[uniqueMethodName]]();
         };
         struct Bar {
           void $BarLoc[[uniqueMethodName]]();
         };
-        // Will call u^niqueMethodName() on t.
+        )cpp");
+  Annotations Source(R"cpp(
         template <typename T>
-        void f(T t);
+        void f(T t) {
+          t.u^niqueMethodName();
+        }
       )cpp");
-  auto TU = TestTU::withCode(T.code());
+  TestTU TU;
+  TU.Code = std::string(Source.code());
+  TU.HeaderCode = std::string(Header.code());
   auto AST = TU.build();
   auto Index = TU.index();
-  auto Word = SpelledWord::touching(
-      cantFail(sourceLocationInMainFile(AST.getSourceManager(), T.point())),
-      AST.getTokens(), AST.getLangOpts());
-  ASSERT_TRUE(Word);
-  auto Results =
-      locateSymbolTextually(*Word, AST, Index.get(), testPath(TU.Filename));
-  EXPECT_THAT(Results,
-              UnorderedElementsAre(Sym("uniqueMethodName", T.range("FooLoc")),
-                                   Sym("uniqueMethodName", T.range("BarLoc"))));
+  // Need to use locateSymbolAt() since we are testing an
+  // interaction between locateASTReferent() and
+  // locateSymbolNamedTextuallyAt().
+  auto Results = locateSymbolAt(AST, Source.point(), Index.get());
+  EXPECT_THAT(Results, UnorderedElementsAre(
+                           Sym("uniqueMethodName", Header.range("FooLoc")),
+                           Sym("uniqueMethodName", Header.range("BarLoc"))));
 }
 
 TEST(LocateSymbol, TemplateTypedefs) {
@@ -841,7 +974,7 @@ int [[bar_not_preamble]];
   std::string BuildDir = testPath("build");
   MockCompilationDatabase CDB(BuildDir, RelPathPrefix);
 
-  MockFSProvider FS;
+  MockFS FS;
   ClangdServer Server(CDB, FS, ClangdServer::optsForTest());
 
   // Fill the filesystem.
@@ -877,7 +1010,7 @@ int [[bar_not_preamble]];
 }
 
 TEST(GoToInclude, All) {
-  MockFSProvider FS;
+  MockFS FS;
   MockCompilationDatabase CDB;
   ClangdServer Server(CDB, FS, ClangdServer::optsForTest());
 
@@ -951,7 +1084,7 @@ TEST(GoToInclude, All) {
 TEST(LocateSymbol, WithPreamble) {
   // Test stragety: AST should always use the latest preamble instead of last
   // good preamble.
-  MockFSProvider FS;
+  MockFS FS;
   MockCompilationDatabase CDB;
   ClangdServer Server(CDB, FS, ClangdServer::optsForTest());
 
@@ -1494,14 +1627,15 @@ TEST(GetNonLocalDeclRefs, All) {
 
 TEST(DocumentLinks, All) {
   Annotations MainCpp(R"cpp(
-      #include $foo[["foo.h"]]
+      #/*comments*/include /*comments*/ $foo[["foo.h"]] //more comments
       int end_of_preamble = 0;
-      #include $bar[["bar.h"]]
+      #include $bar[[<bar.h>]]
     )cpp");
 
   TestTU TU;
   TU.Code = std::string(MainCpp.code());
   TU.AdditionalFiles = {{"foo.h", ""}, {"bar.h", ""}};
+  TU.ExtraArgs = {"-isystem."};
   auto AST = TU.build();
 
   EXPECT_THAT(

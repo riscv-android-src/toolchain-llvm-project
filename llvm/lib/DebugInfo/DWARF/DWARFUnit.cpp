@@ -300,7 +300,7 @@ bool DWARFUnitHeader::extract(DWARFContext &Context,
                 TypeOffset < getLength() + getUnitLengthFieldByteSize();
   bool LengthOK = debug_info.isValidOffset(getNextUnitOffset() - 1);
   bool VersionOK = DWARFContext::isSupportedVersion(getVersion());
-  bool AddrSizeOK = getAddressByteSize() == 4 || getAddressByteSize() == 8;
+  bool AddrSizeOK = DWARFContext::isAddressSizeSupported(getAddressByteSize());
 
   if (!LengthOK || !VersionOK || !AddrSizeOK || !TypeOffsetOK)
     return false;
@@ -996,11 +996,10 @@ DWARFUnit::determineStringOffsetsTableContributionDWO(DWARFDataExtractor & DA) {
   // index table (in a package file). In a .dwo file it is simply
   // the length of the string offsets section.
   if (!IndexEntry)
-    return {
-        Optional<StrOffsetsContributionDescriptor>(
-            {0, StringOffsetSection.Data.size(), 4, DWARF32})};
+    return {Optional<StrOffsetsContributionDescriptor>(
+        {0, StringOffsetSection.Data.size(), 4, Header.getFormat()})};
   if (C)
     return {Optional<StrOffsetsContributionDescriptor>(
-        {C->Offset, C->Length, 4, DWARF32})};
+        {C->Offset, C->Length, 4, Header.getFormat()})};
   return None;
 }

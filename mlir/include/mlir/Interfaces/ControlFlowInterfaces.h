@@ -24,11 +24,6 @@ class BranchOpInterface;
 //===----------------------------------------------------------------------===//
 
 namespace detail {
-/// Erase an operand from a branch operation that is used as a successor
-/// operand. `operandIndex` is the operand within `operands` to be erased.
-void eraseBranchSuccessorOperand(OperandRange operands, unsigned operandIndex,
-                                 Operation *op);
-
 /// Return the `BlockArgument` corresponding to operand `operandIndex` in some
 /// successor if `operandIndex` is within the range of `operands`, or None if
 /// `operandIndex` isn't a successor operand index.
@@ -76,12 +71,6 @@ private:
 };
 
 //===----------------------------------------------------------------------===//
-// ControlFlow Interfaces
-//===----------------------------------------------------------------------===//
-
-#include "mlir/Interfaces/ControlFlowInterfaces.h.inc"
-
-//===----------------------------------------------------------------------===//
 // ControlFlow Traits
 //===----------------------------------------------------------------------===//
 
@@ -105,5 +94,12 @@ struct ReturnLike : public TraitBase<ConcreteType, ReturnLike> {
 } // namespace OpTrait
 
 } // end namespace mlir
+
+//===----------------------------------------------------------------------===//
+// ControlFlow Interfaces
+//===----------------------------------------------------------------------===//
+
+/// Include the generated interface declarations.
+#include "mlir/Interfaces/ControlFlowInterfaces.h.inc"
 
 #endif // MLIR_INTERFACES_CONTROLFLOWINTERFACES_H

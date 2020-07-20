@@ -14,12 +14,15 @@
 #ifndef LLVM_SUPPORT_ARMTARGETPARSER_H
 #define LLVM_SUPPORT_ARMTARGETPARSER_H
 
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
-#include "llvm/ADT/Triple.h"
 #include "llvm/Support/ARMBuildAttributes.h"
 #include <vector>
 
 namespace llvm {
+
+class Triple;
+
 namespace ARM {
 
 // Arch extension modifiers for CPUs.

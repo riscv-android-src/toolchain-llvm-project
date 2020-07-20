@@ -48,7 +48,7 @@ protected:
 /// MemRef. It has placeholders for non-contiguous tensors that fit within the
 /// Fortran subarray model.
 /// At the moment it can only capture a MemRef with an identity layout map.
-// TODO(ntv): Support MemRefs with layoutMaps.
+// TODO: Support MemRefs with layoutMaps.
 class MemRefBoundsCapture : public BoundsCapture {
 public:
   explicit MemRefBoundsCapture(Value v);
@@ -68,6 +68,7 @@ private:
 class VectorBoundsCapture : public BoundsCapture {
 public:
   explicit VectorBoundsCapture(Value v);
+  explicit VectorBoundsCapture(VectorType t);
   VectorBoundsCapture(const VectorBoundsCapture &) = default;
   VectorBoundsCapture &operator=(const VectorBoundsCapture &) = default;
 

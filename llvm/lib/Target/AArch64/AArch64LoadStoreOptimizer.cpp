@@ -1144,24 +1144,11 @@ static int alignTo(int Num, int PowOf2) {
   return (Num + PowOf2 - 1) & ~(PowOf2 - 1);
 }
 
-static bool mayAlias(MachineInstr &MIa, MachineInstr &MIb,
-                     AliasAnalysis *AA) {
-  // One of the instructions must modify memory.
-  if (!MIa.mayStore() && !MIb.mayStore())
-    return false;
-
-  // Both instructions must be memory operations.
-  if (!MIa.mayLoadOrStore() && !MIb.mayLoadOrStore())
-    return false;
-
-  return MIa.mayAlias(AA, MIb, /*UseTBAA*/false);
-}
-
 static bool mayAlias(MachineInstr &MIa,
                      SmallVectorImpl<MachineInstr *> &MemInsns,
                      AliasAnalysis *AA) {
   for (MachineInstr *MIb : MemInsns)
-    if (mayAlias(MIa, *MIb, AA))
+    if (MIa.mayAlias(AA, *MIb, /*UseTBAA*/ false))
       return true;
 
   return false;
@@ -1219,7 +1206,7 @@ bool AArch64LoadStoreOpt::findMatchingStore(
       return false;
 
     // If we encounter a store aliased with the load, return early.
-    if (MI.mayStore() && mayAlias(LoadMI, MI, AA))
+    if (MI.mayStore() && LoadMI.mayAlias(AA, MI, /*UseTBAA*/ false))
       return false;
   } while (MBBI != B && Count < Limit);
   return false;
@@ -1300,7 +1287,23 @@ canRenameUpToDef(MachineInstr &FirstMI, LiveRegUnits &UsedInBetween,
     LLVM_DEBUG(dbgs() << "  Operand not killed at " << FirstMI << "\n");
     return false;
   }
-  auto canRenameMOP = [](const MachineOperand &MOP) {
+  auto canRenameMOP = [TRI](const MachineOperand &MOP) {
+    if (MOP.isReg()) {
+      auto *RegClass = TRI->getMinimalPhysRegClass(MOP.getReg());
+      // Renaming registers with multiple disjunct sub-registers (e.g. the
+      // result of a LD3) means that all sub-registers are renamed, potentially
+      // impacting other instructions we did not check. Bail out.
+      // Note that this relies on the structure of the AArch64 register file. In
+      // particular, a subregister cannot be written without overwriting the
+      // whole register.
+      if (RegClass->HasDisjunctSubRegs) {
+        LLVM_DEBUG(
+            dbgs()
+            << "  Cannot rename operands with multiple disjunct subregisters ("
+            << MOP << ")\n");
+        return false;
+      }
+    }
     return MOP.isImplicit() ||
            (MOP.isRenamable() && !MOP.isEarlyClobber() && !MOP.isTied());
   };

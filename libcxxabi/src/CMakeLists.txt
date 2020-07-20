@@ -7,7 +7,6 @@ set(LIBCXXABI_SOURCES
   cxa_exception_storage.cpp
   cxa_guard.cpp
   cxa_handlers.cpp
-  cxa_unexpected.cpp
   cxa_vector.cpp
   cxa_virtual.cpp
   # C++ STL files
@@ -134,6 +133,17 @@ if ( APPLE )
       add_library_flags("${LIBCXXABI_SANITIZER_LIBRARY}")
       add_link_flags("-Wl,-rpath,${LIBDIR}")
     endif()
+  endif()
+
+  # Make sure we link in CrashReporterClient if we find it -- it's used by
+  # abort() on Apple platforms when building the system dylib.
+  find_library(CrashReporterClient NAMES libCrashReporterClient.a
+                                   PATHS "${CMAKE_OSX_SYSROOT}/usr/local/lib")
+  if (CrashReporterClient)
+    message(STATUS "Linking with CrashReporterClient at ${CrashReporterClient}")
+    add_library_flags("${CrashReporterClient}")
+  else()
+    message(STATUS "Could not find CrashReporterClient, not linking against it")
   endif()
 endif()
 

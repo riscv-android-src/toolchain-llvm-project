@@ -1295,6 +1295,14 @@ bool CursorVisitor::VisitFriendDecl(FriendDecl *D) {
   return false;
 }
 
+bool CursorVisitor::VisitDecompositionDecl(DecompositionDecl *D) {
+  for (auto *B : D->bindings()) {
+    if (Visit(MakeCXCursor(B, TU, RegionOfInterest)))
+      return true;
+  }
+  return VisitVarDecl(D);
+}
+
 bool CursorVisitor::VisitDeclarationNameInfo(DeclarationNameInfo Name) {
   switch (Name.getName().getNameKind()) {
   case clang::DeclarationName::Identifier:
@@ -1787,6 +1795,8 @@ DEFAULT_TYPELOC_IMPL(DependentVector, Type)
 DEFAULT_TYPELOC_IMPL(DependentSizedExtVector, Type)
 DEFAULT_TYPELOC_IMPL(Vector, Type)
 DEFAULT_TYPELOC_IMPL(ExtVector, VectorType)
+DEFAULT_TYPELOC_IMPL(ConstantMatrix, MatrixType)
+DEFAULT_TYPELOC_IMPL(DependentSizedMatrix, MatrixType)
 DEFAULT_TYPELOC_IMPL(FunctionProto, FunctionType)
 DEFAULT_TYPELOC_IMPL(FunctionNoProto, FunctionType)
 DEFAULT_TYPELOC_IMPL(Record, TagType)
@@ -2366,6 +2376,17 @@ void OMPClauseEnqueue::VisitOMPReductionClause(const OMPReductionClause *C) {
   for (auto *E : C->reduction_ops()) {
     Visitor->AddStmt(E);
   }
+  if (C->getModifier() == clang::OMPC_REDUCTION_inscan) {
+    for (auto *E : C->copy_ops()) {
+      Visitor->AddStmt(E);
+    }
+    for (auto *E : C->copy_array_temps()) {
+      Visitor->AddStmt(E);
+    }
+    for (auto *E : C->copy_array_elems()) {
+      Visitor->AddStmt(E);
+    }
+  }
 }
 void OMPClauseEnqueue::VisitOMPTaskReductionClause(
     const OMPTaskReductionClause *C) {
@@ -2479,6 +2500,10 @@ void OMPClauseEnqueue::VisitOMPUseDevicePtrClause(
     const OMPUseDevicePtrClause *C) {
   VisitOMPClauseList(C);
 }
+void OMPClauseEnqueue::VisitOMPUseDeviceAddrClause(
+    const OMPUseDeviceAddrClause *C) {
+  VisitOMPClauseList(C);
+}
 void OMPClauseEnqueue::VisitOMPIsDevicePtrClause(
     const OMPIsDevicePtrClause *C) {
   VisitOMPClauseList(C);
@@ -2490,6 +2515,19 @@ void OMPClauseEnqueue::VisitOMPNontemporalClause(
     Visitor->AddStmt(E);
 }
 void OMPClauseEnqueue::VisitOMPOrderClause(const OMPOrderClause *C) {}
+void OMPClauseEnqueue::VisitOMPUsesAllocatorsClause(
+    const OMPUsesAllocatorsClause *C) {
+  for (unsigned I = 0, E = C->getNumberOfAllocators(); I < E; ++I) {
+    const OMPUsesAllocatorsClause::Data &D = C->getAllocatorData(I);
+    Visitor->AddStmt(D.Allocator);
+    Visitor->AddStmt(D.AllocatorTraits);
+  }
+}
+void OMPClauseEnqueue::VisitOMPAffinityClause(const OMPAffinityClause *C) {
+  Visitor->AddStmt(C->getModifier());
+  for (const Expr *E : C->varlists())
+    Visitor->AddStmt(E);
+}
 } // namespace
 
 void EnqueueVisitor::EnqueueChildren(const OMPClause *S) {
@@ -2664,6 +2702,7 @@ void EnqueueVisitor::VisitIfStmt(const IfStmt *If) {
   AddStmt(If->getElse());
   AddStmt(If->getThen());
   AddStmt(If->getCond());
+  AddStmt(If->getInit());
   AddDecl(If->getConditionVariable());
 }
 void EnqueueVisitor::VisitInitListExpr(const InitListExpr *IE) {
@@ -3233,7 +3272,7 @@ bool CursorVisitor::RunVisitorWorkList(VisitorWorkList &WL) {
       }
       // Visit init captures
       for (auto InitExpr : E->capture_inits()) {
-        if (Visit(InitExpr))
+        if (InitExpr && Visit(InitExpr))
           return true;
       }
 
@@ -4017,10 +4056,14 @@ static const Expr *evaluateCompoundStmtExpr(const CompoundStmt *CS) {
 }
 
 CXEvalResult clang_Cursor_Evaluate(CXCursor C) {
-  if (const Expr *E =
-          clang_getCursorKind(C) == CXCursor_CompoundStmt
-              ? evaluateCompoundStmtExpr(cast<CompoundStmt>(getCursorStmt(C)))
-              : evaluateDeclExpr(getCursorDecl(C)))
+  const Expr *E = nullptr;
+  if (clang_getCursorKind(C) == CXCursor_CompoundStmt)
+    E = evaluateCompoundStmtExpr(cast<CompoundStmt>(getCursorStmt(C)));
+  else if (clang_isDeclaration(C.kind))
+    E = evaluateDeclExpr(getCursorDecl(C));
+  else if (clang_isExpression(C.kind))
+    E = getCursorExpr(C);
+  if (E)
     return const_cast<CXEvalResult>(
         reinterpret_cast<const void *>(evaluateExpr(const_cast<Expr *>(E), C)));
   return nullptr;
@@ -5220,6 +5263,8 @@ CXString clang_getCursorKindSpelling(enum CXCursorKind Kind) {
     return cxstring::createRef("CXXConstCastExpr");
   case CXCursor_CXXFunctionalCastExpr:
     return cxstring::createRef("CXXFunctionalCastExpr");
+  case CXCursor_CXXAddrspaceCastExpr:
+    return cxstring::createRef("CXXAddrspaceCastExpr");
   case CXCursor_CXXTypeidExpr:
     return cxstring::createRef("CXXTypeidExpr");
   case CXCursor_CXXBoolLiteralExpr:

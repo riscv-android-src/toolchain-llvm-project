@@ -10,6 +10,8 @@
 #include "Config.h"
 #include "InputFiles.h"
 #include "InputSection.h"
+#include "MergedOutputSection.h"
+#include "OutputSection.h"
 #include "OutputSegment.h"
 #include "SymbolTable.h"
 #include "Symbols.h"
@@ -19,13 +21,12 @@
 #include "lld/Common/ErrorHandler.h"
 #include "lld/Common/Memory.h"
 #include "llvm/BinaryFormat/MachO.h"
-#include "llvm/Support/EndianStream.h"
 #include "llvm/Support/LEB128.h"
 #include "llvm/Support/MathExtras.h"
+#include "llvm/Support/Path.h"
 
 using namespace llvm;
 using namespace llvm::MachO;
-using namespace llvm::support;
 using namespace lld;
 using namespace lld::macho;
 
@@ -34,92 +35,63 @@ class LCLinkEdit;
 class LCDyldInfo;
 class LCSymtab;
 
-class LoadCommand {
-public:
-  virtual ~LoadCommand() = default;
-  virtual uint32_t getSize() const = 0;
-  virtual void writeTo(uint8_t *buf) const = 0;
-};
-
 class Writer {
 public:
   Writer() : buffer(errorHandler().outputBuffer) {}
 
-  void createLoadCommands();
   void scanRelocations();
-  void assignAddresses();
-
-  void createDyldInfoContents();
+  void createOutputSections();
+  void createLoadCommands();
+  void assignAddresses(OutputSegment *);
+  void createSymtabContents();
 
   void openFile();
-  void writeHeader();
   void writeSections();
 
   void run();
 
-  std::vector<LoadCommand *> loadCommands;
   std::unique_ptr<FileOutputBuffer> &buffer;
-  uint64_t fileSize = 0;
-  uint64_t sizeofCmds = 0;
-  LCLinkEdit *linkEditSeg = nullptr;
-  LCDyldInfo *dyldInfoSeg = nullptr;
-  LCSymtab *symtabSeg = nullptr;
-};
-
-class LCPagezero : public LoadCommand {
-public:
-  uint32_t getSize() const override { return sizeof(segment_command_64); }
-
-  void writeTo(uint8_t *buf) const override {
-    auto *c = reinterpret_cast<segment_command_64 *>(buf);
-    c->cmd = LC_SEGMENT_64;
-    c->cmdsize = getSize();
-    strcpy(c->segname, "__PAGEZERO");
-    c->vmsize = PageSize;
-  }
-};
-
-class LCLinkEdit : public LoadCommand {
-public:
-  uint32_t getSize() const override { return sizeof(segment_command_64); }
-
-  void writeTo(uint8_t *buf) const override {
-    auto *c = reinterpret_cast<segment_command_64 *>(buf);
-    c->cmd = LC_SEGMENT_64;
-    c->cmdsize = getSize();
-    strcpy(c->segname, "__LINKEDIT");
-    c->vmaddr = addr;
-    c->fileoff = fileOff;
-    c->filesize = c->vmsize = contents.size();
-    c->maxprot = VM_PROT_READ | VM_PROT_WRITE;
-    c->initprot = VM_PROT_READ;
-  }
-
-  uint64_t getOffset() const { return fileOff + contents.size(); }
-
-  uint64_t fileOff = 0;
   uint64_t addr = 0;
-  SmallVector<char, 128> contents;
+  uint64_t fileOff = 0;
+  MachHeaderSection *headerSection = nullptr;
+  LazyBindingSection *lazyBindingSection = nullptr;
+  ExportSection *exportSection = nullptr;
+  StringTableSection *stringTableSection = nullptr;
+  SymtabSection *symtabSection = nullptr;
 };
 
+// LC_DYLD_INFO_ONLY stores the offsets of symbol import/export information.
 class LCDyldInfo : public LoadCommand {
 public:
+  LCDyldInfo(BindingSection *bindingSection,
+             LazyBindingSection *lazyBindingSection,
+             ExportSection *exportSection)
+      : bindingSection(bindingSection), lazyBindingSection(lazyBindingSection),
+        exportSection(exportSection) {}
+
   uint32_t getSize() const override { return sizeof(dyld_info_command); }
 
   void writeTo(uint8_t *buf) const override {
     auto *c = reinterpret_cast<dyld_info_command *>(buf);
     c->cmd = LC_DYLD_INFO_ONLY;
     c->cmdsize = getSize();
-    c->bind_off = bindOff;
-    c->bind_size = bindSize;
-    c->export_off = exportOff;
-    c->export_size = exportSize;
+    if (bindingSection->isNeeded()) {
+      c->bind_off = bindingSection->fileOff;
+      c->bind_size = bindingSection->getFileSize();
+    }
+    if (lazyBindingSection->isNeeded()) {
+      c->lazy_bind_off = lazyBindingSection->fileOff;
+      c->lazy_bind_size = lazyBindingSection->getFileSize();
+    }
+    if (exportSection->isNeeded()) {
+      c->export_off = exportSection->fileOff;
+      c->export_size = exportSection->getFileSize();
+    }
   }
 
-  uint64_t bindOff = 0;
-  uint64_t bindSize = 0;
-  uint64_t exportOff = 0;
-  uint64_t exportSize = 0;
+  BindingSection *bindingSection;
+  LazyBindingSection *lazyBindingSection;
+  ExportSection *exportSection;
 };
 
 class LCDysymtab : public LoadCommand {
@@ -139,7 +111,7 @@ public:
 
   uint32_t getSize() const override {
     return sizeof(segment_command_64) +
-           seg->sections.size() * sizeof(section_64);
+           seg->numNonHiddenSections() * sizeof(section_64);
   }
 
   void writeTo(uint8_t *buf) const override {
@@ -149,39 +121,35 @@ public:
     c->cmd = LC_SEGMENT_64;
     c->cmdsize = getSize();
     memcpy(c->segname, name.data(), name.size());
+    c->fileoff = seg->fileOff;
+    c->maxprot = seg->maxProt;
+    c->initprot = seg->initProt;
 
-    // dyld3's MachOLoaded::getSlide() assumes that the __TEXT segment starts
-    // from the beginning of the file (i.e. the header).
-    // TODO: replace this logic by creating a synthetic __TEXT,__mach_header
-    // section instead.
-    c->fileoff = name == "__TEXT" ? 0 : seg->firstSection()->addr - ImageBase;
-    c->vmaddr = c->fileoff + ImageBase;
-    c->vmsize = c->filesize =
+    if (seg->getSections().empty())
+      return;
+
+    c->vmaddr = seg->firstSection()->addr;
+    c->vmsize =
         seg->lastSection()->addr + seg->lastSection()->getSize() - c->vmaddr;
-    c->maxprot = VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXECUTE;
-    c->initprot = seg->perms;
-    c->nsects = seg->sections.size();
+    c->nsects = seg->numNonHiddenSections();
 
-    for (auto &p : seg->sections) {
-      StringRef s = p.first;
-      std::vector<InputSection *> &sections = p.second;
+    for (OutputSection *osec : seg->getSections()) {
+      c->filesize += osec->getFileSize();
+
+      if (osec->isHidden())
+        continue;
 
       auto *sectHdr = reinterpret_cast<section_64 *>(buf);
       buf += sizeof(section_64);
 
-      memcpy(sectHdr->sectname, s.data(), s.size());
+      memcpy(sectHdr->sectname, osec->name.data(), osec->name.size());
       memcpy(sectHdr->segname, name.data(), name.size());
 
-      sectHdr->addr = sections[0]->addr;
-      sectHdr->offset = sections[0]->addr - ImageBase;
-      sectHdr->align = sections[0]->align;
-      uint32_t maxAlign = 0;
-      for (const InputSection *section : sections)
-        maxAlign = std::max(maxAlign, section->align);
-      sectHdr->align = Log2_32(maxAlign);
-      sectHdr->flags = sections[0]->flags;
-      sectHdr->size = sections.back()->addr + sections.back()->getSize() -
-                      sections[0]->addr;
+      sectHdr->addr = osec->addr;
+      sectHdr->offset = osec->fileOff;
+      sectHdr->align = Log2_32(osec->align);
+      sectHdr->flags = osec->flags;
+      sectHdr->size = osec->getSize();
     }
   }
 
@@ -197,25 +165,39 @@ class LCMain : public LoadCommand {
     auto *c = reinterpret_cast<entry_point_command *>(buf);
     c->cmd = LC_MAIN;
     c->cmdsize = getSize();
-    c->entryoff = config->entry->getVA();
+    c->entryoff = config->entry->getFileOffset();
     c->stacksize = 0;
   }
 };
 
 class LCSymtab : public LoadCommand {
 public:
+  LCSymtab(SymtabSection *symtabSection, StringTableSection *stringTableSection)
+      : symtabSection(symtabSection), stringTableSection(stringTableSection) {}
+
   uint32_t getSize() const override { return sizeof(symtab_command); }
 
   void writeTo(uint8_t *buf) const override {
     auto *c = reinterpret_cast<symtab_command *>(buf);
     c->cmd = LC_SYMTAB;
     c->cmdsize = getSize();
+    c->symoff = symtabSection->fileOff;
+    c->nsyms = symtabSection->getNumSymbols();
+    c->stroff = stringTableSection->fileOff;
+    c->strsize = stringTableSection->getFileSize();
   }
+
+  SymtabSection *symtabSection = nullptr;
+  StringTableSection *stringTableSection = nullptr;
 };
 
-class LCLoadDylib : public LoadCommand {
+// There are several dylib load commands that share the same structure:
+//   * LC_LOAD_DYLIB
+//   * LC_ID_DYLIB
+//   * LC_REEXPORT_DYLIB
+class LCDylib : public LoadCommand {
 public:
-  LCLoadDylib(StringRef path) : path(path) {}
+  LCDylib(LoadCommandType type, StringRef path) : type(type), path(path) {}
 
   uint32_t getSize() const override {
     return alignTo(sizeof(dylib_command) + path.size() + 1, 8);
@@ -225,7 +207,7 @@ public:
     auto *c = reinterpret_cast<dylib_command *>(buf);
     buf += sizeof(dylib_command);
 
-    c->cmd = LC_LOAD_DYLIB;
+    c->cmd = type;
     c->cmdsize = getSize();
     c->dylib.name = sizeof(dylib_command);
 
@@ -234,6 +216,7 @@ public:
   }
 
 private:
+  LoadCommandType type;
   StringRef path;
 };
 
@@ -262,118 +245,229 @@ private:
 };
 } // namespace
 
-void Writer::createLoadCommands() {
-  linkEditSeg = make<LCLinkEdit>();
-  dyldInfoSeg = make<LCDyldInfo>();
-  symtabSeg = make<LCSymtab>();
-
-  loadCommands.push_back(linkEditSeg);
-  loadCommands.push_back(dyldInfoSeg);
-  loadCommands.push_back(symtabSeg);
-  loadCommands.push_back(make<LCPagezero>());
-  loadCommands.push_back(make<LCLoadDylinker>());
-  loadCommands.push_back(make<LCDysymtab>());
-  loadCommands.push_back(make<LCMain>());
-
-  uint8_t segIndex = 1; // LCPagezero is a segment load command
-  for (OutputSegment *seg : outputSegments) {
-    if (!seg->sections.empty()) {
-      loadCommands.push_back(make<LCSegment>(seg->name, seg));
-      seg->index = segIndex++;
+void Writer::scanRelocations() {
+  for (InputSection *isec : inputSections) {
+    for (Reloc &r : isec->relocs) {
+      if (auto *s = r.target.dyn_cast<lld::macho::Symbol *>()) {
+        if (isa<Undefined>(s))
+          error("undefined symbol " + s->getName() + ", referenced from " +
+                sys::path::filename(isec->file->getName()));
+        else
+          target->prepareSymbolRelocation(*s, isec, r);
+      }
     }
+  }
+}
+
+void Writer::createLoadCommands() {
+  headerSection->addLoadCommand(
+      make<LCDyldInfo>(in.binding, lazyBindingSection, exportSection));
+  headerSection->addLoadCommand(
+      make<LCSymtab>(symtabSection, stringTableSection));
+  headerSection->addLoadCommand(make<LCDysymtab>());
+
+  switch (config->outputType) {
+  case MH_EXECUTE:
+    headerSection->addLoadCommand(make<LCMain>());
+    headerSection->addLoadCommand(make<LCLoadDylinker>());
+    break;
+  case MH_DYLIB:
+    headerSection->addLoadCommand(
+        make<LCDylib>(LC_ID_DYLIB, config->installName));
+    break;
+  default:
+    llvm_unreachable("unhandled output file type");
+  }
+
+  uint8_t segIndex = 0;
+  for (OutputSegment *seg : outputSegments) {
+    headerSection->addLoadCommand(make<LCSegment>(seg->name, seg));
+    seg->index = segIndex++;
   }
 
   uint64_t dylibOrdinal = 1;
   for (InputFile *file : inputFiles) {
     if (auto *dylibFile = dyn_cast<DylibFile>(file)) {
-      loadCommands.push_back(make<LCLoadDylib>(dylibFile->dylibName));
+      headerSection->addLoadCommand(
+          make<LCDylib>(LC_LOAD_DYLIB, dylibFile->dylibName));
       dylibFile->ordinal = dylibOrdinal++;
+
+      if (dylibFile->reexport)
+        headerSection->addLoadCommand(
+            make<LCDylib>(LC_REEXPORT_DYLIB, dylibFile->dylibName));
     }
   }
-
-  // TODO: dyld requires libSystem to be loaded. libSystem is a universal
-  // binary and we don't have support for that yet, so mock it out here.
-  loadCommands.push_back(make<LCLoadDylib>("/usr/lib/libSystem.B.dylib"));
 }
 
-void Writer::scanRelocations() {
-  for (InputSection *sect : inputSections)
-    for (Reloc &r : sect->relocs)
-      if (auto *s = r.target.dyn_cast<Symbol *>())
-        if (auto *dylibSymbol = dyn_cast<DylibSymbol>(s))
-          in.got->addEntry(*dylibSymbol);
+static size_t getSymbolPriority(const SymbolPriorityEntry &entry,
+                                const InputFile &file) {
+  return std::max(entry.objectFiles.lookup(sys::path::filename(file.getName())),
+                  entry.anyObjectFile);
 }
 
-void Writer::assignAddresses() {
-  uint64_t addr = ImageBase + sizeof(mach_header_64);
+// Each section gets assigned the priority of the highest-priority symbol it
+// contains.
+static DenseMap<const InputSection *, size_t> buildInputSectionPriorities() {
+  DenseMap<const InputSection *, size_t> sectionPriorities;
 
-  uint64_t size = 0;
-  for (LoadCommand *lc : loadCommands)
-    size += lc->getSize();
-  sizeofCmds = size;
-  addr += size;
+  if (config->priorities.empty())
+    return sectionPriorities;
 
+  auto addSym = [&](Defined &sym) {
+    auto it = config->priorities.find(sym.getName());
+    if (it == config->priorities.end())
+      return;
+
+    SymbolPriorityEntry &entry = it->second;
+    size_t &priority = sectionPriorities[sym.isec];
+    priority = std::max(priority, getSymbolPriority(entry, *sym.isec->file));
+  };
+
+  // TODO: Make sure this handles weak symbols correctly.
+  for (InputFile *file : inputFiles)
+    if (isa<ObjFile>(file) || isa<ArchiveFile>(file))
+      for (lld::macho::Symbol *sym : file->symbols)
+        if (auto *d = dyn_cast<Defined>(sym))
+          addSym(*d);
+
+  return sectionPriorities;
+}
+
+static int segmentOrder(OutputSegment *seg) {
+  return StringSwitch<int>(seg->name)
+      .Case(segment_names::pageZero, -2)
+      .Case(segment_names::text, -1)
+      // Make sure __LINKEDIT is the last segment (i.e. all its hidden
+      // sections must be ordered after other sections).
+      .Case(segment_names::linkEdit, std::numeric_limits<int>::max())
+      .Default(0);
+}
+
+static int sectionOrder(OutputSection *osec) {
+  StringRef segname = osec->parent->name;
+  // Sections are uniquely identified by their segment + section name.
+  if (segname == segment_names::text) {
+    if (osec->name == section_names::header)
+      return -1;
+  } else if (segname == segment_names::linkEdit) {
+    return StringSwitch<int>(osec->name)
+        .Case(section_names::binding, -4)
+        .Case(section_names::export_, -3)
+        .Case(section_names::symbolTable, -2)
+        .Case(section_names::stringTable, -1)
+        .Default(0);
+  }
+  // ZeroFill sections must always be the at the end of their segments,
+  // otherwise subsequent sections may get overwritten with zeroes at runtime.
+  if (isZeroFill(osec->flags))
+    return std::numeric_limits<int>::max();
+  return 0;
+}
+
+template <typename T, typename F>
+static std::function<bool(T, T)> compareByOrder(F ord) {
+  return [=](T a, T b) { return ord(a) < ord(b); };
+}
+
+// Sorting only can happen once all outputs have been collected. Here we sort
+// segments, output sections within each segment, and input sections within each
+// output segment.
+static void sortSegmentsAndSections() {
+  llvm::stable_sort(outputSegments,
+                    compareByOrder<OutputSegment *>(segmentOrder));
+
+  DenseMap<const InputSection *, size_t> isecPriorities =
+      buildInputSectionPriorities();
+
+  uint32_t sectionIndex = 0;
   for (OutputSegment *seg : outputSegments) {
-    addr = alignTo(addr, PageSize);
+    seg->sortOutputSections(compareByOrder<OutputSection *>(sectionOrder));
+    for (auto *osec : seg->getSections()) {
+      // Now that the output sections are sorted, assign the final
+      // output section indices.
+      if (!osec->isHidden())
+        osec->index = ++sectionIndex;
 
-    for (auto &p : seg->sections) {
-      ArrayRef<InputSection *> sections = p.second;
-      for (InputSection *isec : sections) {
-        addr = alignTo(addr, isec->align);
-        isec->addr = addr;
-        addr += isec->getSize();
+      if (!isecPriorities.empty()) {
+        if (auto *merged = dyn_cast<MergedOutputSection>(osec)) {
+          llvm::stable_sort(merged->inputs,
+                            [&](InputSection *a, InputSection *b) {
+                              return isecPriorities[a] > isecPriorities[b];
+                            });
+        }
       }
     }
   }
-
-  addr = alignTo(addr, PageSize);
-  linkEditSeg->addr = addr;
-  linkEditSeg->fileOff = addr - ImageBase;
 }
 
-// LC_DYLD_INFO_ONLY contains symbol import/export information. Imported
-// symbols are described by a sequence of bind opcodes, which allow for a
-// compact encoding. Exported symbols are described using a trie.
-void Writer::createDyldInfoContents() {
-  uint64_t sectionStart = linkEditSeg->getOffset();
-  raw_svector_ostream os{linkEditSeg->contents};
+void Writer::createOutputSections() {
+  // First, create hidden sections
+  headerSection = make<MachHeaderSection>();
+  lazyBindingSection = make<LazyBindingSection>();
+  stringTableSection = make<StringTableSection>();
+  symtabSection = make<SymtabSection>(*stringTableSection);
+  exportSection = make<ExportSection>();
 
-  if (in.got->getSize() != 0) {
-    // Emit bind opcodes, which tell dyld which dylib symbols to load.
-
-    // Tell dyld to write to the section containing the GOT.
-    os << static_cast<uint8_t>(BIND_OPCODE_SET_SEGMENT_AND_OFFSET_ULEB |
-                               in.got->parent->index);
-    encodeULEB128(in.got->addr - in.got->parent->firstSection()->addr, os);
-    for (const DylibSymbol *sym : in.got->getEntries()) {
-      // TODO: Implement compact encoding -- we only need to encode the
-      // differences between consecutive symbol entries.
-      if (sym->file->ordinal <= BIND_IMMEDIATE_MASK) {
-        os << static_cast<uint8_t>(BIND_OPCODE_SET_DYLIB_ORDINAL_IMM |
-                                   sym->file->ordinal);
-      } else {
-        error("TODO: Support larger dylib symbol ordinals");
-        continue;
-      }
-      os << static_cast<uint8_t>(BIND_OPCODE_SET_SYMBOL_TRAILING_FLAGS_IMM)
-         << sym->getName() << '\0'
-         << static_cast<uint8_t>(BIND_OPCODE_SET_TYPE_IMM | BIND_TYPE_POINTER)
-         << static_cast<uint8_t>(BIND_OPCODE_DO_BIND);
-    }
-
-    os << static_cast<uint8_t>(BIND_OPCODE_DONE);
-
-    dyldInfoSeg->bindOff = sectionStart;
-    dyldInfoSeg->bindSize = linkEditSeg->getOffset() - sectionStart;
+  switch (config->outputType) {
+  case MH_EXECUTE:
+    make<PageZeroSection>();
+    break;
+  case MH_DYLIB:
+    break;
+  default:
+    llvm_unreachable("unhandled output file type");
   }
 
-  // TODO: emit bind opcodes for lazy symbols.
-  // TODO: Implement symbol export trie.
+  // Then merge input sections into output sections.
+  MapVector<std::pair<StringRef, StringRef>, MergedOutputSection *>
+      mergedOutputSections;
+  for (InputSection *isec : inputSections) {
+    MergedOutputSection *&osec =
+        mergedOutputSections[{isec->segname, isec->name}];
+    if (osec == nullptr)
+      osec = make<MergedOutputSection>(isec->name);
+    osec->mergeInput(isec);
+  }
+
+  for (const auto &it : mergedOutputSections) {
+    StringRef segname = it.first.first;
+    MergedOutputSection *osec = it.second;
+    getOrCreateOutputSegment(segname)->addOutputSection(osec);
+  }
+
+  for (SyntheticSection *ssec : syntheticSections) {
+    auto it = mergedOutputSections.find({ssec->segname, ssec->name});
+    if (it == mergedOutputSections.end()) {
+      if (ssec->isNeeded())
+        getOrCreateOutputSegment(ssec->segname)->addOutputSection(ssec);
+    } else {
+      error("section from " + it->second->firstSection()->file->getName() +
+            " conflicts with synthetic section " + ssec->segname + "," +
+            ssec->name);
+    }
+  }
+}
+
+void Writer::assignAddresses(OutputSegment *seg) {
+  addr = alignTo(addr, PageSize);
+  fileOff = alignTo(fileOff, PageSize);
+  seg->fileOff = fileOff;
+
+  for (auto *osec : seg->getSections()) {
+    addr = alignTo(addr, osec->align);
+    fileOff = alignTo(fileOff, osec->align);
+    osec->addr = addr;
+    osec->fileOff = isZeroFill(osec->flags) ? 0 : fileOff;
+    osec->finalize();
+
+    addr += osec->getSize();
+    fileOff += osec->getFileSize();
+  }
 }
 
 void Writer::openFile() {
   Expected<std::unique_ptr<FileOutputBuffer>> bufferOrErr =
-      FileOutputBuffer::create(config->outputFile, fileSize,
+      FileOutputBuffer::create(config->outputFile, fileOff,
                                FileOutputBuffer::F_executable);
 
   if (!bufferOrErr)
@@ -383,49 +477,53 @@ void Writer::openFile() {
     buffer = std::move(*bufferOrErr);
 }
 
-void Writer::writeHeader() {
-  auto *hdr = reinterpret_cast<mach_header_64 *>(buffer->getBufferStart());
-  hdr->magic = MH_MAGIC_64;
-  hdr->cputype = CPU_TYPE_X86_64;
-  hdr->cpusubtype = CPU_SUBTYPE_X86_64_ALL | CPU_SUBTYPE_LIB64;
-  hdr->filetype = MH_EXECUTE;
-  hdr->ncmds = loadCommands.size();
-  hdr->sizeofcmds = sizeofCmds;
-  hdr->flags = MH_NOUNDEFS | MH_DYLDLINK | MH_TWOLEVEL;
-
-  uint8_t *p = reinterpret_cast<uint8_t *>(hdr + 1);
-  for (LoadCommand *lc : loadCommands) {
-    lc->writeTo(p);
-    p += lc->getSize();
-  }
-}
-
 void Writer::writeSections() {
   uint8_t *buf = buffer->getBufferStart();
-
   for (OutputSegment *seg : outputSegments)
-    for (auto &sect : seg->sections)
-      for (InputSection *isec : sect.second)
-        isec->writeTo(buf + isec->addr - ImageBase);
-
-  memcpy(buf + linkEditSeg->fileOff, linkEditSeg->contents.data(),
-         linkEditSeg->contents.size());
+    for (OutputSection *osec : seg->getSections())
+      osec->writeTo(buf + osec->fileOff);
 }
 
 void Writer::run() {
-  createLoadCommands();
-  scanRelocations();
-  assignAddresses();
+  // dyld requires __LINKEDIT segment to always exist (even if empty).
+  OutputSegment *linkEditSegment =
+      getOrCreateOutputSegment(segment_names::linkEdit);
 
-  // Fill __LINKEDIT contents
-  createDyldInfoContents();
-  fileSize = linkEditSeg->fileOff + linkEditSeg->contents.size();
+  scanRelocations();
+  if (in.stubHelper->isNeeded())
+    in.stubHelper->setup();
+
+  // Sort and assign sections to their respective segments. No more sections nor
+  // segments may be created after these methods run.
+  createOutputSections();
+  sortSegmentsAndSections();
+
+  createLoadCommands();
+
+  // Ensure that segments (and the sections they contain) are allocated
+  // addresses in ascending order, which dyld requires.
+  //
+  // Note that at this point, __LINKEDIT sections are empty, but we need to
+  // determine addresses of other segments/sections before generating its
+  // contents.
+  for (OutputSegment *seg : outputSegments)
+    if (seg != linkEditSegment)
+      assignAddresses(seg);
+
+  // Fill __LINKEDIT contents.
+  in.binding->finalizeContents();
+  lazyBindingSection->finalizeContents();
+  exportSection->finalizeContents();
+  symtabSection->finalizeContents();
+
+  // Now that __LINKEDIT is filled out, do a proper calculation of its
+  // addresses and offsets.
+  assignAddresses(linkEditSegment);
 
   openFile();
   if (errorCount())
     return;
 
-  writeHeader();
   writeSections();
 
   if (auto e = buffer->commit())
@@ -435,6 +533,10 @@ void Writer::run() {
 void macho::writeResult() { Writer().run(); }
 
 void macho::createSyntheticSections() {
+  in.binding = make<BindingSection>();
   in.got = make<GotSection>();
-  inputSections.push_back(in.got);
+  in.lazyPointers = make<LazyPointerSection>();
+  in.stubs = make<StubsSection>();
+  in.stubHelper = make<StubHelperSection>();
+  in.imageLoaderCache = make<ImageLoaderCacheSection>();
 }

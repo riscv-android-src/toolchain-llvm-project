@@ -81,6 +81,10 @@ set(LLVM_ENABLE_PROJECTS "" CACHE STRING
 if( LLVM_ENABLE_PROJECTS STREQUAL "all" )
   set( LLVM_ENABLE_PROJECTS ${LLVM_ALL_PROJECTS})
 endif()
+if ("flang" IN_LIST LLVM_ENABLE_PROJECTS AND NOT "mlir" IN_LIST LLVM_ENABLE_PROJECTS)
+  message(STATUS "Enabling MLIR as a dependency to flang")
+  list(APPEND LLVM_ENABLE_PROJECTS "mlir")
+endif()
 
 # LLVM_ENABLE_PROJECTS_USED is `ON` if the user has ever used the
 # `LLVM_ENABLE_PROJECTS` CMake cache variable.  This exists for
@@ -364,28 +368,29 @@ set(LLVM_ENABLE_ZLIB "ON" CACHE STRING "Use zlib for compression/decompression i
 
 set(LLVM_Z3_INSTALL_DIR "" CACHE STRING "Install directory of the Z3 solver.")
 
-find_package(Z3 4.7.1)
-
-if (LLVM_Z3_INSTALL_DIR)
-  if (NOT Z3_FOUND)
-    message(FATAL_ERROR "Z3 >= 4.7.1 has not been found in LLVM_Z3_INSTALL_DIR: ${LLVM_Z3_INSTALL_DIR}.")
-  endif()
-endif()
-
-set(LLVM_ENABLE_Z3_SOLVER_DEFAULT "${Z3_FOUND}")
-
 option(LLVM_ENABLE_Z3_SOLVER
   "Enable Support for the Z3 constraint solver in LLVM."
   ${LLVM_ENABLE_Z3_SOLVER_DEFAULT}
 )
 
 if (LLVM_ENABLE_Z3_SOLVER)
+  find_package(Z3 4.7.1)
+  
+  if (LLVM_Z3_INSTALL_DIR)
+    if (NOT Z3_FOUND)
+      message(FATAL_ERROR "Z3 >= 4.7.1 has not been found in LLVM_Z3_INSTALL_DIR: ${LLVM_Z3_INSTALL_DIR}.")
+    endif()
+  endif()
+  
   if (NOT Z3_FOUND)
     message(FATAL_ERROR "LLVM_ENABLE_Z3_SOLVER cannot be enabled when Z3 is not available.")
   endif()
 
   set(LLVM_WITH_Z3 1)
 endif()
+
+set(LLVM_ENABLE_Z3_SOLVER_DEFAULT "${Z3_FOUND}")
+
 
 if( LLVM_TARGETS_TO_BUILD STREQUAL "all" )
   set( LLVM_TARGETS_TO_BUILD ${LLVM_ALL_TARGETS} )
@@ -401,11 +406,10 @@ option(LLVM_ENABLE_WARNINGS "Enable compiler warnings." ON)
 option(LLVM_ENABLE_MODULES "Compile with C++ modules enabled." OFF)
 if(${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
   option(LLVM_ENABLE_MODULE_DEBUGGING "Compile with -gmodules." ON)
-  option(LLVM_ENABLE_LOCAL_SUBMODULE_VISIBILITY "Compile with -fmodules-local-submodule-visibility." OFF)
 else()
   option(LLVM_ENABLE_MODULE_DEBUGGING "Compile with -gmodules." OFF)
-  option(LLVM_ENABLE_LOCAL_SUBMODULE_VISIBILITY "Compile with -fmodules-local-submodule-visibility." ON)
 endif()
+option(LLVM_ENABLE_LOCAL_SUBMODULE_VISIBILITY "Compile with -fmodules-local-submodule-visibility." ON)
 option(LLVM_ENABLE_LIBCXX "Use libc++ if available." OFF)
 option(LLVM_STATIC_LINK_CXX_STDLIB "Statically link the standard library." OFF)
 option(LLVM_ENABLE_LLD "Use lld as C and C++ linker." OFF)
@@ -439,6 +443,9 @@ set(LLVM_ABI_BREAKING_CHECKS "WITH_ASSERTS" CACHE STRING
 
 option(LLVM_FORCE_USE_OLD_TOOLCHAIN
        "Set to ON to force using an old, unsupported host toolchain." OFF)
+
+set(LLVM_LOCAL_RPATH "" CACHE FILEPATH
+  "If set, an absolute path added as rpath on binaries that do not already contain an executable-relative rpath.")
 
 option(LLVM_TEMPORARILY_ALLOW_OLD_TOOLCHAIN
        "Set to ON to only warn when using a toolchain which is about to be deprecated, instead of emitting an error." OFF)
@@ -672,16 +679,38 @@ option(LLVM_ENABLE_PLUGINS "Enable plugin support" ${LLVM_ENABLE_PLUGINS_default
 
 include(HandleLLVMOptions)
 
-include(FindPythonInterp)
-if( NOT PYTHONINTERP_FOUND )
-  message(FATAL_ERROR
-"Unable to find Python interpreter, required for builds and testing.
+if(CMAKE_VERSION VERSION_LESS 3.12)
+  include(FindPythonInterp)
+  if( NOT PYTHONINTERP_FOUND )
+    message(FATAL_ERROR
+  "Unable to find Python interpreter, required for builds and testing.
 
-Please install Python or specify the PYTHON_EXECUTABLE CMake variable.")
-endif()
+  Please install Python or specify the PYTHON_EXECUTABLE CMake variable.")
+  endif()
 
-if( ${PYTHON_VERSION_STRING} VERSION_LESS 2.7 )
-  message(FATAL_ERROR "Python 2.7 or newer is required")
+  if( ${PYTHON_VERSION_STRING} VERSION_LESS 2.7 )
+    message(FATAL_ERROR "Python 2.7 or newer is required")
+  endif()
+
+  add_executable(Python3::Interpreter IMPORTED)
+  set_target_properties(Python3::Interpreter PROPERTIES
+    IMPORTED_LOCATION ${PYTHON_EXECUTABLE})
+  set(Python3_EXECUTABLE ${PYTHON_EXECUTABLE})
+else()
+  find_package(Python3 COMPONENTS Interpreter)
+  if(NOT Python3_Interpreter_FOUND)
+    message(WARNING "Python3 not found, using python2 as a fallback")
+    find_package(Python2 COMPONENTS Interpreter REQUIRED)
+    if(Python2_VERSION VERSION_LESS 2.7)
+      message(SEND_ERROR "Python 2.7 or newer is required")
+    endif()
+
+    # Treat python2 as python3
+    add_executable(Python3::Interpreter IMPORTED)
+    set_target_properties(Python3::Interpreter PROPERTIES
+      IMPORTED_LOCATION ${Python2_EXECUTABLE})
+    set(Python3_EXECUTABLE ${Python2_EXECUTABLE})
+  endif()
 endif()
 
 ######
@@ -717,7 +746,7 @@ endif (LLVM_USE_PERF)
 
 message(STATUS "Constructing LLVMBuild project information")
 execute_process(
-  COMMAND ${PYTHON_EXECUTABLE} -B ${LLVMBUILDTOOL}
+  COMMAND "${Python3_EXECUTABLE}" -B ${LLVMBUILDTOOL}
             --native-target "${LLVM_NATIVE_ARCH}"
             --enable-targets "${LLVM_TARGETS_TO_BUILD}"
             --enable-optional-components "${LLVMOPTIONALCOMPONENTS}"
@@ -853,6 +882,30 @@ endif()
 if (UNIX AND ${CMAKE_SYSTEM_NAME} MATCHES "AIX")
           add_definitions("-D_XOPEN_SOURCE=700")
           add_definitions("-D_LARGE_FILE_API")
+
+  # CMake versions less than 3.16 set default linker flags to include -brtl, as
+  # well as setting -G when building libraries, so clear them out. Note we only
+  # try to clear the form that CMake will set as part of its initial
+  # configuration, it is still possible the user may force it as part of a
+  # compound option.
+  if(CMAKE_VERSION VERSION_LESS 3.16)
+    string(REGEX REPLACE "(^|[ \t]+)-Wl,-brtl([ \t]+|$)" "" CMAKE_EXE_LINKER_FLAGS  "${CMAKE_EXE_LINKER_FLAGS}")
+    string(REGEX REPLACE "(^|[ \t]+)-Wl,-brtl([ \t]+|$)" "" CMAKE_SHARED_LINKER_FLAGS  "${CMAKE_SHARED_LINKER_FLAGS}")
+    string(REGEX REPLACE "(^|[ \t]+)-Wl,-brtl([ \t]+|$)" "" CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS}")
+    string(REGEX REPLACE "(^|[ \t]+)(-Wl,)?-G([ \t]+|$)" "" CMAKE_SHARED_LIBRARY_CREATE_C_FLAGS
+      "${CMAKE_SHARED_LIBRARY_CREATE_C_FLAGS}")
+    string(REGEX REPLACE "(^|[ \t]+)(-Wl,)?-G([ \t]+|$)" "" CMAKE_SHARED_LIBRARY_CREATE_CXX_FLAGS
+      "${CMAKE_SHARED_LIBRARY_CREATE_CXX_FLAGS}")
+    string(REGEX REPLACE "(^|[ \t]+)(-Wl,)?-G([ \t]+|$)" "" CMAKE_SHARED_LIBRARY_CREATE_ASM_FLAGS
+      "${CMAKE_SHARED_LIBRARY_CREATE_ASM_FLAGS}")
+  endif()
+
+  # Modules should be built with -G, so we can use runtime linking with
+  # plugins.
+  string(APPEND CMAKE_MODULE_LINKER_FLAGS " -G")
+
+  # Also set the correct flags for building shared libraries.
+  string(APPEND CMAKE_SHARED_LINKER_FLAGS " -shared")
 endif()
 
 # Build with _FILE_OFFSET_BITS=64 on Solaris to match g++ >= 9.
@@ -907,6 +960,37 @@ if( MINGW AND NOT "${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang" )
   # People report that -O3 is unreliable on MinGW. The traditional
   # build also uses -O2 for that reason:
   llvm_replace_compiler_option(CMAKE_CXX_FLAGS_RELEASE "-O3" "-O2")
+endif()
+
+# For up-to-date instructions for installing the Tensorflow dependency, refer to
+# the bot setup script: https://github.com/google/ml-compiler-opt/blob/master/buildbot/buildbot_init.sh
+# Specifically, assuming python3 is installed:
+# python3 -m pip install --upgrade pip && python3 -m pip install --user tf_nightly==2.3.0.dev20200528
+# Then set TENSORFLOW_AOT_PATH to the package install - usually it's ~/.local/lib/python3.7/site-packages/tensorflow
+#
+set(TENSORFLOW_AOT_PATH "" CACHE PATH "Path to TensorFlow pip install dir")
+
+if (NOT TENSORFLOW_AOT_PATH STREQUAL "")
+  set(LLVM_HAVE_TF_AOT "ON" CACHE BOOL "Tensorflow AOT available")
+  set(TENSORFLOW_AOT_COMPILER 
+    "${TENSORFLOW_AOT_PATH}/../../../../bin/saved_model_cli" 
+      CACHE PATH "Path to the Tensorflow AOT compiler")
+  add_definitions("-DLLVM_HAVE_TF_AOT")
+  include_directories(${TENSORFLOW_AOT_PATH}/include)
+  add_subdirectory(${TENSORFLOW_AOT_PATH}/xla_aot_runtime_src
+    ${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}/tf_runtime)
+endif()
+
+set(TENSORFLOW_C_LIB_PATH "" CACHE PATH "Path to TensorFlow C library install")
+find_library(tensorflow_c_api tensorflow PATHS ${TENSORFLOW_C_LIB_PATH}/lib)
+
+# Similar to the above Tensorflow dependency, please refer to the same script.
+# In this case, the latest C API library is available for download from
+# https://www.tensorflow.org/install/lang_c
+if (tensorflow_c_api)
+  set(LLVM_HAVE_TF_API "ON" CACHE BOOL "Full Tensorflow API available")
+  add_definitions("-DLLVM_HAVE_TF_API")
+  include_directories(${TENSORFLOW_C_LIB_PATH}/include)
 endif()
 
 # Put this before tblgen. Else we have a circular dependence.
@@ -1059,7 +1143,7 @@ if (NOT LLVM_INSTALL_TOOLCHAIN_ONLY)
 
   # Installing the headers needs to depend on generating any public
   # tablegen'd headers.
-  add_custom_target(llvm-headers DEPENDS intrinsics_gen)
+  add_custom_target(llvm-headers DEPENDS intrinsics_gen omp_gen)
   set_target_properties(llvm-headers PROPERTIES FOLDER "Misc")
 
   if (NOT LLVM_ENABLE_IDE)

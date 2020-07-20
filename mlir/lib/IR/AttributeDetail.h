@@ -65,28 +65,6 @@ struct ArrayAttributeStorage : public AttributeStorage {
   ArrayRef<Attribute> value;
 };
 
-/// An attribute representing a boolean value.
-struct BoolAttributeStorage : public AttributeStorage {
-  using KeyTy = std::pair<MLIRContext *, bool>;
-
-  BoolAttributeStorage(Type type, bool value)
-      : AttributeStorage(type), value(value) {}
-
-  /// We only check equality for and hash with the boolean key parameter.
-  bool operator==(const KeyTy &key) const { return key.second == value; }
-  static unsigned hashKey(const KeyTy &key) {
-    return llvm::hash_value(key.second);
-  }
-
-  static BoolAttributeStorage *construct(AttributeStorageAllocator &allocator,
-                                         const KeyTy &key) {
-    return new (allocator.allocate<BoolAttributeStorage>())
-        BoolAttributeStorage(IntegerType::get(1, key.first), key.second);
-  }
-
-  bool value;
-};
-
 /// An attribute representing a dictionary of sorted named attributes.
 struct DictionaryAttributeStorage final
     : public AttributeStorage,
@@ -154,9 +132,7 @@ struct FloatAttributeStorage final
 
   /// Construct a key with a type and double.
   static KeyTy getKey(Type type, double value) {
-    // Treat BF16 as double because it is not supported in LLVM's APFloat.
-    // TODO(b/121118307): add BF16 support to APFloat?
-    if (type.isBF16() || type.isF64())
+    if (type.isF64())
       return KeyTy(type, APFloat(value));
 
     // This handles, e.g., F16 because there is no APFloat constructor for it.
@@ -374,10 +350,9 @@ struct TypeAttributeStorage : public AttributeStorage {
 
 /// Return the bit width which DenseElementsAttr should use for this type.
 inline size_t getDenseElementBitWidth(Type eltType) {
-  // FIXME(b/121118307): using 64 bits for BF16 because it is currently stored
-  // with double semantics.
-  if (eltType.isBF16())
-    return 64;
+  // Align the width for complex to 8 to make storage and interpretation easier.
+  if (ComplexType comp = eltType.dyn_cast<ComplexType>())
+    return llvm::alignTo<8>(getDenseElementBitWidth(comp.getElementType())) * 2;
   if (eltType.isIndex())
     return IndexType::kInternalStorageBitWidth;
   return eltType.getIntOrFloatBitWidth();
@@ -594,7 +569,7 @@ struct DenseStringElementsAttributeStorage
     // If the data is already known to be a splat, the key hash value is
     // directly the data buffer.
     if (isKnownSplat)
-      return KeyTy(ty, data, llvm::hash_value(data), isKnownSplat);
+      return KeyTy(ty, data, llvm::hash_value(data.front()), isKnownSplat);
 
     // Handle the simple case of only one element.
     assert(ty.getNumElements() != 1 &&
@@ -611,7 +586,7 @@ struct DenseStringElementsAttributeStorage
         return KeyTy(ty, data, llvm::hash_combine(hashVal, data.drop_front(i)));
 
     // Otherwise, this is a splat so just return the hash of the first element.
-    return KeyTy(ty, {firstElt}, hashVal, /*isSplat=*/true);
+    return KeyTy(ty, data.take_front(), hashVal, /*isSplat=*/true);
   }
 
   /// Hash the key for the storage.
@@ -683,7 +658,7 @@ struct OpaqueElementsAttributeStorage : public AttributeStorage {
   /// Construct a new storage instance.
   static OpaqueElementsAttributeStorage *
   construct(AttributeStorageAllocator &allocator, KeyTy key) {
-    // TODO(b/131468830): Provide a way to avoid copying content of large opaque
+    // TODO: Provide a way to avoid copying content of large opaque
     // tensors This will likely require a new reference attribute kind.
     return new (allocator.allocate<OpaqueElementsAttributeStorage>())
         OpaqueElementsAttributeStorage(std::get<0>(key), std::get<1>(key),

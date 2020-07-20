@@ -72,6 +72,10 @@ static cl::opt<bool>  ClDistinguishVolatile(
     "tsan-distinguish-volatile", cl::init(false),
     cl::desc("Emit special instrumentation for accesses to volatiles"),
     cl::Hidden);
+static cl::opt<bool>  ClInstrumentReadBeforeWrite(
+    "tsan-instrument-read-before-write", cl::init(false),
+    cl::desc("Do not eliminate read instrumentation for read-before-writes"),
+    cl::Hidden);
 
 STATISTIC(NumInstrumentedReads, "Number of instrumented reads");
 STATISTIC(NumInstrumentedWrites, "Number of instrumented writes");
@@ -139,7 +143,9 @@ private:
 };
 
 struct ThreadSanitizerLegacyPass : FunctionPass {
-  ThreadSanitizerLegacyPass() : FunctionPass(ID) {}
+  ThreadSanitizerLegacyPass() : FunctionPass(ID) {
+    initializeThreadSanitizerLegacyPassPass(*PassRegistry::getPassRegistry());
+  }
   StringRef getPassName() const override;
   void getAnalysisUsage(AnalysisUsage &AU) const override;
   bool runOnFunction(Function &F) override;
@@ -272,28 +278,28 @@ void ThreadSanitizer::initialize(Module &M) {
     TsanAtomicStore[i] = M.getOrInsertFunction(
         AtomicStoreName, Attr, IRB.getVoidTy(), PtrTy, Ty, OrdTy);
 
-    for (int op = AtomicRMWInst::FIRST_BINOP;
-        op <= AtomicRMWInst::LAST_BINOP; ++op) {
-      TsanAtomicRMW[op][i] = nullptr;
+    for (unsigned Op = AtomicRMWInst::FIRST_BINOP;
+         Op <= AtomicRMWInst::LAST_BINOP; ++Op) {
+      TsanAtomicRMW[Op][i] = nullptr;
       const char *NamePart = nullptr;
-      if (op == AtomicRMWInst::Xchg)
+      if (Op == AtomicRMWInst::Xchg)
         NamePart = "_exchange";
-      else if (op == AtomicRMWInst::Add)
+      else if (Op == AtomicRMWInst::Add)
         NamePart = "_fetch_add";
-      else if (op == AtomicRMWInst::Sub)
+      else if (Op == AtomicRMWInst::Sub)
         NamePart = "_fetch_sub";
-      else if (op == AtomicRMWInst::And)
+      else if (Op == AtomicRMWInst::And)
         NamePart = "_fetch_and";
-      else if (op == AtomicRMWInst::Or)
+      else if (Op == AtomicRMWInst::Or)
         NamePart = "_fetch_or";
-      else if (op == AtomicRMWInst::Xor)
+      else if (Op == AtomicRMWInst::Xor)
         NamePart = "_fetch_xor";
-      else if (op == AtomicRMWInst::Nand)
+      else if (Op == AtomicRMWInst::Nand)
         NamePart = "_fetch_nand";
       else
         continue;
       SmallString<32> RMWName("__tsan_atomic" + itostr(BitSize) + NamePart);
-      TsanAtomicRMW[op][i] =
+      TsanAtomicRMW[Op][i] =
           M.getOrInsertFunction(RMWName, Attr, Ty, PtrTy, Ty, OrdTy);
     }
 
@@ -411,7 +417,7 @@ void ThreadSanitizer::chooseInstructionsToInstrument(
       Value *Addr = Load->getPointerOperand();
       if (!shouldInstrumentReadWriteFromAddress(I->getModule(), Addr))
         continue;
-      if (WriteTargets.count(Addr)) {
+      if (!ClInstrumentReadBeforeWrite && WriteTargets.count(Addr)) {
         // We will write to this temp, so no reason to analyze the read.
         NumOmittedReadsBeforeWrite++;
         continue;

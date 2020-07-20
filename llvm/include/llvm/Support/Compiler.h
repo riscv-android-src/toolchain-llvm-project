@@ -289,6 +289,14 @@
 #define LLVM_REQUIRE_CONSTANT_INITIALIZATION
 #endif
 
+/// LLVM_GSL_OWNER - Apply this to owning classes like SmallVector to enable
+/// lifetime warnings.
+#if LLVM_HAS_CPP_ATTRIBUTE(gsl::Owner)
+#define LLVM_GSL_OWNER [[gsl::Owner]]
+#else
+#define LLVM_GSL_OWNER
+#endif
+
 /// LLVM_GSL_POINTER - Apply this to non-owning classes like
 /// StringRef to enable lifetime warnings.
 #if LLVM_HAS_CPP_ATTRIBUTE(gsl::Pointer)
@@ -365,7 +373,6 @@
 #if __has_builtin(__builtin_assume_aligned) || LLVM_GNUC_PREREQ(4, 7, 0)
 # define LLVM_ASSUME_ALIGNED(p, a) __builtin_assume_aligned(p, a)
 #elif defined(LLVM_BUILTIN_UNREACHABLE)
-// As of today, clang does not support __builtin_assume_aligned.
 # define LLVM_ASSUME_ALIGNED(p, a) \
            (((uintptr_t(p) % (a)) == 0) ? (p) : (LLVM_BUILTIN_UNREACHABLE, (p)))
 #else

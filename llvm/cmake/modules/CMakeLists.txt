@@ -28,6 +28,9 @@ endforeach(lib)
 if(intrinsics_gen IN_LIST LLVM_COMMON_DEPENDS)
   list(REMOVE_ITEM LLVM_COMMON_DEPENDS intrinsics_gen)
 endif()
+if(omp_gen IN_LIST LLVM_COMMON_DEPENDS)
+  list(REMOVE_ITEM LLVM_COMMON_DEPENDS omp_gen)
+endif()
 
 # Generate LLVMConfig.cmake for the build tree.
 set(LLVM_CONFIG_CODE "
@@ -56,7 +59,11 @@ set(LLVM_CONFIG_TOOLS_BINARY_DIR "${LLVM_TOOLS_BINARY_DIR}")
 
 # Generate a default location for lit
 if (LLVM_BUILD_UTILS)
-  set(LLVM_CONFIG_DEFAULT_EXTERNAL_LIT "${LLVM_CONFIG_TOOLS_BINARY_DIR}/llvm-lit")
+  if (CMAKE_HOST_WIN32 AND NOT CYGWIN)
+    set(LLVM_CONFIG_DEFAULT_EXTERNAL_LIT "${LLVM_CONFIG_TOOLS_BINARY_DIR}/llvm-lit.py")
+  else()
+    set(LLVM_CONFIG_DEFAULT_EXTERNAL_LIT "${LLVM_CONFIG_TOOLS_BINARY_DIR}/llvm-lit")
+  endif()
 endif()
 
 if (LLVM_LINK_LLVM_DYLIB)

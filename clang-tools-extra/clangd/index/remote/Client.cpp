@@ -6,15 +6,18 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include <grpcpp/grpcpp.h>
+#include <grpc++/grpc++.h>
 
 #include "Client.h"
 #include "Index.grpc.pb.h"
-#include "Logger.h"
-#include "Trace.h"
+#include "index/Index.h"
 #include "index/Serialization.h"
 #include "marshalling/Marshalling.h"
-#include "llvm/Support/YAMLTraits.h"
+#include "support/Logger.h"
+#include "support/Trace.h"
+#include "llvm/ADT/StringRef.h"
+
+#include <chrono>
 
 namespace clang {
 namespace clangd {
@@ -26,7 +29,16 @@ class IndexClient : public clangd::SymbolIndex {
   using StreamingCall = std::unique_ptr<grpc::ClientReader<ReplyT>> (
       remote::SymbolIndex::Stub::*)(grpc::ClientContext *, const RequestT &);
 
-  // FIXME(kirillbobyrev): Set deadlines for requests.
+  template <typename ClangdRequestT, typename RequestT>
+  RequestT serializeRequest(ClangdRequestT Request) const {
+    return toProtobuf(Request);
+  }
+
+  template <>
+  FuzzyFindRequest serializeRequest(clangd::FuzzyFindRequest Request) const {
+    return toProtobuf(Request, ProjectRoot);
+  }
+
   template <typename RequestT, typename ReplyT, typename ClangdRequestT,
             typename CallbackT>
   bool streamRPC(ClangdRequestT Request,
@@ -34,8 +46,11 @@ class IndexClient : public clangd::SymbolIndex {
                  CallbackT Callback) const {
     bool FinalResult = false;
     trace::Span Tracer(RequestT::descriptor()->name());
-    const auto RPCRequest = toProtobuf(Request);
+    const auto RPCRequest = serializeRequest<ClangdRequestT, RequestT>(Request);
     grpc::ClientContext Context;
+    std::chrono::system_clock::time_point Deadline =
+        std::chrono::system_clock::now() + DeadlineWaitingTime;
+    Context.set_deadline(Deadline);
     auto Reader = (Stub.get()->*RPCCall)(&Context, RPCRequest);
     llvm::BumpPtrAllocator Arena;
     llvm::UniqueStringSaver Strings(Arena);
@@ -45,19 +60,22 @@ class IndexClient : public clangd::SymbolIndex {
         FinalResult = Reply.final_result();
         continue;
       }
-      auto Sym = fromProtobuf(Reply.stream_result(), &Strings);
-      if (!Sym)
-        elog("Received invalid {0}: {1}", ReplyT::descriptor()->name(),
-             Reply.stream_result().yaml_serialization());
-      Callback(*Sym);
+      auto Response =
+          fromProtobuf(Reply.stream_result(), &Strings, ProjectRoot);
+      if (!Response)
+        elog("Received invalid {0}", ReplyT::descriptor()->name());
+      Callback(*Response);
     }
     SPAN_ATTACH(Tracer, "status", Reader->Finish().ok());
     return FinalResult;
   }
 
 public:
-  IndexClient(std::shared_ptr<grpc::Channel> Channel)
-      : Stub(remote::SymbolIndex::NewStub(Channel)) {}
+  IndexClient(
+      std::shared_ptr<grpc::Channel> Channel, llvm::StringRef ProjectRoot,
+      std::chrono::milliseconds DeadlineTime = std::chrono::milliseconds(1000))
+      : Stub(remote::SymbolIndex::NewStub(Channel)), ProjectRoot(ProjectRoot),
+        DeadlineWaitingTime(DeadlineTime) {}
 
   void lookup(const clangd::LookupRequest &Request,
               llvm::function_ref<void(const clangd::Symbol &)> Callback) const {
@@ -81,20 +99,26 @@ public:
             llvm::function_ref<void(const SymbolID &, const clangd::Symbol &)>)
       const {}
 
-  // IndexClient does not take any space since the data is stored on the server.
+  // IndexClient does not take any space since the data is stored on the
+  // server.
   size_t estimateMemoryUsage() const { return 0; }
 
 private:
   std::unique_ptr<remote::SymbolIndex::Stub> Stub;
+  std::string ProjectRoot;
+  // Each request will be terminated if it takes too long.
+  std::chrono::milliseconds DeadlineWaitingTime;
 };
 
 } // namespace
 
-std::unique_ptr<clangd::SymbolIndex> getClient(llvm::StringRef Address) {
+std::unique_ptr<clangd::SymbolIndex> getClient(llvm::StringRef Address,
+                                               llvm::StringRef ProjectRoot) {
   const auto Channel =
       grpc::CreateChannel(Address.str(), grpc::InsecureChannelCredentials());
   Channel->GetState(true);
-  return std::unique_ptr<clangd::SymbolIndex>(new IndexClient(Channel));
+  return std::unique_ptr<clangd::SymbolIndex>(
+      new IndexClient(Channel, ProjectRoot));
 }
 
 } // namespace remote

@@ -241,8 +241,8 @@ template <> struct GraphTraits<Loop> : LoopBodyTraits {};
 } // namespace llvm
 
 // Overloaded wrappers to go with the function template below.
-BasicBlock *unwrapBlock(BasicBlock *B) { return B; }
-BasicBlock *unwrapBlock(LoopBodyTraits::NodeRef &N) { return N.second; }
+static BasicBlock *unwrapBlock(BasicBlock *B) { return B; }
+static BasicBlock *unwrapBlock(LoopBodyTraits::NodeRef &N) { return N.second; }
 
 static void createNaturalLoop(LoopInfo &LI, DominatorTree &DT, Function *F,
                               SetVector<BasicBlock *> &Blocks,
@@ -281,6 +281,9 @@ static bool makeReducible(LoopInfo &LI, DominatorTree &DT, Graph &&G) {
     LLVM_DEBUG(dbgs() << "Found headers:");
     for (auto BB : reverse(Blocks)) {
       for (const auto P : predecessors(BB)) {
+        // Skip unreachable predecessors.
+        if (!DT.isReachableFromEntry(P))
+          continue;
         if (!Blocks.count(P)) {
           LLVM_DEBUG(dbgs() << " " << BB->getName());
           Headers.insert(BB);

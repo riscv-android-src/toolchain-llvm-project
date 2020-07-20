@@ -23,17 +23,12 @@
 #define LLVM_LIB_ANALYSIS_OBJCARCANALYSISUTILS_H
 
 #include "llvm/ADT/Optional.h"
-#include "llvm/ADT/StringSwitch.h"
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/ObjCARCInstKind.h"
-#include "llvm/Analysis/Passes.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/Constants.h"
-#include "llvm/IR/InstIterator.h"
-#include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/ValueHandle.h"
-#include "llvm/Pass.h"
 
 namespace llvm {
 namespace objcarc {
@@ -151,9 +146,7 @@ inline bool IsPotentialRetainableObjPtr(const Value *Op) {
     return false;
   // Special arguments can not be a valid retainable object pointer.
   if (const Argument *Arg = dyn_cast<Argument>(Op))
-    if (Arg->hasByValAttr() ||
-        Arg->hasInAllocaAttr() ||
-        Arg->hasNestAttr() ||
+    if (Arg->hasPassPointeeByValueAttr() || Arg->hasNestAttr() ||
         Arg->hasStructRetAttr())
       return false;
   // Only consider values with pointer types.

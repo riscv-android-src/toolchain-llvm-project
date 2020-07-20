@@ -64,7 +64,7 @@ def : ExpComprPattern<v2f16, EXP_DONE, -1>;
 // Used to inject printing of "_e32" suffix for VI (there are "_e64" variants for VI)
 def VINTRPDst : VINTRPDstOperand <VGPR_32>;
 
-let Uses = [M0, EXEC] in {
+let Uses = [MODE, M0, EXEC] in {
 
 // FIXME: Specify SchedRW for VINTRP instructions.
 
@@ -109,7 +109,7 @@ defm V_INTERP_MOV_F32 : VINTRP_m <
   [(set f32:$vdst, (int_amdgcn_interp_mov (i32 timm:$vsrc),
                    (i32 timm:$attrchan), (i32 timm:$attr), M0))]>;
 
-} // End Uses = [M0, EXEC]
+} // End Uses = [MODE, M0, EXEC]
 
 //===----------------------------------------------------------------------===//
 // Pseudo Instructions
@@ -193,16 +193,27 @@ def V_SET_INACTIVE_B64 : VPseudoInstSI <(outs VReg_64:$vdst),
   let Constraints = "$src = $vdst";
 }
 
+let usesCustomInserter = 1, Defs = [VCC, EXEC] in {
+def V_ADD_U64_PSEUDO : VPseudoInstSI <
+  (outs VReg_64:$vdst), (ins VSrc_b64:$src0, VSrc_b64:$src1),
+  [(set VReg_64:$vdst, (getDivergentFrag<add>.ret i64:$src0, i64:$src1))]
+>;
+
+def V_SUB_U64_PSEUDO : VPseudoInstSI <
+  (outs VReg_64:$vdst), (ins VSrc_b64:$src0, VSrc_b64:$src1),
+  [(set VReg_64:$vdst, (getDivergentFrag<sub>.ret i64:$src0, i64:$src1))]
+>;
+} // End usesCustomInserter = 1, Defs = [VCC, EXEC]
 
 let usesCustomInserter = 1, Defs = [SCC] in {
 def S_ADD_U64_PSEUDO : SPseudoInstSI <
-  (outs SReg_64:$vdst), (ins SSrc_b64:$src0, SSrc_b64:$src1),
-  [(set SReg_64:$vdst, (add i64:$src0, i64:$src1))]
+  (outs SReg_64:$sdst), (ins SSrc_b64:$src0, SSrc_b64:$src1),
+  [(set SReg_64:$sdst, (UniformBinFrag<add> i64:$src0, i64:$src1))]
 >;
 
 def S_SUB_U64_PSEUDO : SPseudoInstSI <
-  (outs SReg_64:$vdst), (ins SSrc_b64:$src0, SSrc_b64:$src1),
-  [(set SReg_64:$vdst, (sub i64:$src0, i64:$src1))]
+  (outs SReg_64:$sdst), (ins SSrc_b64:$src0, SSrc_b64:$src1),
+  [(set SReg_64:$sdst, (UniformBinFrag<sub> i64:$src0, i64:$src1))]
 >;
 
 def S_ADD_U64_CO_PSEUDO : SPseudoInstSI <
@@ -212,6 +223,23 @@ def S_ADD_U64_CO_PSEUDO : SPseudoInstSI <
 def S_SUB_U64_CO_PSEUDO : SPseudoInstSI <
   (outs SReg_64:$vdst, VOPDstS64orS32:$sdst), (ins SSrc_b64:$src0, SSrc_b64:$src1)
 >;
+
+def S_ADD_CO_PSEUDO : SPseudoInstSI <
+  (outs SReg_32:$sdst, SSrc_i1:$scc_out), (ins SSrc_b32:$src0, SSrc_b32:$src1, SSrc_i1:$scc_in)
+>;
+
+def S_SUB_CO_PSEUDO : SPseudoInstSI <
+  (outs SReg_32:$sdst, SSrc_i1:$scc_out), (ins SSrc_b32:$src0, SSrc_b32:$src1, SSrc_i1:$scc_in)
+>;
+
+def S_UADDO_PSEUDO : SPseudoInstSI <
+  (outs SReg_32:$sdst, SSrc_i1:$scc_out), (ins SSrc_b32:$src0, SSrc_b32:$src1)
+>;
+
+def S_USUBO_PSEUDO : SPseudoInstSI <
+  (outs SReg_32:$sdst, SSrc_i1:$scc_out), (ins SSrc_b32:$src0, SSrc_b32:$src1)
+>;
+
 } // End usesCustomInserter = 1, Defs = [SCC]
 
 let usesCustomInserter = 1 in {
@@ -246,13 +274,14 @@ def S_OR_B32_term : WrapTerminatorInst<S_OR_B32>;
 def S_ANDN2_B32_term : WrapTerminatorInst<S_ANDN2_B32>;
 }
 
+
 def WAVE_BARRIER : SPseudoInstSI<(outs), (ins),
   [(int_amdgcn_wave_barrier)]> {
   let SchedRW = [];
   let hasNoSchedulingInfo = 1;
   let hasSideEffects = 1;
-  let mayLoad = 1;
-  let mayStore = 1;
+  let mayLoad = 0;
+  let mayStore = 0;
   let isConvergent = 1;
   let FixedSize = 1;
   let Size = 0;
@@ -350,6 +379,9 @@ multiclass PseudoInstKill <dag ins> {
 defm SI_KILL_I1 : PseudoInstKill <(ins SCSrc_i1:$src, i1imm:$killvalue)>;
 defm SI_KILL_F32_COND_IMM : PseudoInstKill <(ins VSrc_b32:$src0, i32imm:$src1, i32imm:$cond)>;
 
+let Defs = [EXEC] in
+def SI_KILL_CLEANUP : SPseudoInstSI <(outs), (ins)>;
+
 let Defs = [EXEC,VCC] in
 def SI_ILLEGAL_COPY : SPseudoInstSI <
   (outs unknown:$dst), (ins unknown:$src),
@@ -418,7 +450,7 @@ def SI_INIT_EXEC_FROM_INPUT : SPseudoInstSI <
 
 def : GCNPat <
   (int_amdgcn_init_exec timm:$src),
-  (SI_INIT_EXEC_LO (as_i32imm imm:$src))> {
+  (SI_INIT_EXEC_LO (as_i32timm timm:$src))> {
   let WaveSizePredicate = isWave32;
 }
 
@@ -537,12 +569,14 @@ def SI_INDIRECT_SRC_V2 : SI_INDIRECT_SRC<VReg_64>;
 def SI_INDIRECT_SRC_V4 : SI_INDIRECT_SRC<VReg_128>;
 def SI_INDIRECT_SRC_V8 : SI_INDIRECT_SRC<VReg_256>;
 def SI_INDIRECT_SRC_V16 : SI_INDIRECT_SRC<VReg_512>;
+def SI_INDIRECT_SRC_V32 : SI_INDIRECT_SRC<VReg_1024>;
 
 def SI_INDIRECT_DST_V1 : SI_INDIRECT_DST<VGPR_32>;
 def SI_INDIRECT_DST_V2 : SI_INDIRECT_DST<VReg_64>;
 def SI_INDIRECT_DST_V4 : SI_INDIRECT_DST<VReg_128>;
 def SI_INDIRECT_DST_V8 : SI_INDIRECT_DST<VReg_256>;
 def SI_INDIRECT_DST_V16 : SI_INDIRECT_DST<VReg_512>;
+def SI_INDIRECT_DST_V32 : SI_INDIRECT_DST<VReg_1024>;
 
 } // End Uses = [EXEC], Defs = [M0, EXEC]
 
@@ -632,6 +666,7 @@ defm SI_SPILL_S64  : SI_SPILL_SGPR <SReg_64>;
 defm SI_SPILL_S96  : SI_SPILL_SGPR <SReg_96>;
 defm SI_SPILL_S128 : SI_SPILL_SGPR <SReg_128>;
 defm SI_SPILL_S160 : SI_SPILL_SGPR <SReg_160>;
+defm SI_SPILL_S192 : SI_SPILL_SGPR <SReg_192>;
 defm SI_SPILL_S256 : SI_SPILL_SGPR <SReg_256>;
 defm SI_SPILL_S512 : SI_SPILL_SGPR <SReg_512>;
 defm SI_SPILL_S1024 : SI_SPILL_SGPR <SReg_1024>;
@@ -671,6 +706,7 @@ defm SI_SPILL_V64  : SI_SPILL_VGPR <VReg_64>;
 defm SI_SPILL_V96  : SI_SPILL_VGPR <VReg_96>;
 defm SI_SPILL_V128 : SI_SPILL_VGPR <VReg_128>;
 defm SI_SPILL_V160 : SI_SPILL_VGPR <VReg_160>;
+defm SI_SPILL_V192 : SI_SPILL_VGPR <VReg_192>;
 defm SI_SPILL_V256 : SI_SPILL_VGPR <VReg_256>;
 defm SI_SPILL_V512 : SI_SPILL_VGPR <VReg_512>;
 defm SI_SPILL_V1024 : SI_SPILL_VGPR <VReg_1024>;
@@ -884,6 +920,7 @@ class FMADModsPat<ValueType Ty, Instruction inst, SDPatternOperator mad_opr>
   $src2_mod, $src2, DSTCLAMP.NONE, DSTOMOD.NONE)
 >;
 
+let SubtargetPredicate = HasMadMacF32Insts in
 def : FMADModsPat<f32, V_MAD_F32, AMDGPUfmad_ftz>;
 def : FMADModsPat<f16, V_MAD_F16, AMDGPUfmad_ftz> {
   let SubtargetPredicate = Has16BitInsts;
@@ -1149,14 +1186,46 @@ def : BitConvert <v8i32, v8f32, SReg_256>;
 def : BitConvert <v8f32, v8i32, SReg_256>;
 def : BitConvert <v8i32, v8f32, VReg_256>;
 def : BitConvert <v8f32, v8i32, VReg_256>;
+def : BitConvert <v4i64, v4f64, VReg_256>;
+def : BitConvert <v4f64, v4i64, VReg_256>;
+def : BitConvert <v4i64, v8i32, VReg_256>;
+def : BitConvert <v4i64, v8f32, VReg_256>;
+def : BitConvert <v4f64, v8i32, VReg_256>;
+def : BitConvert <v4f64, v8f32, VReg_256>;
+def : BitConvert <v8i32, v4i64, VReg_256>;
+def : BitConvert <v8f32, v4i64, VReg_256>;
+def : BitConvert <v8i32, v4f64, VReg_256>;
+def : BitConvert <v8f32, v4f64, VReg_256>;
+
 
 // 512-bit bitcast
 def : BitConvert <v16i32, v16f32, VReg_512>;
 def : BitConvert <v16f32, v16i32, VReg_512>;
+def : BitConvert <v8i64,  v8f64,  VReg_512>;
+def : BitConvert <v8f64,  v8i64,  VReg_512>;
+def : BitConvert <v8i64,  v16i32, VReg_512>;
+def : BitConvert <v8f64,  v16i32, VReg_512>;
+def : BitConvert <v16i32, v8i64,  VReg_512>;
+def : BitConvert <v16i32, v8f64,  VReg_512>;
+def : BitConvert <v8i64,  v16f32, VReg_512>;
+def : BitConvert <v8f64,  v16f32, VReg_512>;
+def : BitConvert <v16f32, v8i64,  VReg_512>;
+def : BitConvert <v16f32, v8f64,  VReg_512>;
 
 // 1024-bit bitcast
 def : BitConvert <v32i32, v32f32, VReg_1024>;
 def : BitConvert <v32f32, v32i32, VReg_1024>;
+def : BitConvert <v16i64, v16f64, VReg_1024>;
+def : BitConvert <v16f64, v16i64, VReg_1024>;
+def : BitConvert <v16i64, v32i32, VReg_1024>;
+def : BitConvert <v32i32, v16i64, VReg_1024>;
+def : BitConvert <v16f64, v32f32, VReg_1024>;
+def : BitConvert <v32f32, v16f64, VReg_1024>;
+def : BitConvert <v16i64, v32f32, VReg_1024>;
+def : BitConvert <v32i32, v16f64, VReg_1024>;
+def : BitConvert <v16f64, v32i32, VReg_1024>;
+def : BitConvert <v32f32, v16i64, VReg_1024>;
+
 
 /********** =================== **********/
 /********** Src & Dst modifiers **********/
@@ -1483,11 +1552,12 @@ class Ext32Pat <SDNode ext> : GCNPat <
 def : Ext32Pat <zext>;
 def : Ext32Pat <anyext>;
 
-// The multiplication scales from [0,1] to the unsigned integer range
+// The multiplication scales from [0,1) to the unsigned integer range,
+// rounding down a bit to avoid unwanted overflow.
 def : GCNPat <
   (AMDGPUurecip i32:$src0),
   (V_CVT_U32_F32_e32
-    (V_MUL_F32_e32 (i32 CONST.FP_UINT_MAX_PLUS_1),
+    (V_MUL_F32_e32 (i32 CONST.FP_4294966784),
                    (V_RCP_IFLAG_F32_e32 (V_CVT_F32_U32_e32 $src0))))
 >;
 
@@ -1532,11 +1602,13 @@ defm : SI_INDIRECT_Pattern <v2f32, f32, "V2">;
 defm : SI_INDIRECT_Pattern <v4f32, f32, "V4">;
 defm : SI_INDIRECT_Pattern <v8f32, f32, "V8">;
 defm : SI_INDIRECT_Pattern <v16f32, f32, "V16">;
+defm : SI_INDIRECT_Pattern <v32f32, f32, "V32">;
 
 defm : SI_INDIRECT_Pattern <v2i32, i32, "V2">;
 defm : SI_INDIRECT_Pattern <v4i32, i32, "V4">;
 defm : SI_INDIRECT_Pattern <v8i32, i32, "V8">;
 defm : SI_INDIRECT_Pattern <v16i32, i32, "V16">;
+defm : SI_INDIRECT_Pattern <v32i32, i32, "V32">;
 
 //===----------------------------------------------------------------------===//
 // SAD Patterns

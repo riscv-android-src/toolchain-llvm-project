@@ -218,6 +218,39 @@ void aarch64::getAArch64TargetFeatures(const Driver &D,
       D.Diag(diag::err_drv_invalid_mtp) << A->getAsString(Args);
   }
 
+  // Enable/disable straight line speculation hardening.
+  if (Arg *A = Args.getLastArg(options::OPT_mharden_sls_EQ)) {
+    StringRef Scope = A->getValue();
+    bool EnableRetBr = false;
+    bool EnableBlr = false;
+    if (Scope != "none" && Scope != "all") {
+      SmallVector<StringRef, 4> Opts;
+      Scope.split(Opts, ",");
+      for (auto Opt : Opts) {
+        Opt = Opt.trim();
+        if (Opt == "retbr") {
+          EnableRetBr = true;
+          continue;
+        }
+        if (Opt == "blr") {
+          EnableBlr = true;
+          continue;
+        }
+        D.Diag(diag::err_invalid_sls_hardening)
+            << Scope << A->getAsString(Args);
+        break;
+      }
+    } else if (Scope == "all") {
+      EnableRetBr = true;
+      EnableBlr = true;
+    }
+
+    if (EnableRetBr)
+      Features.push_back("+harden-sls-retbr");
+    if (EnableBlr)
+      Features.push_back("+harden-sls-blr");
+  }
+
   // En/disable crc
   if (Arg *A = Args.getLastArg(options::OPT_mcrc, options::OPT_mnocrc)) {
     if (A->getOption().matches(options::OPT_mcrc))
@@ -408,6 +441,9 @@ fp16_fml_fallthrough:
 
   if (Args.hasArg(options::OPT_ffixed_x28))
     Features.push_back("+reserve-x28");
+
+  if (Args.hasArg(options::OPT_ffixed_x30))
+    Features.push_back("+reserve-x30");
 
   if (Args.hasArg(options::OPT_fcall_saved_x8))
     Features.push_back("+call-saved-x8");

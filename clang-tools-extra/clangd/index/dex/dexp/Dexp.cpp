@@ -11,15 +11,12 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "Features.inc"
-#include "SourceCode.h"
 #include "index/Serialization.h"
 #include "index/dex/Dex.h"
 #include "index/remote/Client.h"
 #include "llvm/ADT/ScopeExit.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
-#include "llvm/ADT/StringSwitch.h"
 #include "llvm/LineEditor/LineEditor.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Signals.h"
@@ -35,7 +32,10 @@ llvm::cl::opt<std::string> IndexLocation(
 llvm::cl::opt<std::string>
     ExecCommand("c", llvm::cl::desc("Command to execute and then exit"));
 
-static const std::string Overview = R"(
+llvm::cl::opt<std::string> ProjectRoot("project-root",
+                                       llvm::cl::desc("Path to the project"));
+
+static constexpr char Overview[] = R"(
 This is an **experimental** interactive tool to process user-provided search
 queries over given symbol collection obtained via clangd-indexer. The
 tool can be used to evaluate search quality of existing index implementations
@@ -329,7 +329,8 @@ struct {
 
 std::unique_ptr<SymbolIndex> openIndex(llvm::StringRef Index) {
   return Index.startswith("remote:")
-             ? remote::getClient(Index.drop_front(strlen("remote:")))
+             ? remote::getClient(Index.drop_front(strlen("remote:")),
+                                 ProjectRoot)
              : loadIndex(Index, /*UseDex=*/true);
 }
 

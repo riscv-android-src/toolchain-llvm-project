@@ -75,6 +75,13 @@ New module
 
 New checks
 ^^^^^^^^^^
+
+- New :doc:`abseil-string-find-str-contains
+  <clang-tidy/checks/abseil-string-find-str-contains>` check.
+
+  Finds ``s.find(...) == string::npos`` comparisons (for various string-like types)
+  and suggests replacing with ``absl::StrContains()``.
+
 - New :doc:`cppcoreguidelines-avoid-non-const-global-variables
   <clang-tidy/checks/cppcoreguidelines-avoid-non-const-global-variables>` check.
   Finds non-const global variables as described in check I.2 of C++ Core
@@ -86,6 +93,12 @@ New checks
   Finds cases where an integer expression is added to or subtracted from the
   result of a memory allocation function (``malloc()``, ``calloc()``,
   ``realloc()``, ``alloca()``) instead of its argument.
+
+- New :doc:`bugprone-no-escape
+  <clang-tidy/checks/bugprone-no-escape>` check.
+
+  Finds pointers with the ``noescape`` attribute that are captured by an
+  asynchronously-executed block.
 
 - New :doc:`bugprone-spuriously-wake-up-functions
   <clang-tidy/checks/bugprone-spuriously-wake-up-functions>` check.
@@ -113,6 +126,11 @@ New checks
   Flags use of the `C` standard library functions ``memset``, ``memcpy`` and
   ``memcmp`` and similar derivatives on non-trivial types.
 
+- New :doc:`llvmlibc-callee-namespace
+  <clang-tidy/checks/llvmlibc-callee-namespace>` check.
+
+  Checks all calls resolve to functions within ``__llvm_libc`` namespace.
+
 - New :doc:`llvmlibc-implementation-in-namespace
   <clang-tidy/checks/llvmlibc-implementation-in-namespace>` check.
 
@@ -123,6 +141,12 @@ New checks
 
   Finds includes of system libc headers not provided by the compiler within
   llvm-libc implementations.
+
+- New :doc:`modernize-replace-disallow-copy-and-assign-macro
+  <clang-tidy/checks/modernize-replace-disallow-copy-and-assign-macro>` check.
+
+  Finds macro expansions of ``DISALLOW_COPY_AND_ASSIGN`` and replaces them with
+  a deleted copy constructor and a deleted assignment operator.
 
 - New :doc:`objc-dealloc-in-category
   <clang-tidy/checks/objc-dealloc-in-category>` check.
@@ -139,6 +163,12 @@ New checks
 
   Finds calls to ``NSInvocation`` methods under ARC that don't have proper
   argument object lifetimes.
+
+- New :doc:`readability-use-anyofallof
+  <clang-tidy/checks/readability-use-anyofallof>` check.
+
+  Finds range-based for loops that can be replaced by a call to ``std::any_of``
+  or ``std::all_of``.
 
 New check aliases
 ^^^^^^^^^^^^^^^^^
@@ -163,8 +193,34 @@ New check aliases
   :doc:`bugprone-reserved-identifier
   <clang-tidy/checks/bugprone-reserved-identifier>` was added.
 
+- New alias :doc:`cert-str34-c
+  <clang-tidy/checks/cert-str34-c>` to
+  :doc:`bugprone-signed-char-misuse
+  <clang-tidy/checks/bugprone-signed-char-misuse>` was added.
+
+- New alias :doc:`llvm-else-after-return
+  <clang-tidy/checks/llvm-else-after-return>` to
+  :doc:`readability-else-after-return
+  <clang-tidy/checks/readability-else-after-return>` was added.
+
 Changes in existing checks
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+- Improved :doc:`performance-faster-string-find
+  <clang-tidy/checks/performance-faster-string-find>` check.
+
+  Now checks ``std::basic_string_view`` by default.
+
+- Improved :doc:`readability-else-after-return
+  <clang-tidy/checks/readability-else-after-return>` check now supports a
+  `WarnOnConditionVariables` option to control whether to refactor condition
+  variables where possible.
+
+- Improved :doc:`readability-identifier-naming
+  <clang-tidy/checks/readability-identifier-naming>` check.
+
+  Now able to rename member references in class template definitions with
+  explicit access.
 
 - Improved :doc:`readability-qualified-auto
   <clang-tidy/checks/readability-qualified-auto>` check now supports a
