@@ -664,7 +664,6 @@ constexpr auto logicalFALSE{
 constexpr auto rawHollerithLiteral{
     deprecated<LanguageFeature::Hollerith>(HollerithLiteral{})};
 
-
 template <typename A> constexpr decltype(auto) verbatim(A x) {
   return sourced(construct<Verbatim>(x));
 }

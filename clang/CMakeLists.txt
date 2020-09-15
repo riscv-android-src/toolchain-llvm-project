@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.4.3)
+cmake_minimum_required(VERSION 3.13.4)
 
 if(POLICY CMP0075)
   cmake_policy(SET CMP0075 NEW)
@@ -531,7 +531,7 @@ list(APPEND LLVM_COMMON_DEPENDS clang-tablegen-targets)
 # Force target to be built as soon as possible. Clang modules builds depend
 # header-wise on it as they ship all headers from the umbrella folders. Building
 # an entire module might include header, which depends on intrinsics_gen.
-if(LLVM_ENABLE_MODULES AND NOT CLANG_BUILT_STANDALONE)
+if(LLVM_ENABLE_MODULES)
   list(APPEND LLVM_COMMON_DEPENDS intrinsics_gen)
 endif()
 

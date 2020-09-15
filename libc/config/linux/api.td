@@ -163,6 +163,9 @@ def MathAPI : PublicAPI<"math.h"> {
    "floor",
    "floorf",
    "floorl",
+   "fmin",
+   "fminf",
+   "fminl",
    "frexp",
    "frexpf",
    "frexpl",
@@ -210,6 +213,7 @@ def StringAPI : PublicAPI<"string.h"> {
     "strtok",
     "strerror",
     "strlen",
+    "strnlen"
   ];
 
   let TypeDeclarations = [

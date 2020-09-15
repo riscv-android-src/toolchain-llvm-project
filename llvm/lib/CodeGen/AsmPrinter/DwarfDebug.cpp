@@ -1071,9 +1071,8 @@ DwarfDebug::getOrCreateDwarfCompileUnit(const DICompileUnit *DIUnit) {
   // compilation directory.
   if (!Asm->OutStreamer->hasRawTextSupport() || SingleCU)
     Asm->OutStreamer->emitDwarfFile0Directive(
-        CompilationDir, DIUnit->getFilename(),
-        NewCU.getMD5AsBytes(DIUnit->getFile()), DIUnit->getSource(),
-        NewCU.getUniqueID());
+        CompilationDir, DIUnit->getFilename(), getMD5AsBytes(DIUnit->getFile()),
+        DIUnit->getSource(), NewCU.getUniqueID());
 
   if (useSplitDwarf()) {
     NewCU.setSkeleton(constructSkeletonCU(NewCU));
@@ -3001,7 +3000,10 @@ static void emitMacroHeader(AsmPrinter *Asm, const DwarfDebug &DD,
   Asm->OutStreamer->AddComment("Flags: 32 bit, debug_line_offset present");
   Asm->emitInt8(Flags);
   Asm->OutStreamer->AddComment("debug_line_offset");
-  Asm->OutStreamer->emitSymbolValue(CU.getLineTableStartSym(), /*Size=*/4);
+  if (DD.useSplitDwarf())
+    Asm->OutStreamer->emitIntValue(0, /*Size=*/4);
+  else
+    Asm->OutStreamer->emitSymbolValue(CU.getLineTableStartSym(), /*Size=*/4);
 }
 
 void DwarfDebug::handleMacroNodes(DIMacroNodeArray Nodes, DwarfCompileUnit &U) {
@@ -3057,16 +3059,22 @@ void DwarfDebug::emitMacro(DIMacro &M) {
 }
 
 void DwarfDebug::emitMacroFileImpl(
-    DIMacroFile &F, DwarfCompileUnit &U, unsigned StartFile, unsigned EndFile,
+    DIMacroFile &MF, DwarfCompileUnit &U, unsigned StartFile, unsigned EndFile,
     StringRef (*MacroFormToString)(unsigned Form)) {
 
   Asm->OutStreamer->AddComment(MacroFormToString(StartFile));
   Asm->emitULEB128(StartFile);
   Asm->OutStreamer->AddComment("Line Number");
-  Asm->emitULEB128(F.getLine());
+  Asm->emitULEB128(MF.getLine());
   Asm->OutStreamer->AddComment("File Number");
-  Asm->emitULEB128(U.getOrCreateSourceID(F.getFile()));
-  handleMacroNodes(F.getElements(), U);
+  DIFile &F = *MF.getFile();
+  if (useSplitDwarf())
+    Asm->emitULEB128(getDwoLineTable(U)->getFile(
+        F.getDirectory(), F.getFilename(), getMD5AsBytes(&F),
+        Asm->OutContext.getDwarfVersion(), F.getSource()));
+  else
+    Asm->emitULEB128(U.getOrCreateSourceID(&F));
+  handleMacroNodes(MF.getElements(), U);
   Asm->OutStreamer->AddComment(MacroFormToString(EndFile));
   Asm->emitULEB128(EndFile);
 }
@@ -3200,7 +3208,7 @@ MCDwarfDwoLineTable *DwarfDebug::getDwoLineTable(const DwarfCompileUnit &CU) {
   const DICompileUnit *DIUnit = CU.getCUNode();
   SplitTypeUnitFileTable.maybeSetRootFile(
       DIUnit->getDirectory(), DIUnit->getFilename(),
-      CU.getMD5AsBytes(DIUnit->getFile()), DIUnit->getSource());
+      getMD5AsBytes(DIUnit->getFile()), DIUnit->getSource());
   return &SplitTypeUnitFileTable;
 }
 
@@ -3382,4 +3390,21 @@ void DwarfDebug::insertSectionLabel(const MCSymbol *S) {
   if (SectionLabels.insert(std::make_pair(&S->getSection(), S)).second)
     if (useSplitDwarf() || getDwarfVersion() >= 5)
       AddrPool.getIndex(S);
+}
+
+Optional<MD5::MD5Result> DwarfDebug::getMD5AsBytes(const DIFile *File) const {
+  assert(File);
+  if (getDwarfVersion() < 5)
+    return None;
+  Optional<DIFile::ChecksumInfo<StringRef>> Checksum = File->getChecksum();
+  if (!Checksum || Checksum->Kind != DIFile::CSK_MD5)
+    return None;
+
+  // Convert the string checksum to an MD5Result for the streamer.
+  // The verifier validates the checksum so we assume it's okay.
+  // An MD5 checksum is 16 bytes.
+  std::string ChecksumString = fromHex(Checksum->Value);
+  MD5::MD5Result CKMem;
+  std::copy(ChecksumString.begin(), ChecksumString.end(), CKMem.Bytes.data());
+  return CKMem;
 }

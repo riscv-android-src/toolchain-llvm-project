@@ -1222,7 +1222,8 @@ static bool isUndefShift(Value *Amount) {
 
   // If all lanes of a vector shift are undefined the whole shift is.
   if (isa<ConstantVector>(C) || isa<ConstantDataVector>(C)) {
-    for (unsigned I = 0, E = cast<VectorType>(C->getType())->getNumElements();
+    for (unsigned I = 0,
+                  E = cast<FixedVectorType>(C->getType())->getNumElements();
          I != E; ++I)
       if (!isUndefShift(C->getAggregateElement(I)))
         return false;
@@ -3703,6 +3704,13 @@ static Value *SimplifyFCmpInst(unsigned Predicate, Value *LHS, Value *RHS,
           break;
         }
       }
+
+      // LHS == Inf
+      if (Pred == FCmpInst::FCMP_OEQ && isKnownNeverInfinity(LHS, Q.TLI))
+        return getFalse(RetTy);
+      // LHS != Inf
+      if (Pred == FCmpInst::FCMP_UNE && isKnownNeverInfinity(LHS, Q.TLI))
+        return getTrue(RetTy);
     }
     if (C->isNegative() && !C->isNegZero()) {
       assert(!C->isNaN() && "Unexpected NaN constant!");
@@ -4118,22 +4126,17 @@ static Value *SimplifySelectInst(Value *Cond, Value *TrueVal, Value *FalseVal,
   if (TrueVal == FalseVal)
     return TrueVal;
 
-  // If the true or false value is undef, we can fold to the other value as
-  // long as the other value isn't poison.
-  // select ?, undef, X -> X
-  if (isa<UndefValue>(TrueVal) &&
-      isGuaranteedNotToBeUndefOrPoison(FalseVal, Q.CxtI, Q.DT))
+  if (isa<UndefValue>(TrueVal))   // select ?, undef, X -> X
     return FalseVal;
-  // select ?, X, undef -> X
-  if (isa<UndefValue>(FalseVal) &&
-      isGuaranteedNotToBeUndefOrPoison(TrueVal, Q.CxtI, Q.DT))
+  if (isa<UndefValue>(FalseVal))   // select ?, X, undef -> X
     return TrueVal;
 
   // Deal with partial undef vector constants: select ?, VecC, VecC' --> VecC''
   Constant *TrueC, *FalseC;
   if (TrueVal->getType()->isVectorTy() && match(TrueVal, m_Constant(TrueC)) &&
       match(FalseVal, m_Constant(FalseC))) {
-    unsigned NumElts = cast<VectorType>(TrueC->getType())->getNumElements();
+    unsigned NumElts =
+        cast<FixedVectorType>(TrueC->getType())->getNumElements();
     SmallVector<Constant *, 16> NewC;
     for (unsigned i = 0; i != NumElts; ++i) {
       // Bail out on incomplete vector constants.
@@ -4146,11 +4149,9 @@ static Value *SimplifySelectInst(Value *Cond, Value *TrueVal, Value *FalseVal,
       // one element is undef, choose the defined element as the safe result.
       if (TEltC == FEltC)
         NewC.push_back(TEltC);
-      else if (isa<UndefValue>(TEltC) &&
-               isGuaranteedNotToBeUndefOrPoison(FEltC))
+      else if (isa<UndefValue>(TEltC))
         NewC.push_back(FEltC);
-      else if (isa<UndefValue>(FEltC) &&
-               isGuaranteedNotToBeUndefOrPoison(TEltC))
+      else if (isa<UndefValue>(FEltC))
         NewC.push_back(TEltC);
       else
         break;
@@ -4421,7 +4422,7 @@ static Value *SimplifyExtractElementInst(Value *Vec, Value *Idx, const SimplifyQ
   if (auto *IdxC = dyn_cast<ConstantInt>(Idx)) {
     // For fixed-length vector, fold into undef if index is out of bounds.
     if (isa<FixedVectorType>(VecVTy) &&
-        IdxC->getValue().uge(VecVTy->getNumElements()))
+        IdxC->getValue().uge(cast<FixedVectorType>(VecVTy)->getNumElements()))
       return UndefValue::get(VecVTy->getElementType());
     if (Value *Elt = findScalarElement(Vec, IdxC->getZExtValue()))
       return Elt;
@@ -4527,7 +4528,7 @@ static Value *foldIdentityShuffles(int DestElt, Value *Op0, Value *Op1,
     return nullptr;
 
   // The mask value chooses which source operand we need to look at next.
-  int InVecNumElts = cast<VectorType>(Op0->getType())->getNumElements();
+  int InVecNumElts = cast<FixedVectorType>(Op0->getType())->getNumElements();
   int RootElt = MaskVal;
   Value *SourceOp = Op0;
   if (MaskVal >= InVecNumElts) {

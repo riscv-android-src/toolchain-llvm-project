@@ -28,8 +28,8 @@ TYPE_PARSER("AUTO" >> construct<AccClause>(construct<AccClause::Auto>()) ||
                    maybe(parenthesized(scalarIntExpr)))) ||
     "ATTACH" >> construct<AccClause>(construct<AccClause::Attach>(
                     parenthesized(Parser<AccObjectList>{}))) ||
-    "BIND" >> construct<AccClause>(construct<AccClause::Bind>(
-        parenthesized(name))) ||
+    "BIND" >>
+        construct<AccClause>(construct<AccClause::Bind>(parenthesized(name))) ||
     "CAPTURE" >> construct<AccClause>(construct<AccClause::Capture>()) ||
     "COLLAPSE" >> construct<AccClause>(construct<AccClause::Collapse>(
                       parenthesized(scalarIntConstantExpr))) ||
@@ -62,11 +62,11 @@ TYPE_PARSER("AUTO" >> construct<AccClause>(construct<AccClause::Auto>()) ||
     "DEVICE_RESIDENT" >>
         construct<AccClause>(construct<AccClause::DeviceResident>(
             parenthesized(Parser<AccObjectList>{}))) ||
-    ("DEVICE_TYPE"_tok || "DTYPE"_tok) >> construct<AccClause>(
-        construct<AccClause::DeviceType>(parenthesized(
+    ("DEVICE_TYPE"_tok || "DTYPE"_tok) >>
+        construct<AccClause>(construct<AccClause::DeviceType>(parenthesized(
             "*" >> construct<std::optional<std::list<Name>>>()))) ||
-    ("DEVICE_TYPE"_tok || "DTYPE"_tok) >> construct<AccClause>(
-        construct<AccClause::DeviceType>(
+    ("DEVICE_TYPE"_tok || "DTYPE"_tok) >>
+        construct<AccClause>(construct<AccClause::DeviceType>(
             parenthesized(maybe(nonemptyList(name))))) ||
     "FINALIZE" >> construct<AccClause>(construct<AccClause::Finalize>()) ||
     "FIRSTPRIVATE" >> construct<AccClause>(construct<AccClause::FirstPrivate>(
@@ -78,8 +78,8 @@ TYPE_PARSER("AUTO" >> construct<AccClause>(construct<AccClause::Auto>()) ||
     "IF" >> construct<AccClause>(
                 construct<AccClause::If>(parenthesized(scalarLogicalExpr))) ||
     "IF_PRESENT" >> construct<AccClause>(construct<AccClause::IfPresent>()) ||
-    "INDEPENDENT" >> construct<AccClause>(
-        construct<AccClause::Independent>()) ||
+    "INDEPENDENT" >>
+        construct<AccClause>(construct<AccClause::Independent>()) ||
     "LINK" >> construct<AccClause>(construct<AccClause::Link>(
                   parenthesized(Parser<AccObjectList>{}))) ||
     "NO_CREATE" >> construct<AccClause>(construct<AccClause::NoCreate>(
@@ -107,11 +107,13 @@ TYPE_PARSER("AUTO" >> construct<AccClause>(construct<AccClause::Auto>()) ||
                         parenthesized(Parser<AccObjectList>{}))) ||
     "VECTOR_LENGTH" >> construct<AccClause>(construct<AccClause::VectorLength>(
                            parenthesized(scalarIntExpr))) ||
-    "VECTOR" >> construct<AccClause>(construct<AccClause::Vector>(maybe(
+    "VECTOR" >>
+        construct<AccClause>(construct<AccClause::Vector>(maybe(
             parenthesized(("LENGTH:" >> scalarIntExpr || scalarIntExpr))))) ||
     "WAIT" >> construct<AccClause>(construct<AccClause::Wait>(
                   maybe(Parser<AccWaitArgument>{}))) ||
-    "WORKER" >> construct<AccClause>(construct<AccClause::Worker>(maybe(
+    "WORKER" >>
+        construct<AccClause>(construct<AccClause::Worker>(maybe(
             parenthesized(("NUM:" >> scalarIntExpr || scalarIntExpr))))) ||
     "WRITE" >> construct<AccClause>(construct<AccClause::Auto>()))
 
