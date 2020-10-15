@@ -13,6 +13,7 @@
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/StandardTypes.h"
 #include "mlir/IR/TypeUtilities.h"
+#include "mlir/Interfaces/FoldInterfaces.h"
 #include <numeric>
 
 using namespace mlir;
@@ -44,11 +45,16 @@ StringRef OperationName::stripDialect() const {
   return splitName.second.empty() ? splitName.first : splitName.second;
 }
 
-/// Return the name of this operation.  This always succeeds.
+/// Return the name of this operation. This always succeeds.
 StringRef OperationName::getStringRef() const {
+  return getIdentifier().strref();
+}
+
+/// Return the name of this operation as an identifier. This always succeeds.
+Identifier OperationName::getIdentifier() const {
   if (auto *op = representation.dyn_cast<const AbstractOperation *>())
     return op->name;
-  return representation.get<Identifier>().strref();
+  return representation.get<Identifier>();
 }
 
 const AbstractOperation *OperationName::getAbstractOperation() const {
@@ -213,7 +219,7 @@ Dialect *Operation::getDialect() {
 
   // If this operation hasn't been registered or doesn't have abstract
   // operation, try looking up the dialect name in the context.
-  return getContext()->getRegisteredDialect(getName().getDialect());
+  return getContext()->getLoadedDialect(getName().getDialect());
 }
 
 Region *Operation::getParentRegion() {
@@ -570,11 +576,11 @@ LogicalResult Operation::fold(ArrayRef<Attribute> operands,
   if (!dialect)
     return failure();
 
-  SmallVector<Attribute, 8> constants;
-  if (failed(dialect->constantFoldHook(this, operands, constants)))
+  auto *interface = dialect->getRegisteredInterface<DialectFoldInterface>();
+  if (!interface)
     return failure();
-  results.assign(constants.begin(), constants.end());
-  return success();
+
+  return interface->fold(this, operands, results);
 }
 
 /// Emit an error with the op name prefixed, like "'dim' op " which is
