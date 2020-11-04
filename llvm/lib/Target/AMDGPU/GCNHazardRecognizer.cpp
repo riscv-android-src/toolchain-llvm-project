@@ -67,7 +67,14 @@ static bool isSGetReg(unsigned Opcode) {
 }
 
 static bool isSSetReg(unsigned Opcode) {
-  return Opcode == AMDGPU::S_SETREG_B32 || Opcode == AMDGPU::S_SETREG_IMM32_B32;
+  switch (Opcode) {
+  case AMDGPU::S_SETREG_B32:
+  case AMDGPU::S_SETREG_B32_mode:
+  case AMDGPU::S_SETREG_IMM32_B32:
+  case AMDGPU::S_SETREG_IMM32_B32_mode:
+    return true;
+  }
+  return false;
 }
 
 static bool isRWLane(unsigned Opcode) {
@@ -368,7 +375,7 @@ static int getWaitStatesSince(GCNHazardRecognizer::IsHazardFn IsHazard,
     if (IsHazard(&*I))
       return WaitStates;
 
-    if (I->isInlineAsm() || I->isImplicitDef() || I->isDebugInstr())
+    if (I->isInlineAsm() || I->isMetaInstruction())
       continue;
 
     WaitStates += SIInstrInfo::getNumWaitStates(*I);
@@ -1361,7 +1368,7 @@ int GCNHazardRecognizer::checkMAILdStHazards(MachineInstr *MI) {
     Register Reg = Op.getReg();
 
     const int AccVgprReadLdStWaitStates = 2;
-    const int VALUWriteAccVgprReadLdStDepVALUWaitStates = 1;
+    const int VALUWriteAccVgprRdWrLdStDepVALUWaitStates = 1;
     const int MaxWaitStates = 2;
 
     int WaitStatesNeededForUse = AccVgprReadLdStWaitStates -
@@ -1371,8 +1378,9 @@ int GCNHazardRecognizer::checkMAILdStHazards(MachineInstr *MI) {
     if (WaitStatesNeeded == MaxWaitStates)
       return WaitStatesNeeded; // Early exit.
 
-    auto IsVALUAccVgprReadCheckFn = [Reg, this] (MachineInstr *MI) {
-      if (MI->getOpcode() != AMDGPU::V_ACCVGPR_READ_B32)
+    auto IsVALUAccVgprRdWrCheckFn = [Reg, this](MachineInstr *MI) {
+      if (MI->getOpcode() != AMDGPU::V_ACCVGPR_READ_B32 &&
+          MI->getOpcode() != AMDGPU::V_ACCVGPR_WRITE_B32)
         return false;
       auto IsVALUFn = [] (MachineInstr *MI) {
         return SIInstrInfo::isVALU(*MI) && !SIInstrInfo::isMAI(*MI);
@@ -1381,8 +1389,8 @@ int GCNHazardRecognizer::checkMAILdStHazards(MachineInstr *MI) {
              std::numeric_limits<int>::max();
     };
 
-    WaitStatesNeededForUse = VALUWriteAccVgprReadLdStDepVALUWaitStates -
-      getWaitStatesSince(IsVALUAccVgprReadCheckFn, MaxWaitStates);
+    WaitStatesNeededForUse = VALUWriteAccVgprRdWrLdStDepVALUWaitStates -
+      getWaitStatesSince(IsVALUAccVgprRdWrCheckFn, MaxWaitStates);
     WaitStatesNeeded = std::max(WaitStatesNeeded, WaitStatesNeededForUse);
   }
 

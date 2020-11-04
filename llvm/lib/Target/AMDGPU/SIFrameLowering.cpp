@@ -112,15 +112,19 @@ static void getVGPRSpillLaneOrTempRegister(MachineFunction &MF,
       // 3: There's no free lane to spill, and no free register to save FP/BP,
       // so we're forced to spill another VGPR to use for the spill.
       FrameIndex = NewFI;
+
+      LLVM_DEBUG(
+          auto Spill = MFI->getSGPRToVGPRSpills(NewFI).front();
+          dbgs() << (IsFP ? "FP" : "BP") << " requires fallback spill to "
+                 << printReg(Spill.VGPR, TRI) << ':' << Spill.Lane << '\n';);
     } else {
+      // Remove dead <NewFI> index
+      MF.getFrameInfo().RemoveStackObject(NewFI);
       // 4: If all else fails, spill the FP/BP to memory.
       FrameIndex = FrameInfo.CreateSpillStackObject(4, Align(4));
+      LLVM_DEBUG(dbgs() << "Reserved FI " << FrameIndex << " for spilling "
+                        << (IsFP ? "FP" : "BP") << '\n');
     }
-
-    LLVM_DEBUG(auto Spill = MFI->getSGPRToVGPRSpills(NewFI).front();
-               dbgs() << (IsFP ? "FP" : "BP") << " requires fallback spill to "
-                      << printReg(Spill.VGPR, TRI) << ':' << Spill.Lane
-                      << '\n';);
   } else {
     LLVM_DEBUG(dbgs() << "Saving " << (IsFP ? "FP" : "BP") << " with copy to "
                       << printReg(TempSGPR, TRI) << '\n');
@@ -143,7 +147,7 @@ static void buildPrologSpill(LivePhysRegs &LiveRegs, MachineBasicBlock &MBB,
       MachinePointerInfo::getFixedStack(*MF, FI), MachineMemOperand::MOStore, 4,
       MFI.getObjectAlign(FI));
 
-  if (isUInt<12>(Offset)) {
+  if (SIInstrInfo::isLegalMUBUFImmOffset(Offset)) {
     BuildMI(MBB, I, DebugLoc(), TII->get(AMDGPU::BUFFER_STORE_DWORD_OFFSET))
       .addReg(SpillReg, RegState::Kill)
       .addReg(ScratchRsrcReg)
@@ -196,7 +200,7 @@ static void buildEpilogReload(LivePhysRegs &LiveRegs, MachineBasicBlock &MBB,
       MachinePointerInfo::getFixedStack(*MF, FI), MachineMemOperand::MOLoad, 4,
       MFI.getObjectAlign(FI));
 
-  if (isUInt<12>(Offset)) {
+  if (SIInstrInfo::isLegalMUBUFImmOffset(Offset)) {
     BuildMI(MBB, I, DebugLoc(),
             TII->get(AMDGPU::BUFFER_LOAD_DWORD_OFFSET), SpillReg)
       .addReg(ScratchRsrcReg)

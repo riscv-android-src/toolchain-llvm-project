@@ -41,33 +41,19 @@ if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR OR LIBCXX_STANDALONE_BUIL
 endif()
 
 if (LIBCXX_STANDALONE_BUILD)
-  if(CMAKE_VERSION VERSION_LESS 3.12)
-    include(FindPythonInterp)
-    if( NOT PYTHONINTERP_FOUND )
-      message(WARNING "Failed to find python interpreter. "
-                      "The libc++ test suite will be disabled.")
-      set(LLVM_INCLUDE_TESTS OFF)
-    else()
-      add_executable(Python3::Interpreter IMPORTED)
-      set_target_properties(Python3::Interpreter PROPERTIES
-        IMPORTED_LOCATION ${PYTHON_EXECUTABLE})
-      set(Python3_EXECUTABLE ${PYTHON_EXECUTABLE})
+  find_package(Python3 COMPONENTS Interpreter)
+  if(NOT Python3_Interpreter_FOUND)
+    message(WARNING "Python3 not found, using python2 as a fallback")
+    find_package(Python2 COMPONENTS Interpreter REQUIRED)
+    if(Python2_VERSION VERSION_LESS 2.7)
+      message(SEND_ERROR "Python 2.7 or newer is required")
     endif()
-  else()
-    find_package(Python3 COMPONENTS Interpreter)
-    if(NOT Python3_Interpreter_FOUND)
-      message(WARNING "Python3 not found, using python2 as a fallback")
-      find_package(Python2 COMPONENTS Interpreter REQUIRED)
-      if(Python2_VERSION VERSION_LESS 2.7)
-        message(SEND_ERROR "Python 2.7 or newer is required")
-      endif()
 
-      # Treat python2 as python3
-      add_executable(Python3::Interpreter IMPORTED)
-      set_target_properties(Python3::Interpreter PROPERTIES
-        IMPORTED_LOCATION ${Python2_EXECUTABLE})
-      set(Python3_EXECUTABLE ${Python2_EXECUTABLE})
-    endif()
+    # Treat python2 as python3
+    add_executable(Python3::Interpreter IMPORTED)
+    set_target_properties(Python3::Interpreter PROPERTIES
+      IMPORTED_LOCATION ${Python2_EXECUTABLE})
+    set(Python3_EXECUTABLE ${Python2_EXECUTABLE})
   endif()
 endif()
 
@@ -108,9 +94,14 @@ option(LIBCXX_ENABLE_FILESYSTEM "Build filesystem as part of the main libc++ lib
     ${ENABLE_FILESYSTEM_DEFAULT})
 option(LIBCXX_INCLUDE_TESTS "Build the libc++ tests." ${LLVM_INCLUDE_TESTS})
 option(LIBCXX_ENABLE_PARALLEL_ALGORITHMS "Enable the parallel algorithms library. This requires the PSTL to be available." OFF)
+option(LIBCXX_ENABLE_DEBUG_MODE_SUPPORT
+  "Whether to include support for libc++'s debugging mode in the library.
+   By default, this is turned on. If you turn it off and try to enable the
+   debug mode when compiling a program against libc++, it will fail to link
+   since the required support isn't provided in the library." ON)
 option(LIBCXX_TEST_GDB_PRETTY_PRINTERS "Test gdb pretty printers." OFF)
 set(LIBCXX_TEST_CONFIG "${CMAKE_CURRENT_SOURCE_DIR}/test/configs/legacy.cfg.in" CACHE STRING
-    "The Lit testing configuration to use when running the tests." FORCE) # TODO: Stop using 'FORCE' once we can assume all CMake build dirs have been re-generated
+    "The Lit testing configuration to use when running the tests.")
 set(LIBCXX_TEST_PARAMS "" CACHE STRING
     "A list of parameters to run the Lit test suite with.")
 
@@ -270,23 +261,6 @@ option(LIBCXX_DISABLE_MACRO_CONFLICT_WARNINGS "Disable #warnings about conflicti
 option(LIBCXX_GENERATE_COVERAGE "Enable generating code coverage." OFF)
 set(LIBCXX_COVERAGE_LIBRARY "" CACHE STRING
     "The Profile-rt library used to build with code coverage")
-
-# Don't allow a user to accidentally overwrite the system libc++ installation on Darwin.
-# If the user specifies -DCMAKE_INSTALL_PREFIX=/usr the install rules for libc++
-# will not be generated and a warning will be issued.
-option(LIBCXX_OVERRIDE_DARWIN_INSTALL "Enable overwriting darwins libc++ installation." OFF)
-mark_as_advanced(LIBCXX_OVERRIDE_DARWIN_INSTALL) # Don't show this option by default.
-
-if (${CMAKE_SYSTEM_NAME} MATCHES "Darwin" AND NOT LIBCXX_OVERRIDE_DARWIN_INSTALL)
-  if ("${CMAKE_INSTALL_PREFIX}" STREQUAL "/usr")
-    message(WARNING "Disabling libc++ install rules because installation would "
-                    "overwrite the systems installation. Configure with "
-                    "-DLIBCXX_OVERRIDE_DARWIN_INSTALL=ON to suppress this behaviour.")
-    mark_as_advanced(CLEAR LIBCXX_OVERRIDE_DARWIN_INSTALL) # Show the override option.
-    set(LIBCXX_INSTALL_HEADERS OFF)
-    set(LIBCXX_INSTALL_LIBRARY OFF)
-  endif()
-endif()
 
 set(LIBCXX_CONFIGURE_IDE_DEFAULT OFF)
 if (XCODE OR MSVC_IDE)

@@ -163,11 +163,6 @@ public:
     /// Enable preview of FoldingRanges feature.
     bool FoldingRanges = false;
 
-    /// Returns true if the tweak should be enabled.
-    std::function<bool(const Tweak &)> TweakFilter = [](const Tweak &T) {
-      return !T.hidden(); // only enable non-hidden tweaks.
-    };
-
     explicit operator TUScheduler::Options() const;
   };
   // Sensible default options for use in tests.
@@ -273,9 +268,12 @@ public:
                     StringRef TriggerText, Callback<std::vector<TextEdit>> CB);
 
   /// Test the validity of a rename operation.
+  ///
+  /// If NewName is provided, it performs a name validation.
   void prepareRename(PathRef File, Position Pos,
+                     llvm::Optional<std::string> NewName,
                      const RenameOptions &RenameOpts,
-                     Callback<llvm::Optional<Range>> CB);
+                     Callback<RenameResult> CB);
 
   /// Rename all occurrences of the symbol at the \p Pos in \p File to
   /// \p NewName.
@@ -283,15 +281,17 @@ public:
   /// embedders could use this method to get all occurrences of the symbol (e.g.
   /// highlighting them in prepare stage).
   void rename(PathRef File, Position Pos, llvm::StringRef NewName,
-              const RenameOptions &Opts, Callback<FileEdits> CB);
+              const RenameOptions &Opts, Callback<RenameResult> CB);
 
   struct TweakRef {
     std::string ID;    /// ID to pass for applyTweak.
     std::string Title; /// A single-line message to show in the UI.
-    Tweak::Intent Intent;
+    llvm::StringLiteral Kind;
   };
   /// Enumerate the code tweaks available to the user at a specified point.
+  /// Tweaks where Filter returns false will not be checked or included.
   void enumerateTweaks(PathRef File, Range Sel,
+                       llvm::unique_function<bool(const Tweak &)> Filter,
                        Callback<std::vector<TweakRef>> CB);
 
   /// Apply the code tweak with a specified \p ID.
@@ -378,8 +378,6 @@ private:
   bool BuildRecoveryAST = true;
   // If true, preserve the type for recovery AST.
   bool PreserveRecoveryASTType = false;
-
-  std::function<bool(const Tweak &)> TweakFilter;
 
   // GUARDED_BY(CachedCompletionFuzzyFindRequestMutex)
   llvm::StringMap<llvm::Optional<FuzzyFindRequest>>

@@ -441,7 +441,7 @@ bool SIRegisterInfo::needsFrameBaseReg(MachineInstr *MI, int64_t Offset) const {
 
   int64_t FullOffset = Offset + getMUBUFInstrOffset(MI);
 
-  return !isUInt<12>(FullOffset);
+  return !SIInstrInfo::isLegalMUBUFImmOffset(FullOffset);
 }
 
 void SIRegisterInfo::materializeFrameBaseRegister(MachineBasicBlock *MBB,
@@ -503,16 +503,23 @@ void SIRegisterInfo::resolveFrameIndex(MachineInstr &MI, Register BaseReg,
 #endif
   assert(FIOp && FIOp->isFI() && "frame index must be address operand");
   assert(TII->isMUBUF(MI));
-  assert(TII->getNamedOperand(MI, AMDGPU::OpName::soffset)->getReg() ==
-         MF->getInfo<SIMachineFunctionInfo>()->getStackPtrOffsetReg() &&
+
+  MachineOperand *SOffset = TII->getNamedOperand(MI, AMDGPU::OpName::soffset);
+  assert(SOffset->getReg() ==
+             MF->getInfo<SIMachineFunctionInfo>()->getStackPtrOffsetReg() &&
          "should only be seeing stack pointer offset relative FrameIndex");
 
   MachineOperand *OffsetOp = TII->getNamedOperand(MI, AMDGPU::OpName::offset);
   int64_t NewOffset = OffsetOp->getImm() + Offset;
-  assert(isUInt<12>(NewOffset) && "offset should be legal");
+  assert(SIInstrInfo::isLegalMUBUFImmOffset(NewOffset) &&
+         "offset should be legal");
 
   FIOp->ChangeToRegister(BaseReg, false);
   OffsetOp->setImm(NewOffset);
+
+  // The move materializing the base address will be an absolute stack address,
+  // so clear the base offset.
+  SOffset->ChangeToImmediate(0);
 }
 
 bool SIRegisterInfo::isFrameOffsetLegal(const MachineInstr *MI,
@@ -523,7 +530,7 @@ bool SIRegisterInfo::isFrameOffsetLegal(const MachineInstr *MI,
 
   int64_t NewOffset = Offset + getMUBUFInstrOffset(MI);
 
-  return isUInt<12>(NewOffset);
+  return SIInstrInfo::isLegalMUBUFImmOffset(NewOffset);
 }
 
 const TargetRegisterClass *SIRegisterInfo::getPointerRegClass(
@@ -764,7 +771,7 @@ void SIRegisterInfo::buildSpillLoadStore(MachineBasicBlock::iterator MI,
 
   assert((Offset % EltSize) == 0 && "unexpected VGPR spill offset");
 
-  if (!isUInt<12>(Offset + Size - EltSize)) {
+  if (!SIInstrInfo::isLegalMUBUFImmOffset(Offset + Size - EltSize)) {
     SOffset = MCRegister();
 
     // We currently only support spilling VGPRs to EltSize boundaries, meaning
@@ -1466,7 +1473,7 @@ void SIRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
           = TII->getNamedOperand(*MI, AMDGPU::OpName::offset)->getImm();
         int64_t NewOffset = OldImm + Offset;
 
-        if (isUInt<12>(NewOffset) &&
+        if (SIInstrInfo::isLegalMUBUFImmOffset(NewOffset) &&
             buildMUBUFOffsetLoadStore(ST, FrameInfo, MI, Index, NewOffset)) {
           MI->eraseFromParent();
           return;

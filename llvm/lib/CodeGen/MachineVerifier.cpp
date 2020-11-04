@@ -488,7 +488,7 @@ void MachineVerifier::report(const char *msg, const MachineInstr *MI) {
   errs() << "- instruction: ";
   if (Indexes && Indexes->hasIndex(*MI))
     errs() << Indexes->getInstructionIndex(*MI) << '\t';
-  MI->print(errs(), /*SkipOpers=*/true);
+  MI->print(errs(), /*IsStandalone=*/true);
 }
 
 void MachineVerifier::report(const char *msg, const MachineOperand *MO,
@@ -1486,6 +1486,40 @@ void MachineVerifier::verifyPreISelGenericInstruction(const MachineInstr *MI) {
     if (DstPtrTy.getAddressSpace() != MMOs[0]->getAddrSpace())
       report("inconsistent memset address space", MI);
 
+    break;
+  }
+  case TargetOpcode::G_VECREDUCE_SEQ_FADD:
+  case TargetOpcode::G_VECREDUCE_SEQ_FMUL:
+  case TargetOpcode::G_VECREDUCE_FADD:
+  case TargetOpcode::G_VECREDUCE_FMUL: {
+    LLT DstTy = MRI->getType(MI->getOperand(0).getReg());
+    LLT Src1Ty = MRI->getType(MI->getOperand(1).getReg());
+    LLT Src2Ty = MRI->getType(MI->getOperand(2).getReg());
+    if (!DstTy.isScalar())
+      report("Vector reduction requires a scalar destination type", MI);
+    if (!Src1Ty.isScalar())
+      report("FADD/FMUL vector reduction requires a scalar 1st operand", MI);
+    if (!Src2Ty.isVector())
+      report("FADD/FMUL vector reduction must have a vector 2nd operand", MI);
+    break;
+  }
+  case TargetOpcode::G_VECREDUCE_FMAX:
+  case TargetOpcode::G_VECREDUCE_FMIN:
+  case TargetOpcode::G_VECREDUCE_ADD:
+  case TargetOpcode::G_VECREDUCE_MUL:
+  case TargetOpcode::G_VECREDUCE_AND:
+  case TargetOpcode::G_VECREDUCE_OR:
+  case TargetOpcode::G_VECREDUCE_XOR:
+  case TargetOpcode::G_VECREDUCE_SMAX:
+  case TargetOpcode::G_VECREDUCE_SMIN:
+  case TargetOpcode::G_VECREDUCE_UMAX:
+  case TargetOpcode::G_VECREDUCE_UMIN: {
+    LLT DstTy = MRI->getType(MI->getOperand(0).getReg());
+    LLT SrcTy = MRI->getType(MI->getOperand(1).getReg());
+    if (!DstTy.isScalar())
+      report("Vector reduction requires a scalar destination type", MI);
+    if (!SrcTy.isVector())
+      report("Vector reduction requires vector source=", MI);
     break;
   }
   default:
@@ -2529,7 +2563,7 @@ void MachineVerifier::verifyLiveIntervals() {
     }
 
     const LiveInterval &LI = LiveInts->getInterval(Reg);
-    assert(Reg == LI.reg && "Invalid reg to interval mapping");
+    assert(Reg == LI.reg() && "Invalid reg to interval mapping");
     verifyLiveInterval(LI);
   }
 
@@ -2855,7 +2889,7 @@ void MachineVerifier::verifyLiveRange(const LiveRange &LR, unsigned Reg,
 }
 
 void MachineVerifier::verifyLiveInterval(const LiveInterval &LI) {
-  unsigned Reg = LI.reg;
+  unsigned Reg = LI.reg();
   assert(Register::isVirtualRegister(Reg));
   verifyLiveRange(LI, Reg);
 
@@ -2872,10 +2906,10 @@ void MachineVerifier::verifyLiveInterval(const LiveInterval &LI) {
     }
     if (SR.empty()) {
       report("Subrange must not be empty", MF);
-      report_context(SR, LI.reg, SR.LaneMask);
+      report_context(SR, LI.reg(), SR.LaneMask);
     }
     Mask |= SR.LaneMask;
-    verifyLiveRange(SR, LI.reg, SR.LaneMask);
+    verifyLiveRange(SR, LI.reg(), SR.LaneMask);
     if (!LI.covers(SR)) {
       report("A Subrange is not covered by the main range", MF);
       report_context(LI);
