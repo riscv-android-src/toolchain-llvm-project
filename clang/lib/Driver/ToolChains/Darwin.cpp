@@ -149,7 +149,7 @@ void darwin::Assembler::ConstructJob(Compilation &C, const JobAction &JA,
 
   const char *Exec = Args.MakeArgString(getToolChain().GetProgramPath("as"));
   C.addCommand(std::make_unique<Command>(JA, *this, ResponseFileSupport::None(),
-                                         Exec, CmdArgs, Inputs));
+                                         Exec, CmdArgs, Inputs, Output));
 }
 
 void darwin::MachOTool::anchor() {}
@@ -522,7 +522,7 @@ void darwin::Linker::ConstructJob(Compilation &C, const JobAction &JA,
         Args.MakeArgString(getToolChain().GetProgramPath("touch"));
     CmdArgs.push_back(Output.getFilename());
     C.addCommand(std::make_unique<Command>(
-        JA, *this, ResponseFileSupport::None(), Exec, CmdArgs, None));
+        JA, *this, ResponseFileSupport::None(), Exec, CmdArgs, None, Output));
     return;
   }
 
@@ -695,7 +695,7 @@ void darwin::Linker::ConstructJob(Compilation &C, const JobAction &JA,
 
   const char *Exec = Args.MakeArgString(getToolChain().GetLinkerPath());
   std::unique_ptr<Command> Cmd = std::make_unique<Command>(
-      JA, *this, ResponseSupport, Exec, CmdArgs, Inputs);
+      JA, *this, ResponseSupport, Exec, CmdArgs, Inputs, Output);
   Cmd->setInputFileList(std::move(InputFileList));
   C.addCommand(std::move(Cmd));
 }
@@ -720,7 +720,7 @@ void darwin::Lipo::ConstructJob(Compilation &C, const JobAction &JA,
 
   const char *Exec = Args.MakeArgString(getToolChain().GetProgramPath("lipo"));
   C.addCommand(std::make_unique<Command>(JA, *this, ResponseFileSupport::None(),
-                                         Exec, CmdArgs, Inputs));
+                                         Exec, CmdArgs, Inputs, Output));
 }
 
 void darwin::Dsymutil::ConstructJob(Compilation &C, const JobAction &JA,
@@ -741,7 +741,7 @@ void darwin::Dsymutil::ConstructJob(Compilation &C, const JobAction &JA,
   const char *Exec =
       Args.MakeArgString(getToolChain().GetProgramPath("dsymutil"));
   C.addCommand(std::make_unique<Command>(JA, *this, ResponseFileSupport::None(),
-                                         Exec, CmdArgs, Inputs));
+                                         Exec, CmdArgs, Inputs, Output));
 }
 
 void darwin::VerifyDebug::ConstructJob(Compilation &C, const JobAction &JA,
@@ -765,7 +765,7 @@ void darwin::VerifyDebug::ConstructJob(Compilation &C, const JobAction &JA,
   const char *Exec =
       Args.MakeArgString(getToolChain().GetProgramPath("dwarfdump"));
   C.addCommand(std::make_unique<Command>(JA, *this, ResponseFileSupport::None(),
-                                         Exec, CmdArgs, Inputs));
+                                         Exec, CmdArgs, Inputs, Output));
 }
 
 MachO::MachO(const Driver &D, const llvm::Triple &Triple, const ArgList &Args)
@@ -1062,10 +1062,9 @@ void MachO::AddLinkRuntimeLib(const ArgList &Args, ArgStringList &CmdArgs,
     DarwinLibName += Component;
     if (!(Opts & RLO_IsEmbedded))
       DarwinLibName += "_";
-    DarwinLibName += getOSLibraryNameSuffix();
-  } else
-    DarwinLibName += getOSLibraryNameSuffix(true);
+  }
 
+  DarwinLibName += getOSLibraryNameSuffix();
   DarwinLibName += IsShared ? "_dynamic.dylib" : ".a";
   SmallString<128> Dir(getDriver().ResourceDir);
   llvm::sys::path::append(
@@ -1196,8 +1195,8 @@ void Darwin::addProfileRTLibs(const ArgList &Args,
   // runtime's functionality.
   if (hasExportSymbolDirective(Args)) {
     if (ForGCOV) {
-      addExportedSymbol(CmdArgs, "___gcov_flush");
-      addExportedSymbol(CmdArgs, "_flush_fn_list");
+      addExportedSymbol(CmdArgs, "___gcov_dump");
+      addExportedSymbol(CmdArgs, "___gcov_reset");
       addExportedSymbol(CmdArgs, "_writeout_fn_list");
       addExportedSymbol(CmdArgs, "_reset_fn_list");
     } else {
@@ -2021,21 +2020,42 @@ void DarwinClang::AddClangCXXStdlibIncludeArgs(
 
   switch (GetCXXStdlibType(DriverArgs)) {
   case ToolChain::CST_Libcxx: {
-    // On Darwin, libc++ is installed alongside the compiler in
-    // include/c++/v1, so get from '<install>/bin' to '<install>/include/c++/v1'.
-    {
-      llvm::SmallString<128> P = llvm::StringRef(getDriver().getInstalledDir());
-      // Note that P can be relative, so we have to '..' and not parent_path.
-      llvm::sys::path::append(P, "..", "include", "c++", "v1");
-      addSystemInclude(DriverArgs, CC1Args, P);
+    // On Darwin, libc++ can be installed in one of the following two places:
+    // 1. Alongside the compiler in         <install>/include/c++/v1
+    // 2. In a SDK (or a custom sysroot) in <sysroot>/usr/include/c++/v1
+    //
+    // The precendence of paths is as listed above, i.e. we take the first path
+    // that exists. Also note that we never include libc++ twice -- we take the
+    // first path that exists and don't send the other paths to CC1 (otherwise
+    // include_next could break).
+
+    // Check for (1)
+    // Get from '<install>/bin' to '<install>/include/c++/v1'.
+    // Note that InstallBin can be relative, so we use '..' instead of
+    // parent_path.
+    llvm::SmallString<128> InstallBin =
+        llvm::StringRef(getDriver().getInstalledDir()); // <install>/bin
+    llvm::sys::path::append(InstallBin, "..", "include", "c++", "v1");
+    if (getVFS().exists(InstallBin)) {
+      addSystemInclude(DriverArgs, CC1Args, InstallBin);
+      return;
+    } else if (DriverArgs.hasArg(options::OPT_v)) {
+      llvm::errs() << "ignoring nonexistent directory \"" << InstallBin
+                   << "\"\n";
     }
-    // Also add <sysroot>/usr/include/c++/v1 unless -nostdinc is used,
-    // to match the legacy behavior in CC1.
-    if (!DriverArgs.hasArg(options::OPT_nostdinc)) {
-      llvm::SmallString<128> P = Sysroot;
-      llvm::sys::path::append(P, "usr", "include", "c++", "v1");
-      addSystemInclude(DriverArgs, CC1Args, P);
+
+    // Otherwise, check for (2)
+    llvm::SmallString<128> SysrootUsr = Sysroot;
+    llvm::sys::path::append(SysrootUsr, "usr", "include", "c++", "v1");
+    if (getVFS().exists(SysrootUsr)) {
+      addSystemInclude(DriverArgs, CC1Args, SysrootUsr);
+      return;
+    } else if (DriverArgs.hasArg(options::OPT_v)) {
+      llvm::errs() << "ignoring nonexistent directory \"" << SysrootUsr
+                   << "\"\n";
     }
+
+    // Otherwise, don't add any path.
     break;
   }
 
@@ -2271,11 +2291,6 @@ DerivedArgList *MachO::TranslateArgs(const DerivedArgList &Args,
     }
   }
 
-  if (getTriple().isX86())
-    if (!Args.hasArgNoClaim(options::OPT_mtune_EQ))
-      DAL->AddJoinedArg(nullptr, Opts.getOption(options::OPT_mtune_EQ),
-                        "core2");
-
   // Add the arch options based on the particular spelling of -arch, to match
   // how the driver driver works.
   if (!BoundArch.empty()) {
@@ -2413,6 +2428,13 @@ void Darwin::addClangTargetOptions(const llvm::opt::ArgList &DriverArgs,
   // Enable compatibility mode for NSItemProviderCompletionHandler in
   // Foundation/NSItemProvider.h.
   CC1Args.push_back("-fcompatibility-qualified-id-block-type-checking");
+
+  // Give static local variables in inline functions hidden visibility when
+  // -fvisibility-inlines-hidden is enabled.
+  if (!DriverArgs.getLastArgNoClaim(
+          options::OPT_fvisibility_inlines_hidden_static_local_var,
+          options::OPT_fno_visibility_inlines_hidden_static_local_var))
+    CC1Args.push_back("-fvisibility-inlines-hidden-static-local-var");
 }
 
 DerivedArgList *
@@ -2713,6 +2735,7 @@ void Darwin::CheckObjCARC() const {
 
 SanitizerMask Darwin::getSupportedSanitizers() const {
   const bool IsX86_64 = getTriple().getArch() == llvm::Triple::x86_64;
+  const bool IsAArch64 = getTriple().getArch() == llvm::Triple::aarch64;
   SanitizerMask Res = ToolChain::getSupportedSanitizers();
   Res |= SanitizerKind::Address;
   Res |= SanitizerKind::PointerCompare;
@@ -2730,9 +2753,8 @@ SanitizerMask Darwin::getSupportedSanitizers() const {
       && !(isTargetIPhoneOS() && isIPhoneOSVersionLT(5, 0)))
     Res |= SanitizerKind::Vptr;
 
-  if (isTargetMacOS()) {
-    if (IsX86_64)
-      Res |= SanitizerKind::Thread;
+  if ((IsX86_64 || IsAArch64) && isTargetMacOS()) {
+    Res |= SanitizerKind::Thread;
   } else if (isTargetIOSSimulator() || isTargetTvOSSimulator()) {
     if (IsX86_64)
       Res |= SanitizerKind::Thread;

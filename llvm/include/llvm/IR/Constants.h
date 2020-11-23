@@ -308,6 +308,7 @@ public:
   /// Return true if Ty is big enough to represent V.
   static bool isValueValidForType(Type *Ty, const APFloat &V);
   inline const APFloat &getValueAPF() const { return Val; }
+  inline const APFloat &getValue() const { return Val; }
 
   /// Return true if the value is positive or negative zero.
   bool isZero() const { return Val.isZero(); }
@@ -958,6 +959,7 @@ public:
   static Constant *getAnd(Constant *C1, Constant *C2);
   static Constant *getOr(Constant *C1, Constant *C2);
   static Constant *getXor(Constant *C1, Constant *C2);
+  static Constant *getUMin(Constant *C1, Constant *C2);
   static Constant *getShl(Constant *C1, Constant *C2,
                           bool HasNUW = false, bool HasNSW = false);
   static Constant *getLShr(Constant *C1, Constant *C2, bool isExact = false);

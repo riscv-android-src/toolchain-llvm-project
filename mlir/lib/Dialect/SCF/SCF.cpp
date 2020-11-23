@@ -38,7 +38,7 @@ struct SCFInlinerInterface : public DialectInlinerInterface {
   // as necessary. Required when the region has only one block.
   void handleTerminator(Operation *op,
                         ArrayRef<Value> valuesToRepl) const final {
-    auto retValOp = dyn_cast<YieldOp>(op);
+    auto retValOp = dyn_cast<scf::YieldOp>(op);
     if (!retValOp)
       return;
 
@@ -53,8 +53,7 @@ struct SCFInlinerInterface : public DialectInlinerInterface {
 // SCFDialect
 //===----------------------------------------------------------------------===//
 
-SCFDialect::SCFDialect(MLIRContext *context)
-    : Dialect(getDialectNamespace(), context) {
+void SCFDialect::initialize() {
   addOperations<
 #define GET_OP_LIST
 #include "mlir/Dialect/SCF/SCFOps.cpp.inc"
@@ -137,7 +136,8 @@ static LogicalResult verify(ForOp op) {
 
     i++;
   }
-  return success();
+
+  return RegionBranchOpInterface::verifyTypes(op);
 }
 
 static void print(OpAsmPrinter &p, ForOp op) {
@@ -413,7 +413,7 @@ static LogicalResult verify(IfOp op) {
   if (op.getNumResults() != 0 && op.elseRegion().empty())
     return op.emitOpError("must have an else block if defining values");
 
-  return success();
+  return RegionBranchOpInterface::verifyTypes(op);
 }
 
 static ParseResult parseIfOp(OpAsmParser &parser, OperationState &result) {
@@ -508,6 +508,67 @@ void IfOp::getSuccessorRegions(Optional<unsigned> index,
   regions.push_back(RegionSuccessor(condition ? &thenRegion() : elseRegion));
 }
 
+namespace {
+// Pattern to remove unused IfOp results.
+struct RemoveUnusedResults : public OpRewritePattern<IfOp> {
+  using OpRewritePattern<IfOp>::OpRewritePattern;
+
+  void transferBody(Block *source, Block *dest, ArrayRef<OpResult> usedResults,
+                    PatternRewriter &rewriter) const {
+    // Move all operations to the destination block.
+    rewriter.mergeBlocks(source, dest);
+    // Replace the yield op by one that returns only the used values.
+    auto yieldOp = cast<scf::YieldOp>(dest->getTerminator());
+    SmallVector<Value, 4> usedOperands;
+    llvm::transform(usedResults, std::back_inserter(usedOperands),
+                    [&](OpResult result) {
+                      return yieldOp.getOperand(result.getResultNumber());
+                    });
+    rewriter.updateRootInPlace(
+        yieldOp, [&]() { yieldOp.getOperation()->setOperands(usedOperands); });
+  }
+
+  LogicalResult matchAndRewrite(IfOp op,
+                                PatternRewriter &rewriter) const override {
+    // Compute the list of used results.
+    SmallVector<OpResult, 4> usedResults;
+    llvm::copy_if(op.getResults(), std::back_inserter(usedResults),
+                  [](OpResult result) { return !result.use_empty(); });
+
+    // Replace the operation if only a subset of its results have uses.
+    if (usedResults.size() == op.getNumResults())
+      return failure();
+
+    // Compute the result types of the replacement operation.
+    SmallVector<Type, 4> newTypes;
+    llvm::transform(usedResults, std::back_inserter(newTypes),
+                    [](OpResult result) { return result.getType(); });
+
+    // Create a replacement operation with empty then and else regions.
+    auto emptyBuilder = [](OpBuilder &, Location) {};
+    auto newOp = rewriter.create<IfOp>(op.getLoc(), newTypes, op.condition(),
+                                       emptyBuilder, emptyBuilder);
+
+    // Move the bodies and replace the terminators (note there is a then and
+    // an else region since the operation returns results).
+    transferBody(op.getBody(0), newOp.getBody(0), usedResults, rewriter);
+    transferBody(op.getBody(1), newOp.getBody(1), usedResults, rewriter);
+
+    // Replace the operation by the new one.
+    SmallVector<Value, 4> repResults(op.getNumResults());
+    for (auto en : llvm::enumerate(usedResults))
+      repResults[en.value().getResultNumber()] = newOp.getResult(en.index());
+    rewriter.replaceOp(op, repResults);
+    return success();
+  }
+};
+} // namespace
+
+void IfOp::getCanonicalizationPatterns(OwningRewritePatternList &results,
+                                       MLIRContext *context) {
+  results.insert<RemoveUnusedResults>(context);
+}
+
 //===----------------------------------------------------------------------===//
 // ParallelOp
 //===----------------------------------------------------------------------===//
@@ -591,6 +652,12 @@ static LogicalResult verify(ParallelOp op) {
     if (!arg.getType().isIndex())
       return op.emitOpError(
           "expects arguments for the induction variable to be of index type");
+
+  // Check that the yield has no results
+  Operation *yield = body->getTerminator();
+  if (yield->getNumOperands() != 0)
+    return yield->emitOpError() << "not allowed to have operands inside '"
+                                << ParallelOp::getOperationName() << "'";
 
   // Check that the number of results is the same as the number of ReduceOps.
   SmallVector<ReduceOp, 4> reductions(body->getOps<ReduceOp>());
@@ -869,31 +936,6 @@ static LogicalResult verify(ReduceReturnOp op) {
 //===----------------------------------------------------------------------===//
 // YieldOp
 //===----------------------------------------------------------------------===//
-static LogicalResult verify(YieldOp op) {
-  auto parentOp = op.getParentOp();
-  auto results = parentOp->getResults();
-  auto operands = op.getOperands();
-
-  if (isa<IfOp, ForOp>(parentOp)) {
-    if (parentOp->getNumResults() != op.getNumOperands())
-      return op.emitOpError() << "parent of yield must have same number of "
-                                 "results as the yield operands";
-    for (auto e : llvm::zip(results, operands)) {
-      if (std::get<0>(e).getType() != std::get<1>(e).getType())
-        return op.emitOpError()
-               << "types mismatch between yield op and its parent";
-    }
-  } else if (isa<ParallelOp>(parentOp)) {
-    if (op.getNumOperands() != 0)
-      return op.emitOpError()
-             << "yield inside scf.parallel is not allowed to have operands";
-  } else {
-    return op.emitOpError()
-           << "yield only terminates If, For or Parallel regions";
-  }
-
-  return success();
-}
 
 static ParseResult parseYieldOp(OpAsmParser &parser, OperationState &result) {
   SmallVector<OpAsmParser::OperandType, 4> operands;
@@ -908,7 +950,7 @@ static ParseResult parseYieldOp(OpAsmParser &parser, OperationState &result) {
   return success();
 }
 
-static void print(OpAsmPrinter &p, YieldOp op) {
+static void print(OpAsmPrinter &p, scf::YieldOp op) {
   p << op.getOperationName();
   if (op.getNumOperands() != 0)
     p << ' ' << op.getOperands() << " : " << op.getOperandTypes();

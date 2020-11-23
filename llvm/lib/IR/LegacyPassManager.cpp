@@ -20,6 +20,7 @@
 #include "llvm/IR/LegacyPassNameParser.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/PassTimingInfo.h"
+#include "llvm/IR/StructuralHash.h"
 #include "llvm/Support/Chrono.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
@@ -86,14 +87,14 @@ static cl::opt<bool> PrintAfterAll("print-after-all",
 static cl::opt<bool>
     PrintModuleScope("print-module-scope",
                      cl::desc("When printing IR for print-[before|after]{-all} "
-                              "always print a module IR"),
+                              "and change reporters, always print a module IR"),
                      cl::init(false), cl::Hidden);
 
 static cl::list<std::string>
     PrintFuncsList("filter-print-funcs", cl::value_desc("function names"),
                    cl::desc("Only print IR for functions whose name "
                             "match this for all print-[before|after][-all] "
-                            "options"),
+                            "and change reporter options"),
                    cl::CommaSeparated, cl::Hidden);
 
 /// This is a helper to determine whether to print IR before or
@@ -1475,7 +1476,6 @@ void FPPassManager::dumpPassStructure(unsigned Offset) {
   }
 }
 
-
 /// Execute all of the passes scheduled for execution by invoking
 /// runOnFunction method.  Keep track of whether any of the passes modifies
 /// the function, and if so, return true.
@@ -1513,7 +1513,19 @@ bool FPPassManager::runOnFunction(Function &F) {
     {
       PassManagerPrettyStackEntry X(FP, F);
       TimeRegion PassTimer(getPassTimer(FP));
+#ifdef EXPENSIVE_CHECKS
+      uint64_t RefHash = StructuralHash(F);
+#endif
       LocalChanged |= FP->runOnFunction(F);
+
+#if defined(EXPENSIVE_CHECKS) && !defined(NDEBUG)
+      if (!LocalChanged && (RefHash != StructuralHash(F))) {
+        llvm::errs() << "Pass modifies its input and doesn't report it: "
+                     << FP->getPassName() << "\n";
+        llvm_unreachable("Pass modifies its input and doesn't report it");
+      }
+#endif
+
       if (EmitICRemark) {
         unsigned NewSize = F.getInstructionCount();
 
@@ -1537,7 +1549,8 @@ bool FPPassManager::runOnFunction(Function &F) {
     dumpUsedSet(FP);
 
     verifyPreservedAnalysis(FP);
-    removeNotPreservedAnalysis(FP);
+    if (LocalChanged)
+      removeNotPreservedAnalysis(FP);
     recordAvailableAnalysis(FP);
     removeDeadPasses(FP, F.getName(), ON_FUNCTION_MSG);
   }
@@ -1614,7 +1627,17 @@ MPPassManager::runOnModule(Module &M) {
       PassManagerPrettyStackEntry X(MP, M);
       TimeRegion PassTimer(getPassTimer(MP));
 
+#ifdef EXPENSIVE_CHECKS
+      uint64_t RefHash = StructuralHash(M);
+#endif
+
       LocalChanged |= MP->runOnModule(M);
+
+#ifdef EXPENSIVE_CHECKS
+      assert((LocalChanged || (RefHash == StructuralHash(M))) &&
+             "Pass modifies its input and doesn't report it.");
+#endif
+
       if (EmitICRemark) {
         // Update the size of the module.
         unsigned ModuleCount = M.getInstructionCount();
@@ -1636,7 +1659,8 @@ MPPassManager::runOnModule(Module &M) {
     dumpUsedSet(MP);
 
     verifyPreservedAnalysis(MP);
-    removeNotPreservedAnalysis(MP);
+    if (LocalChanged)
+      removeNotPreservedAnalysis(MP);
     recordAvailableAnalysis(MP);
     removeDeadPasses(MP, M.getModuleIdentifier(), ON_MODULE_MSG);
   }

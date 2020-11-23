@@ -5,7 +5,6 @@
 
 include(CheckIncludeFile)
 include(CheckCXXSourceCompiles)
-include(TestBigEndian)
 
 check_include_file(unwind.h HAVE_UNWIND_H)
 
@@ -163,11 +162,8 @@ macro(test_targets)
 
   # Generate the COMPILER_RT_SUPPORTED_ARCH list.
   if(ANDROID)
-    if(${COMPILER_RT_DEFAULT_TARGET_ARCH} STREQUAL "i686")
-      add_default_target_arch(i386)
-    else()
-      add_default_target_arch(${COMPILER_RT_DEFAULT_TARGET_ARCH})
-    endif()
+    # Examine compiler output to determine target architecture.
+    detect_target_arch()
     set(COMPILER_RT_OS_SUFFIX "-android")
   elseif(NOT APPLE) # Supported archs for Apple platforms are generated later
     if(COMPILER_RT_DEFAULT_TARGET_ONLY)
@@ -191,19 +187,13 @@ macro(test_targets)
           test_target_arch(x86_64 "" "")
         endif()
       endif()
+    elseif("${COMPILER_RT_DEFAULT_TARGET_ARCH}" MATCHES "powerpc64le")
+      test_target_arch(powerpc64le "" "-m64")
     elseif("${COMPILER_RT_DEFAULT_TARGET_ARCH}" MATCHES "powerpc")
-      # Strip out -nodefaultlibs when calling TEST_BIG_ENDIAN. Configuration
-      # will fail with this option when building with a sanitizer.
-      cmake_push_check_state()
-      string(REPLACE "-nodefaultlibs" "" CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS}")
-      TEST_BIG_ENDIAN(HOST_IS_BIG_ENDIAN)
-      cmake_pop_check_state()
-
-      if(HOST_IS_BIG_ENDIAN)
-        test_target_arch(powerpc64 "" "-m64")
-      else()
-        test_target_arch(powerpc64le "" "-m64")
+      if(CMAKE_SYSTEM_NAME MATCHES "AIX")
+        test_target_arch(powerpc "" "-m32")
       endif()
+      test_target_arch(powerpc64 "" "-m64")
     elseif("${COMPILER_RT_DEFAULT_TARGET_ARCH}" MATCHES "s390x")
       test_target_arch(s390x "" "")
     elseif("${COMPILER_RT_DEFAULT_TARGET_ARCH}" MATCHES "sparc")

@@ -16,13 +16,15 @@ extern "C"
 void *registers_thread_func(void *arg) {
   int *sync = reinterpret_cast<int *>(arg);
   void *p = malloc(1337);
+  print_address("Test alloc: ", 1, p);
+  fflush(stderr);
+
   // To store the pointer, choose a register which is unlikely to be reused by
   // a function call.
-#if defined(__i386__)
-  asm ( "mov %0, %%esi"
+#if defined(__i386__) || defined(__i686__)
+  asm("mov %0, %%edi"
       :
-      : "r" (p)
-      );
+      : "r"(p));
 #elif defined(__x86_64__)
   asm ( "mov %0, %%r15"
       :
@@ -38,6 +40,12 @@ void *registers_thread_func(void *arg) {
       :
       : "r" (p)
       );
+#elif defined(__aarch64__)
+  // x9-10are used. x11-12 are probably used.
+  // So we pick x13 to be safe.
+  asm("mov x13, %0"
+      :
+      : "r"(p));
 #elif defined(__powerpc__)
   asm ( "mr 30, %0"
       :
@@ -50,8 +58,6 @@ void *registers_thread_func(void *arg) {
 #else
 #error "Test is not supported on this architecture."
 #endif
-  print_address("Test alloc: ", 1, p);
-  fflush(stderr);
   __sync_fetch_and_xor(sync, 1);
   while (true)
     sched_yield();

@@ -8,9 +8,9 @@
 
 from libcxx.test.dsl import *
 
-_allStandards = ['c++98', 'c++03', 'c++11', 'c++14', 'c++17', 'c++2a']
+_allStandards = ['c++03', 'c++11', 'c++14', 'c++17', 'c++2a']
 
-parameters = [
+DEFAULT_PARAMETERS = [
   # Core parameters of the test suite
   Parameter(name='std', choices=_allStandards, type=str,
             help="The version of the standard to compile the test suite with.",
@@ -23,6 +23,11 @@ parameters = [
             help="Whether to enable exceptions when compiling the test suite.",
             feature=lambda exceptions: None if exceptions else
               Feature(name='no-exceptions', compileFlag='-fno-exceptions')),
+
+  Parameter(name='enable_rtti', choices=[True, False], type=bool, default=True,
+            help="Whether to enable RTTI when compiling the test suite.",
+            feature=lambda rtti: None if rtti else
+              Feature(name='no-rtti', compileFlag='-fno-rtti')),
 
   Parameter(name='stdlib', choices=['libc++', 'libstdc++', 'msvc'], type=str, default='libc++',
             help="The C++ Standard Library implementation being tested.",
@@ -40,6 +45,10 @@ parameters = [
             Feature(name='c++experimental', linkFlag='-lc++experimental')),
 
   Parameter(name='long_tests', choices=[True, False], type=bool, default=True,
-            help="Whether to tests that take longer to run. This can be useful when running on a very slow device.",
+            help="Whether to enable tests that take longer to run. This can be useful when running on a very slow device.",
             feature=lambda enabled: Feature(name='long_tests') if enabled else None),
+
+  Parameter(name='enable_debug_tests', choices=[True, False], type=bool, default=True,
+            help="Whether to enable tests that exercise the libc++ debugging mode.",
+            feature=lambda enabled: None if enabled else Feature(name='libcxx-no-debug-mode')),
 ]
