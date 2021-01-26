@@ -14,12 +14,15 @@ add_tablegen(mlir-tblgen MLIR
   OpDocGen.cpp
   OpFormatGen.cpp
   OpInterfacesGen.cpp
+  OpPythonBindingGen.cpp
   OpenMPCommonGen.cpp
-  PassGen.cpp
+  PassCAPIGen.cpp
   PassDocGen.cpp
+  PassGen.cpp
   RewriterGen.cpp
   SPIRVUtilsGen.cpp
   StructsGen.cpp
+  TypeDefGen.cpp
   )
 
 set_target_properties(mlir-tblgen PROPERTIES FOLDER "Tablegenning")

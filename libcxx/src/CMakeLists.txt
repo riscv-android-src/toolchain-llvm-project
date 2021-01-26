@@ -19,21 +19,15 @@ set(LIBCXX_SOURCES
   include/atomic_support.h
   include/config_elast.h
   include/refstring.h
-  ios.cpp
-  iostream.cpp
-  locale.cpp
   memory.cpp
   mutex.cpp
   mutex_destructor.cpp
   new.cpp
   optional.cpp
-  random.cpp
   random_shuffle.cpp
-  regex.cpp
   shared_mutex.cpp
   stdexcept.cpp
   string.cpp
-  strstream.cpp
   support/runtime/exception_fallback.ipp
   support/runtime/exception_glibcxx.ipp
   support/runtime/exception_libcxxabi.ipp
@@ -58,6 +52,23 @@ set(LIBCXX_SOURCES
 if (LIBCXX_ENABLE_DEBUG_MODE_SUPPORT)
   list(APPEND LIBCXX_SOURCES
     debug.cpp
+    )
+endif()
+
+if (LIBCXX_ENABLE_RANDOM_DEVICE)
+  list(APPEND LIBCXX_SOURCES
+    random.cpp
+    )
+endif()
+
+if (LIBCXX_ENABLE_LOCALIZATION)
+  list(APPEND LIBCXX_SOURCES
+    ios.cpp
+    ios.instantiations.cpp
+    iostream.cpp
+    locale.cpp
+    regex.cpp
+    strstream.cpp
     )
 endif()
 
@@ -165,9 +176,6 @@ split_list(LIBCXX_LINK_FLAGS)
 # Build the shared library.
 if (LIBCXX_ENABLE_SHARED)
   add_library(cxx_shared SHARED ${exclude_from_all} ${LIBCXX_SOURCES} ${LIBCXX_HEADERS})
-  if(COMMAND llvm_setup_rpath)
-    llvm_setup_rpath(cxx_shared)
-  endif()
   target_link_libraries(cxx_shared PUBLIC cxx-headers
                                    PRIVATE ${LIBCXX_LIBRARIES})
   set_target_properties(cxx_shared
@@ -218,10 +226,7 @@ if (LIBCXX_ENABLE_SHARED)
       "-Wl,-force_symbols_not_weak_list,${CMAKE_CURRENT_SOURCE_DIR}/../lib/notweak.exp"
       "-Wl,-force_symbols_weak_list,${CMAKE_CURRENT_SOURCE_DIR}/../lib/weak.exp")
 
-    if (NOT LIBCXX_ENABLE_NEW_DELETE_DEFINITIONS)
-      target_link_libraries(cxx_shared PRIVATE
-        "-Wl,-reexported_symbols_list,${CMAKE_CURRENT_SOURCE_DIR}/../../libcxxabi/lib/new-delete.exp")
-    endif()
+    target_link_libraries(cxx_shared PRIVATE $<TARGET_NAME_IF_EXISTS:cxxabi-reexports>)
   endif()
 
   # Generate a linker script in place of a libc++.so symlink.

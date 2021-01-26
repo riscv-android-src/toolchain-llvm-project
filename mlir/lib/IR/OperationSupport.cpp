@@ -13,9 +13,9 @@
 
 #include "mlir/IR/OperationSupport.h"
 #include "mlir/IR/Block.h"
+#include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/OpDefinition.h"
 #include "mlir/IR/Operation.h"
-#include "mlir/IR/StandardTypes.h"
 using namespace mlir;
 
 //===----------------------------------------------------------------------===//
@@ -31,6 +31,16 @@ NamedAttrList::NamedAttrList(const_iterator in_start, const_iterator in_end) {
 }
 
 ArrayRef<NamedAttribute> NamedAttrList::getAttrs() const { return attrs; }
+
+Optional<NamedAttribute> NamedAttrList::findDuplicate() const {
+  Optional<NamedAttribute> duplicate =
+      DictionaryAttr::findDuplicate(attrs, isSorted());
+  // DictionaryAttr::findDuplicate will sort the list, so reset the sorted
+  // state.
+  if (!isSorted())
+    dictionarySorted.setPointerAndInt(nullptr, true);
+  return duplicate;
+}
 
 DictionaryAttr NamedAttrList::getDictionary(MLIRContext *context) const {
   if (!isSorted()) {
@@ -148,6 +158,26 @@ void NamedAttrList::set(Identifier name, Attribute value) {
 void NamedAttrList::set(StringRef name, Attribute value) {
   assert(value && "setting null attribute not supported");
   return set(mlir::Identifier::get(name, value.getContext()), value);
+}
+
+Attribute
+NamedAttrList::eraseImpl(SmallVectorImpl<NamedAttribute>::iterator it) {
+  if (it == attrs.end())
+    return nullptr;
+
+  // Erasing does not affect the sorted property.
+  Attribute attr = it->second;
+  attrs.erase(it);
+  dictionarySorted.setPointer(nullptr);
+  return attr;
+}
+
+Attribute NamedAttrList::erase(Identifier name) {
+  return eraseImpl(findAttr(attrs, name, isSorted()));
+}
+
+Attribute NamedAttrList::erase(StringRef name) {
+  return eraseImpl(findAttr(attrs, name, isSorted()));
 }
 
 NamedAttrList &

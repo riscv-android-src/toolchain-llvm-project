@@ -936,6 +936,25 @@ Instruction *InstCombinerImpl::foldAddWithConstant(BinaryOperator &Add) {
       if ((*C2 | LHSKnown.Zero).isAllOnesValue())
         return BinaryOperator::CreateSub(ConstantInt::get(Ty, *C2 + *C), X);
     }
+
+    // Look for a math+logic pattern that corresponds to sext-in-register of a
+    // value with cleared high bits. Convert that into a pair of shifts:
+    // add (xor X, 0x80), 0xF..F80 --> (X << ShAmtC) >>s ShAmtC
+    // add (xor X, 0xF..F80), 0x80 --> (X << ShAmtC) >>s ShAmtC
+    if (Op0->hasOneUse() && *C2 == -(*C)) {
+      unsigned BitWidth = Ty->getScalarSizeInBits();
+      unsigned ShAmt = 0;
+      if (C->isPowerOf2())
+        ShAmt = BitWidth - C->logBase2() - 1;
+      else if (C2->isPowerOf2())
+        ShAmt = BitWidth - C2->logBase2() - 1;
+      if (ShAmt && MaskedValueIsZero(X, APInt::getHighBitsSet(BitWidth, ShAmt),
+                                     0, &Add)) {
+        Constant *ShAmtC = ConstantInt::get(Ty, ShAmt);
+        Value *NewShl = Builder.CreateShl(X, ShAmtC, "sext");
+        return BinaryOperator::CreateAShr(NewShl, ShAmtC);
+      }
+    }
   }
 
   if (C->isOneValue() && Op0->hasOneUse()) {
@@ -1284,39 +1303,8 @@ Instruction *InstCombinerImpl::visitAdd(BinaryOperator &I) {
   if (Instruction *X = foldNoWrapAdd(I, Builder))
     return X;
 
-  // FIXME: This should be moved into the above helper function to allow these
-  // transforms for general constant or constant splat vectors.
   Value *LHS = I.getOperand(0), *RHS = I.getOperand(1);
   Type *Ty = I.getType();
-  if (ConstantInt *CI = dyn_cast<ConstantInt>(RHS)) {
-    Value *XorLHS = nullptr; ConstantInt *XorRHS = nullptr;
-    if (match(LHS, m_Xor(m_Value(XorLHS), m_ConstantInt(XorRHS)))) {
-      unsigned TySizeBits = Ty->getScalarSizeInBits();
-      const APInt &RHSVal = CI->getValue();
-      unsigned ExtendAmt = 0;
-      // If we have ADD(XOR(AND(X, 0xFF), 0x80), 0xF..F80), it's a sext.
-      // If we have ADD(XOR(AND(X, 0xFF), 0xF..F80), 0x80), it's a sext.
-      if (XorRHS->getValue() == -RHSVal) {
-        if (RHSVal.isPowerOf2())
-          ExtendAmt = TySizeBits - RHSVal.logBase2() - 1;
-        else if (XorRHS->getValue().isPowerOf2())
-          ExtendAmt = TySizeBits - XorRHS->getValue().logBase2() - 1;
-      }
-
-      if (ExtendAmt) {
-        APInt Mask = APInt::getHighBitsSet(TySizeBits, ExtendAmt);
-        if (!MaskedValueIsZero(XorLHS, Mask, 0, &I))
-          ExtendAmt = 0;
-      }
-
-      if (ExtendAmt) {
-        Constant *ShAmt = ConstantInt::get(Ty, ExtendAmt);
-        Value *NewShl = Builder.CreateShl(XorLHS, ShAmt, "sext");
-        return BinaryOperator::CreateAShr(NewShl, ShAmt);
-      }
-    }
-  }
-
   if (Ty->isIntOrIntVectorTy(1))
     return BinaryOperator::CreateXor(LHS, RHS);
 
@@ -1684,19 +1672,18 @@ Value *InstCombinerImpl::OptimizePointerDifference(Value *LHS, Value *RHS,
   Value *Result = EmitGEPOffset(GEP1);
 
   // If this is a single inbounds GEP and the original sub was nuw,
-  // then the final multiplication is also nuw. We match an extra add zero
-  // here, because that's what EmitGEPOffset() generates.
-  Instruction *I;
-  if (IsNUW && !GEP2 && !Swapped && GEP1->isInBounds() &&
-      match(Result, m_Add(m_Instruction(I), m_Zero())) &&
-      I->getOpcode() == Instruction::Mul)
-    I->setHasNoUnsignedWrap();
+  // then the final multiplication is also nuw.
+  if (auto *I = dyn_cast<Instruction>(Result))
+    if (IsNUW && !GEP2 && !Swapped && GEP1->isInBounds() &&
+        I->getOpcode() == Instruction::Mul)
+      I->setHasNoUnsignedWrap();
 
-  // If we had a constant expression GEP on the other side offsetting the
-  // pointer, subtract it from the offset we have.
+  // If we have a 2nd GEP of the same base pointer, subtract the offsets.
+  // If both GEPs are inbounds, then the subtract does not have signed overflow.
   if (GEP2) {
     Value *Offset = EmitGEPOffset(GEP2);
-    Result = Builder.CreateSub(Result, Offset, "gepdiff");
+    Result = Builder.CreateSub(Result, Offset, "gepdiff", /* NUW */ false,
+                               GEP1->isInBounds() && GEP2->isInBounds());
   }
 
   // If we have p - gep(p, ...)  then we have to negate the result.
@@ -1733,6 +1720,19 @@ Instruction *InstCombinerImpl::visitSub(BinaryOperator &I) {
     }
 
     return Res;
+  }
+
+  // Try this before Negator to preserve NSW flag.
+  if (Instruction *R = factorizeMathWithShlOps(I, Builder))
+    return R;
+
+  if (Constant *C = dyn_cast<Constant>(Op0)) {
+    Value *X;
+    Constant *C2;
+
+    // C-(X+C2) --> (C-C2)-X
+    if (match(Op1, m_Add(m_Value(X), m_Constant(C2))))
+      return BinaryOperator::CreateSub(ConstantExpr::getSub(C, C2), X);
   }
 
   auto TryToNarrowDeduceFlags = [this, &I, &Op0, &Op1]() -> Instruction * {
@@ -1773,9 +1773,6 @@ Instruction *InstCombinerImpl::visitSub(BinaryOperator &I) {
   // (A*B)-(A*C) -> A*(B-C) etc
   if (Value *V = SimplifyUsingDistributiveLaws(I))
     return replaceInstUsesWith(I, V);
-
-  if (Instruction *R = factorizeMathWithShlOps(I, Builder))
-    return R;
 
   if (I.getType()->isIntOrIntVectorTy(1))
     return BinaryOperator::CreateXor(Op0, Op1);
@@ -1846,10 +1843,6 @@ Instruction *InstCombinerImpl::visitSub(BinaryOperator &I) {
     // C-(C2-X) --> X+(C-C2)
     if (match(Op1, m_Sub(m_Constant(C2), m_Value(X))) && !isa<ConstantExpr>(C2))
       return BinaryOperator::CreateAdd(X, ConstantExpr::getSub(C, C2));
-
-    // C-(X+C2) --> (C-C2)-X
-    if (match(Op1, m_Add(m_Value(X), m_Constant(C2))))
-      return BinaryOperator::CreateSub(ConstantExpr::getSub(C, C2), X);
   }
 
   const APInt *Op0C;
@@ -2056,6 +2049,20 @@ Instruction *InstCombinerImpl::visitSub(BinaryOperator &I) {
     Value *Neg = Builder.CreateNeg(A, "", I.hasNoUnsignedWrap(),
                                    I.hasNoSignedWrap());
     return SelectInst::Create(Cmp, Neg, A);
+  }
+
+  // If we are subtracting a low-bit masked subset of some value from an add
+  // of that same value with no low bits changed, that is clearing some low bits
+  // of the sum:
+  // sub (X + AddC), (X & AndC) --> and (X + AddC), ~AndC
+  const APInt *AddC, *AndC;
+  if (match(Op0, m_Add(m_Value(X), m_APInt(AddC))) &&
+      match(Op1, m_And(m_Specific(X), m_APInt(AndC)))) {
+    unsigned BitWidth = Ty->getScalarSizeInBits();
+    unsigned Cttz = AddC->countTrailingZeros();
+    APInt HighMask(APInt::getHighBitsSet(BitWidth, BitWidth - Cttz));
+    if ((HighMask & *AndC).isNullValue())
+      return BinaryOperator::CreateAnd(Op0, ConstantInt::get(Ty, ~(*AndC)));
   }
 
   if (Instruction *V =

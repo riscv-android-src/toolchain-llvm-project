@@ -30,9 +30,14 @@ class DerivedTypeSpec;
 class Scope;
 class Symbol;
 
+// Note: Here ProgramUnit includes internal subprograms while TopLevelUnit
+// does not. "program-unit" in the Fortran standard matches TopLevelUnit.
+const Scope &GetTopLevelUnitContaining(const Scope &);
+const Scope &GetTopLevelUnitContaining(const Symbol &);
+const Scope &GetProgramUnitContaining(const Scope &);
+const Scope &GetProgramUnitContaining(const Symbol &);
+
 const Scope *FindModuleContaining(const Scope &);
-const Scope *FindProgramUnitContaining(const Scope &);
-const Scope *FindProgramUnitContaining(const Symbol &);
 const Scope *FindPureProcedureContaining(const Scope &);
 const Scope *FindPureProcedureContaining(const Symbol &);
 const Symbol *FindPointerComponent(const Scope &);
@@ -542,6 +547,8 @@ private:
       parser::CharBlock stmtLocation, parser::MessageFormattedText &&message,
       parser::CharBlock constructLocation);
 };
-
+// Return the (possibly null) name of the ConstructNode
+const std::optional<parser::Name> &MaybeGetNodeName(
+    const ConstructNode &construct);
 } // namespace Fortran::semantics
 #endif // FORTRAN_SEMANTICS_TOOLS_H_

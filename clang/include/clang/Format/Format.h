@@ -1913,6 +1913,10 @@ struct FormatStyle {
   /// line.
   unsigned PenaltyReturnTypeOnItsOwnLine;
 
+  /// Penalty for each character of whitespace indentation
+  /// (counted relative to leading non-whitespace column).
+  unsigned PenaltyIndentedWhitespace;
+
   /// The ``&`` and ``*`` alignment style.
   enum PointerAlignmentStyle {
     /// Align pointer to the left.
@@ -2077,6 +2081,38 @@ struct FormatStyle {
   ///    template <int> void foo();     vs.     template<int> void foo();
   /// \endcode
   bool SpaceAfterTemplateKeyword;
+
+  /// Different ways to put a space before opening parentheses.
+  enum SpaceAroundPointerQualifiersStyle {
+    /// Don't ensure spaces around pointer qualifiers and use PointerAlignment
+    /// instead.
+    /// \code
+    ///    PointerAlignment: Left                 PointerAlignment: Right
+    ///    void* const* x = NULL;         vs.     void *const *x = NULL;
+    /// \endcode
+    SAPQ_Default,
+    /// Ensure that there is a space before pointer qualifiers.
+    /// \code
+    ///    PointerAlignment: Left                 PointerAlignment: Right
+    ///    void* const* x = NULL;         vs.     void * const *x = NULL;
+    /// \endcode
+    SAPQ_Before,
+    /// Ensure that there is a space after pointer qualifiers.
+    /// \code
+    ///    PointerAlignment: Left                 PointerAlignment: Right
+    ///    void* const * x = NULL;         vs.     void *const *x = NULL;
+    /// \endcode
+    SAPQ_After,
+    /// Ensure that there is a space both before and after pointer qualifiers.
+    /// \code
+    ///    PointerAlignment: Left                 PointerAlignment: Right
+    ///    void* const * x = NULL;         vs.     void * const *x = NULL;
+    /// \endcode
+    SAPQ_Both,
+  };
+
+  ///  Defines in which cases to put a space before or after pointer qualifiers
+  SpaceAroundPointerQualifiersStyle SpaceAroundPointerQualifiers;
 
   /// If ``false``, spaces will be removed before assignment operators.
   /// \code
@@ -2470,6 +2506,7 @@ struct FormatStyle {
                R.SpaceBeforeCtorInitializerColon &&
            SpaceBeforeInheritanceColon == R.SpaceBeforeInheritanceColon &&
            SpaceBeforeParens == R.SpaceBeforeParens &&
+           SpaceAroundPointerQualifiers == R.SpaceAroundPointerQualifiers &&
            SpaceBeforeRangeBasedForLoopColon ==
                R.SpaceBeforeRangeBasedForLoopColon &&
            SpaceInEmptyBlock == R.SpaceInEmptyBlock &&
