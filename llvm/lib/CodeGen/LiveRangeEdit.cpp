@@ -12,7 +12,6 @@
 
 #include "llvm/CodeGen/LiveRangeEdit.h"
 #include "llvm/ADT/Statistic.h"
-#include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/CodeGen/CalcSpillWeights.h"
 #include "llvm/CodeGen/LiveIntervals.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
@@ -463,7 +462,7 @@ void
 LiveRangeEdit::calculateRegClassAndHint(MachineFunction &MF,
                                         const MachineLoopInfo &Loops,
                                         const MachineBlockFrequencyInfo &MBFI) {
-  VirtRegAuxInfo VRAI(MF, LIS, VRM, Loops, MBFI);
+  VirtRegAuxInfo VRAI(MF, LIS, *VRM, Loops, MBFI);
   for (unsigned I = 0, Size = size(); I < Size; ++I) {
     LiveInterval &LI = LIS.getInterval(get(I));
     if (MRI.recomputeRegClass(LI.reg()))

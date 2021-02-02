@@ -531,10 +531,13 @@ func @testupdateop(%a: memref<10xf32>, %b: memref<10xf32>, %c: memref<10x10xf32>
   %i64Value = constant 1 : i64
   %i32Value = constant 1 : i32
   %idxValue = constant 1 : index
+  %ifCond = constant true
   acc.update async(%i64Value: i64) host(%a: memref<10xf32>)
   acc.update async(%i32Value: i32) host(%a: memref<10xf32>)
   acc.update async(%idxValue: index) host(%a: memref<10xf32>)
   acc.update wait_devnum(%i64Value: i64) wait(%i32Value, %idxValue : i32, index) host(%a: memref<10xf32>)
+  acc.update if(%ifCond) host(%a: memref<10xf32>)
+  acc.update device_type(%i32Value : i32) host(%a: memref<10xf32>)
   acc.update host(%a: memref<10xf32>) device(%b, %c : memref<10xf32>, memref<10x10xf32>)
   acc.update host(%a: memref<10xf32>) device(%b, %c : memref<10xf32>, memref<10x10xf32>) attributes {async}
   acc.update host(%a: memref<10xf32>) device(%b, %c : memref<10xf32>, memref<10x10xf32>) attributes {wait}
@@ -546,10 +549,13 @@ func @testupdateop(%a: memref<10xf32>, %b: memref<10xf32>, %c: memref<10x10xf32>
 // CHECK:   [[I64VALUE:%.*]] = constant 1 : i64
 // CHECK:   [[I32VALUE:%.*]] = constant 1 : i32
 // CHECK:   [[IDXVALUE:%.*]] = constant 1 : index
+// CHECK:   [[IFCOND:%.*]] = constant true
 // CHECK:   acc.update async([[I64VALUE]] : i64) host([[ARGA]] : memref<10xf32>)
 // CHECK:   acc.update async([[I32VALUE]] : i32) host([[ARGA]] : memref<10xf32>)
 // CHECK:   acc.update async([[IDXVALUE]] : index) host([[ARGA]] : memref<10xf32>)
 // CHECK:   acc.update wait_devnum([[I64VALUE]] : i64) wait([[I32VALUE]], [[IDXVALUE]] : i32, index) host([[ARGA]] : memref<10xf32>)
+// CHECK:   acc.update if([[IFCOND]]) host([[ARGA]] : memref<10xf32>)
+// CHECK:   acc.update device_type([[I32VALUE]] : i32) host([[ARGA]] : memref<10xf32>)
 // CHECK:   acc.update host([[ARGA]] : memref<10xf32>) device([[ARGB]], [[ARGC]] : memref<10xf32>, memref<10x10xf32>)
 // CHECK:   acc.update host([[ARGA]] : memref<10xf32>) device([[ARGB]], [[ARGC]] : memref<10xf32>, memref<10x10xf32>) attributes {async}
 // CHECK:   acc.update host([[ARGA]] : memref<10xf32>) device([[ARGB]], [[ARGC]] : memref<10xf32>, memref<10x10xf32>) attributes {wait}
@@ -684,3 +690,37 @@ func @testexitdataop(%a: memref<10xf32>, %b: memref<10xf32>, %c: memref<10x10xf3
 // CHECK: acc.exit_data async([[I64VALUE]] : i64) copyout([[ARGA]] : memref<10xf32>)
 // CHECK: acc.exit_data if([[IFCOND]]) copyout([[ARGA]] : memref<10xf32>)
 // CHECK: acc.exit_data wait_devnum([[I64VALUE]] : i64) wait([[I32VALUE]], [[IDXVALUE]] : i32, index) copyout([[ARGA]] : memref<10xf32>)
+// -----
+
+
+func @testenterdataop(%a: memref<10xf32>, %b: memref<10xf32>, %c: memref<10x10xf32>) -> () {
+  %ifCond = constant true
+  %i64Value = constant 1 : i64
+  %i32Value = constant 1 : i32
+  %idxValue = constant 1 : index
+
+  acc.enter_data copyin(%a : memref<10xf32>)
+  acc.enter_data create(%a : memref<10xf32>) create_zero(%b, %c : memref<10xf32>, memref<10x10xf32>)
+  acc.enter_data attach(%a : memref<10xf32>)
+  acc.enter_data copyin(%a : memref<10xf32>) attributes {async}
+  acc.enter_data create(%a : memref<10xf32>) attributes {wait}
+  acc.enter_data async(%i64Value : i64) copyin(%a : memref<10xf32>)
+  acc.enter_data if(%ifCond) copyin(%a : memref<10xf32>)
+  acc.enter_data wait_devnum(%i64Value: i64) wait(%i32Value, %idxValue : i32, index) copyin(%a : memref<10xf32>)
+
+  return
+}
+
+// CHECK: func @testenterdataop([[ARGA:%.*]]: memref<10xf32>, [[ARGB:%.*]]: memref<10xf32>, [[ARGC:%.*]]: memref<10x10xf32>) {
+// CHECK: [[IFCOND1:%.*]] = constant true
+// CHECK: [[I64VALUE:%.*]] = constant 1 : i64
+// CHECK: [[I32VALUE:%.*]] = constant 1 : i32
+// CHECK: [[IDXVALUE:%.*]] = constant 1 : index
+// CHECK: acc.enter_data copyin([[ARGA]] : memref<10xf32>)
+// CHECK: acc.enter_data create([[ARGA]] : memref<10xf32>) create_zero([[ARGB]], [[ARGC]] : memref<10xf32>, memref<10x10xf32>)
+// CHECK: acc.enter_data attach([[ARGA]] : memref<10xf32>)
+// CHECK: acc.enter_data copyin([[ARGA]] : memref<10xf32>) attributes {async}
+// CHECK: acc.enter_data create([[ARGA]] : memref<10xf32>) attributes {wait}
+// CHECK: acc.enter_data async([[I64VALUE]] : i64) copyin([[ARGA]] : memref<10xf32>)
+// CHECK: acc.enter_data if([[IFCOND]]) copyin([[ARGA]] : memref<10xf32>)
+// CHECK: acc.enter_data wait_devnum([[I64VALUE]] : i64) wait([[I32VALUE]], [[IDXVALUE]] : i32, index) copyin([[ARGA]] : memref<10xf32>)

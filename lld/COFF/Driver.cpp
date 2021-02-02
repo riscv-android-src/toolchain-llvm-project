@@ -1188,6 +1188,11 @@ Optional<std::string> getReproduceFile(const opt::InputArgList &args) {
     return std::string(path);
   }
 
+  // This is intentionally not guarded by OPT_lldignoreenv since writing
+  // a repro tar file doesn't affect the main output.
+  if (auto *path = getenv("LLD_REPRODUCE"))
+    return std::string(path);
+
   return None;
 }
 
@@ -1513,6 +1518,8 @@ void LinkerDriver::link(ArrayRef<const char *> argsArr) {
   unsigned icfLevel =
       args.hasArg(OPT_profile) ? 0 : 1; // 0: off, 1: limited, 2: on
   unsigned tailMerge = 1;
+  bool ltoNewPM = false;
+  bool ltoDebugPM = false;
   for (auto *arg : args.filtered(OPT_opt)) {
     std::string str = StringRef(arg->getValue()).lower();
     SmallVector<StringRef, 1> vec;
@@ -1530,6 +1537,14 @@ void LinkerDriver::link(ArrayRef<const char *> argsArr) {
         tailMerge = 2;
       } else if (s == "nolldtailmerge") {
         tailMerge = 0;
+      } else if (s == "ltonewpassmanager") {
+        ltoNewPM = true;
+      } else if (s == "noltonewpassmanager") {
+        ltoNewPM = false;
+      } else if (s == "ltodebugpassmanager") {
+        ltoDebugPM = true;
+      } else if (s == "noltodebugpassmanager") {
+        ltoDebugPM = false;
       } else if (s.startswith("lldlto=")) {
         StringRef optLevel = s.substr(7);
         if (optLevel.getAsInteger(10, config->ltoo) || config->ltoo > 3)
@@ -1559,6 +1574,8 @@ void LinkerDriver::link(ArrayRef<const char *> argsArr) {
   config->doGC = doGC;
   config->doICF = icfLevel > 0;
   config->tailMerge = (tailMerge == 1 && config->doICF) || tailMerge == 2;
+  config->ltoNewPassManager = ltoNewPM;
+  config->ltoDebugPassManager = ltoDebugPM;
 
   // Handle /lldsavetemps
   if (args.hasArg(OPT_lldsavetemps))
@@ -2008,6 +2025,12 @@ void LinkerDriver::link(ArrayRef<const char *> argsArr) {
     while (run());
   }
 
+  // Create wrapped symbols for -wrap option.
+  std::vector<WrappedSymbol> wrapped = addWrappedSymbols(args);
+  // Load more object files that might be needed for wrapped symbols.
+  if (!wrapped.empty())
+    while (run());
+
   if (config->autoImport) {
     // MinGW specific.
     // Load any further object files that might be needed for doing automatic
@@ -2050,6 +2073,10 @@ void LinkerDriver::link(ArrayRef<const char *> argsArr) {
   // If we generated native object files from bitcode files, this resolves
   // references to the symbols we use from them.
   run();
+
+  // Apply symbol renames for -wrap.
+  if (!wrapped.empty())
+    wrapSymbols(wrapped);
 
   // Resolve remaining undefined symbols and warn about imported locals.
   symtab->resolveRemainingUndefines();

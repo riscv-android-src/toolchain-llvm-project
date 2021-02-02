@@ -151,7 +151,7 @@ TEST_F(SortIncludesTest, NoReplacementsForValidIncludes) {
   EXPECT_TRUE(sortIncludes(FmtStyle, Code, GetCodeRange(Code), "a.cc").empty());
 }
 
-TEST_F(SortIncludesTest, NoMainFileHeader) {
+TEST_F(SortIncludesTest, MainFileHeader) {
   std::string Code = "#include <string>\n"
                      "\n"
                      "#include \"a/extra_action.proto.h\"\n";
@@ -159,6 +159,13 @@ TEST_F(SortIncludesTest, NoMainFileHeader) {
   EXPECT_TRUE(
       sortIncludes(FmtStyle, Code, GetCodeRange(Code), "a/extra_action.cc")
           .empty());
+
+  EXPECT_EQ("#include \"foo.bar.h\"\n"
+            "\n"
+            "#include \"a.h\"\n",
+            sort("#include \"a.h\"\n"
+                 "#include \"foo.bar.h\"\n",
+                 "foo.bar.cc"));
 }
 
 TEST_F(SortIncludesTest, SortedIncludesInMultipleBlocksAreMerged) {
@@ -282,6 +289,19 @@ TEST_F(SortIncludesTest, LeadingWhitespace) {
             sort("# include \"a.h\"\n"
                  "#  include \"c.h\"\n"
                  "#   include \"b.h\"\n"));
+  EXPECT_EQ("#include \"a.h\"\n", sort("#include \"a.h\"\n"
+                                       " #include \"a.h\"\n"));
+}
+
+TEST_F(SortIncludesTest, TrailingWhitespace) {
+  EXPECT_EQ("#include \"a.h\"\n"
+            "#include \"b.h\"\n"
+            "#include \"c.h\"\n",
+            sort("#include \"a.h\" \n"
+                 "#include \"c.h\"  \n"
+                 "#include \"b.h\"   \n"));
+  EXPECT_EQ("#include \"a.h\"\n", sort("#include \"a.h\"\n"
+                                       "#include \"a.h\" \n"));
 }
 
 TEST_F(SortIncludesTest, GreaterInComment) {

@@ -43,7 +43,7 @@ namespace {
 const char *getDiagnosticCode(unsigned ID) {
   switch (ID) {
 #define DIAG(ENUM, CLASS, DEFAULT_MAPPING, DESC, GROPU, SFINAE, NOWERROR,      \
-             SHOWINSYSHEADER, CATEGORY)                                        \
+             SHOWINSYSHEADER, DEFERRABLE, CATEGORY)                            \
   case clang::diag::ENUM:                                                      \
     return #ENUM;
 #include "clang/Basic/DiagnosticASTKinds.inc"
@@ -186,7 +186,7 @@ const char *getMainFileRange(const Diag &D, const SourceManager &SM,
 
 // Place the diagnostic the main file, rather than the header, if possible:
 //   - for errors in included files, use the #include location
-//   - for errors in template instantiation, use the instantation location
+//   - for errors in template instantiation, use the instantiation location
 // In both cases, add the original header location as a note.
 bool tryMoveToMainFile(Diag &D, FullSourceLoc DiagLoc) {
   const SourceManager &SM = DiagLoc.getManager();

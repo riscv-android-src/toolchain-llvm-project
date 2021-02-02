@@ -365,9 +365,6 @@ void amdgpu::getAMDGPUTargetFeatures(const Driver &D,
                                      const llvm::Triple &Triple,
                                      const llvm::opt::ArgList &Args,
                                      std::vector<StringRef> &Features) {
-  if (const Arg *dAbi = Args.getLastArg(options::OPT_mamdgpu_debugger_abi))
-    D.Diag(diag::err_drv_clang_unsupported) << dAbi->getAsString(Args);
-
   // Add target ID features to -target-feature options. No diagnostics should
   // be emitted here since invalid target ID is diagnosed at other places.
   StringRef TargetID = Args.getLastArgValue(options::OPT_mcpu_EQ);
@@ -502,7 +499,7 @@ llvm::DenormalMode AMDGPUToolChain::getDefaultDenormalModeForType(
 bool AMDGPUToolChain::isWave64(const llvm::opt::ArgList &DriverArgs,
                                llvm::AMDGPU::GPUKind Kind) {
   const unsigned ArchAttr = llvm::AMDGPU::getArchAttrAMDGCN(Kind);
-  static bool HasWave32 = (ArchAttr & llvm::AMDGPU::FEATURE_WAVE32);
+  bool HasWave32 = (ArchAttr & llvm::AMDGPU::FEATURE_WAVE32);
 
   return !HasWave32 || DriverArgs.hasFlag(
     options::OPT_mwavefrontsize64, options::OPT_mno_wavefrontsize64, false);

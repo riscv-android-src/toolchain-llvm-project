@@ -333,6 +333,8 @@ class VOP_MAC <ValueType vt0, ValueType vt1=vt0> : VOPProfile <[vt0, vt1, vt1, v
 
 def VOP_MAC_F16 : VOP_MAC <f16>;
 def VOP_MAC_F32 : VOP_MAC <f32>;
+let HasExtDPP = 0 in
+def VOP_MAC_LEGACY_F32 : VOP_MAC <f32>;
 
 class VOP_DOT_ACC<ValueType vt0, ValueType vt1> : VOP_MAC<vt0, vt1> {
   let HasClamp = 0;
@@ -366,8 +368,8 @@ def VOP2b_I32_I1_I32_I32 : VOPProfile<[i32, i32, i32, untyped], 0, /*EnableClamp
 def VOP2b_I32_I1_I32_I32_I1 : VOPProfile<[i32, i32, i32, i1], 0, /*EnableClamp=*/1> {
   let Asm32 = "$vdst, vcc, $src0, $src1, vcc";
   let Asm64 = "$vdst, $sdst, $src0, $src1, $src2$clamp";
-  let AsmSDWA = "$vdst, vcc, $src0_modifiers, $src1_modifiers, vcc $clamp $dst_sel $dst_unused $src0_sel $src1_sel";
-  let AsmSDWA9 = "$vdst, vcc, $src0_modifiers, $src1_modifiers, vcc $clamp $dst_sel $dst_unused $src0_sel $src1_sel";
+  let AsmSDWA = "$vdst, vcc, $src0_modifiers, $src1_modifiers, vcc$clamp $dst_sel $dst_unused $src0_sel $src1_sel";
+  let AsmSDWA9 = "$vdst, vcc, $src0_modifiers, $src1_modifiers, vcc$clamp $dst_sel $dst_unused $src0_sel $src1_sel";
   let AsmDPP = "$vdst, vcc, $src0, $src1, vcc $dpp_ctrl$row_mask$bank_mask$bound_ctrl";
   let AsmDPP8 = "$vdst, vcc, $src0, $src1, vcc $dpp8$fi";
   let AsmDPP16 = AsmDPP#"$fi";
@@ -401,8 +403,8 @@ def VOP2b_I32_I1_I32_I32_I1 : VOPProfile<[i32, i32, i32, i1], 0, /*EnableClamp=*
 def VOP2e_I32_I32_I32_I1 : VOPProfile<[i32, i32, i32, i1], /*EnableF32SrcMods=*/1> {
   let Asm32 = "$vdst, $src0, $src1";
   let Asm64 = "$vdst, $src0_modifiers, $src1_modifiers, $src2";
-  let AsmSDWA = "$vdst, $src0_modifiers, $src1_modifiers, vcc $clamp $dst_sel $dst_unused $src0_sel $src1_sel";
-  let AsmSDWA9 = "$vdst, $src0_modifiers, $src1_modifiers, vcc $clamp $dst_sel $dst_unused $src0_sel $src1_sel";
+  let AsmSDWA = "$vdst, $src0_modifiers, $src1_modifiers, vcc$clamp $dst_sel $dst_unused $src0_sel $src1_sel";
+  let AsmSDWA9 = "$vdst, $src0_modifiers, $src1_modifiers, vcc$clamp $dst_sel $dst_unused $src0_sel $src1_sel";
   let AsmDPP = "$vdst, $src0, $src1, vcc $dpp_ctrl$row_mask$bank_mask$bound_ctrl";
   let AsmDPP8 = "$vdst, $src0, $src1, vcc $dpp8$fi";
   let AsmDPP16 = AsmDPP#"$fi";
@@ -501,7 +503,7 @@ let Constraints = "$vdst = $src2", DisableEncoding="$src2",
 defm V_MAC_F32 : VOP2Inst <"v_mac_f32", VOP_MAC_F32>;
 
 let SubtargetPredicate = isGFX6GFX7GFX10 in
-defm V_MAC_LEGACY_F32 : VOP2Inst <"v_mac_legacy_f32", VOP_MAC_F32>;
+defm V_MAC_LEGACY_F32 : VOP2Inst <"v_mac_legacy_f32", VOP_MAC_LEGACY_F32>;
 } // End Constraints = "$vdst = $src2", DisableEncoding="$src2",
   //     isConvertibleToThreeAddress = 1
 
@@ -670,13 +672,22 @@ let SubtargetPredicate = HasDLInsts in {
 defm V_XNOR_B32 : VOP2Inst <"v_xnor_b32", VOP_I32_I32_I32>;
 
 let Constraints = "$vdst = $src2",
-    DisableEncoding="$src2",
+    DisableEncoding = "$src2",
     isConvertibleToThreeAddress = 1,
-    isCommutable = 1 in {
+    isCommutable = 1 in
 defm V_FMAC_F32 : VOP2Inst <"v_fmac_f32", VOP_MAC_F32>;
-}
 
 } // End SubtargetPredicate = HasDLInsts
+
+let SubtargetPredicate = HasFmaLegacy32 in {
+
+let Constraints = "$vdst = $src2",
+    DisableEncoding = "$src2",
+    isConvertibleToThreeAddress = 1,
+    isCommutable = 1 in
+defm V_FMAC_LEGACY_F32 : VOP2Inst <"v_fmac_legacy_f32", VOP_MAC_LEGACY_F32>;
+
+} // End SubtargetPredicate = HasFmaLegacy32
 
 let Constraints = "$vdst = $src2",
       DisableEncoding="$src2",
@@ -1145,21 +1156,25 @@ multiclass VOP2_Real_gfx10_with_name<bits<6> op, string opName,
   VOP2_Real_dpp_gfx10_with_name<op, opName, asmName>,
   VOP2_Real_dpp8_gfx10_with_name<op, opName, asmName>;
 
-defm V_XNOR_B32      : VOP2_Real_gfx10<0x01e>;
-defm V_FMAC_F32      : VOP2_Real_gfx10<0x02b>;
-defm V_FMAMK_F32     : VOP2Only_Real_MADK_gfx10<0x02c>;
-defm V_FMAAK_F32     : VOP2Only_Real_MADK_gfx10<0x02d>;
-defm V_ADD_F16       : VOP2_Real_gfx10<0x032>;
-defm V_SUB_F16       : VOP2_Real_gfx10<0x033>;
-defm V_SUBREV_F16    : VOP2_Real_gfx10<0x034>;
-defm V_MUL_F16       : VOP2_Real_gfx10<0x035>;
-defm V_FMAC_F16      : VOP2_Real_gfx10<0x036>;
-defm V_FMAMK_F16     : VOP2Only_Real_MADK_gfx10<0x037>;
-defm V_FMAAK_F16     : VOP2Only_Real_MADK_gfx10<0x038>;
-defm V_MAX_F16       : VOP2_Real_gfx10<0x039>;
-defm V_MIN_F16       : VOP2_Real_gfx10<0x03a>;
-defm V_LDEXP_F16     : VOP2_Real_gfx10<0x03b>;
-defm V_PK_FMAC_F16   : VOP2_Real_e32_gfx10<0x03c>;
+// NB: Same opcode as v_mac_legacy_f32
+let DecoderNamespace = "GFX10_B" in
+defm V_FMAC_LEGACY_F32 : VOP2_Real_gfx10<0x006>;
+
+defm V_XNOR_B32        : VOP2_Real_gfx10<0x01e>;
+defm V_FMAC_F32        : VOP2_Real_gfx10<0x02b>;
+defm V_FMAMK_F32       : VOP2Only_Real_MADK_gfx10<0x02c>;
+defm V_FMAAK_F32       : VOP2Only_Real_MADK_gfx10<0x02d>;
+defm V_ADD_F16         : VOP2_Real_gfx10<0x032>;
+defm V_SUB_F16         : VOP2_Real_gfx10<0x033>;
+defm V_SUBREV_F16      : VOP2_Real_gfx10<0x034>;
+defm V_MUL_F16         : VOP2_Real_gfx10<0x035>;
+defm V_FMAC_F16        : VOP2_Real_gfx10<0x036>;
+defm V_FMAMK_F16       : VOP2Only_Real_MADK_gfx10<0x037>;
+defm V_FMAAK_F16       : VOP2Only_Real_MADK_gfx10<0x038>;
+defm V_MAX_F16         : VOP2_Real_gfx10<0x039>;
+defm V_MIN_F16         : VOP2_Real_gfx10<0x03a>;
+defm V_LDEXP_F16       : VOP2_Real_gfx10<0x03b>;
+defm V_PK_FMAC_F16     : VOP2_Real_e32_gfx10<0x03c>;
 
 // VOP2 no carry-in, carry-out.
 defm V_ADD_NC_U32 :

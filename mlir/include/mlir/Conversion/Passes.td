@@ -74,14 +74,18 @@ def ConvertAffineToStandard : Pass<"lower-affine"> {
 }
 
 //===----------------------------------------------------------------------===//
-// AVX512ToLLVM
+// AsyncToLLVM
 //===----------------------------------------------------------------------===//
 
-def ConvertAVX512ToLLVM : Pass<"convert-avx512-to-llvm", "ModuleOp"> {
-  let summary = "Convert the operations from the avx512 dialect into the LLVM "
+def ConvertAsyncToLLVM : Pass<"convert-async-to-llvm", "ModuleOp"> {
+  let summary = "Convert the operations from the async dialect into the LLVM "
                 "dialect";
-  let constructor = "mlir::createConvertAVX512ToLLVMPass()";
-  let dependentDialects = ["LLVM::LLVMDialect", "LLVM::LLVMAVX512Dialect"];
+  let description = [{
+    Convert `async.execute` operations to LLVM coroutines and use async runtime
+    API to execute them.
+  }];
+  let constructor = "mlir::createConvertAsyncToLLVMPass()";
+  let dependentDialects = ["LLVM::LLVMDialect"];
 }
 
 //===----------------------------------------------------------------------===//
@@ -91,10 +95,17 @@ def ConvertAVX512ToLLVM : Pass<"convert-avx512-to-llvm", "ModuleOp"> {
 def GpuToLLVMConversionPass : Pass<"gpu-to-llvm", "ModuleOp"> {
   let summary = "Convert GPU dialect to LLVM dialect with GPU runtime calls";
   let constructor = "mlir::createGpuToLLVMConversionPass()";
+  let dependentDialects = ["LLVM::LLVMDialect"];
   let options = [
     Option<"gpuBinaryAnnotation", "gpu-binary-annotation", "std::string",
            "", "Annotation attribute string for GPU binary">,
   ];
+}
+
+def LowerHostCodeToLLVM : Pass<"lower-host-to-llvm", "ModuleOp"> {
+  let summary = "Lowers the host module code and `gpu.launch_func` to LLVM";
+  let constructor = "mlir::createLowerHostCodeToLLVMPass()";
+  let dependentDialects = ["LLVM::LLVMDialect"];
 }
 
 //===----------------------------------------------------------------------===//
@@ -196,6 +207,27 @@ def ConvertOpenMPToLLVM : Pass<"convert-openmp-to-llvm", "ModuleOp"> {
   let summary = "Convert the OpenMP ops to OpenMP ops with LLVM dialect";
   let constructor = "mlir::createConvertOpenMPToLLVMPass()";
   let dependentDialects = ["LLVM::LLVMDialect"];
+}
+
+//===----------------------------------------------------------------------===//
+// PDLToPDLInterp
+//===----------------------------------------------------------------------===//
+
+def ConvertPDLToPDLInterp : Pass<"convert-pdl-to-pdl-interp", "ModuleOp"> {
+  let summary = "Convert PDL ops to PDL interpreter ops";
+  let constructor = "mlir::createPDLToPDLInterpPass()";
+  let dependentDialects = ["pdl_interp::PDLInterpDialect"];
+}
+
+//===----------------------------------------------------------------------===//
+// SCFToOpenMP
+//===----------------------------------------------------------------------===//
+
+def ConvertSCFToOpenMP : FunctionPass<"convert-scf-to-openmp"> {
+  let summary = "Convert SCF parallel loop to OpenMP parallel + workshare "
+                "constructs.";
+  let constructor = "mlir::createConvertSCFToOpenMPPass()";
+  let dependentDialects = ["omp::OpenMPDialect"];
 }
 
 //===----------------------------------------------------------------------===//
@@ -358,15 +390,28 @@ def ConvertVectorToSCF : FunctionPass<"convert-vector-to-scf"> {
 def ConvertVectorToLLVM : Pass<"convert-vector-to-llvm", "ModuleOp"> {
   let summary = "Lower the operations from the vector dialect into the LLVM "
                 "dialect";
+  let description = [{
+
+    Convert operations from the vector dialect into the LLVM IR dialect
+    operations. The lowering pass provides several options to control
+    the kind of optimizations that are allowed. It also provides options
+    that augment the architectural-neutral vector dialect with
+    architectural-specific dialects (AVX512, Neon, etc.).
+
+  }];
   let constructor = "mlir::createConvertVectorToLLVMPass()";
-  let dependentDialects = ["LLVM::LLVMDialect"];
+  let dependentDialects = ["LLVM::LLVMDialect", "LLVM::LLVMAVX512Dialect"];
   let options = [
     Option<"reassociateFPReductions", "reassociate-fp-reductions",
            "bool", /*default=*/"false",
            "Allows llvm to reassociate floating-point reductions for speed">,
     Option<"enableIndexOptimizations", "enable-index-optimizations",
            "bool", /*default=*/"true",
-           "Allows compiler to assume indices fit in 32-bit if that yields faster code">
+           "Allows compiler to assume indices fit in 32-bit if that yields "
+	   "faster code">,
+    Option<"enableAVX512", "enable-avx512",
+           "bool", /*default=*/"false",
+           "Augments the vector dialect with the AVX512 dialect during lowering">
   ];
 }
 

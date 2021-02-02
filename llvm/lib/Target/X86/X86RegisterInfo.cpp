@@ -665,13 +665,6 @@ bool X86RegisterInfo::canRealignStack(const MachineFunction &MF) const {
   return true;
 }
 
-bool X86RegisterInfo::hasReservedSpillSlot(const MachineFunction &MF,
-                                           Register Reg, int &FrameIdx) const {
-  // Since X86 defines assignCalleeSavedSpillSlots which always return true
-  // this function neither used nor tested.
-  llvm_unreachable("Unused function on X86. Otherwise need a test case.");
-}
-
 // tryOptimizeLEAtoMOV - helper function that tries to replace a LEA instruction
 // of the form 'lea (%esp), %ebx' --> 'mov %esp, %ebx'.
 // TODO: In this case we should be really trying first to entirely eliminate
@@ -732,11 +725,12 @@ X86RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
     assert((!needsStackRealignment(MF) ||
            MF.getFrameInfo().isFixedObjectIndex(FrameIndex)) &&
            "Return instruction can only reference SP relative frame objects");
-    FIOffset = TFI->getFrameIndexReferenceSP(MF, FrameIndex, BasePtr, 0);
+    FIOffset =
+        TFI->getFrameIndexReferenceSP(MF, FrameIndex, BasePtr, 0).getFixed();
   } else if (TFI->Is64Bit && (MBB.isEHFuncletEntry() || IsEHFuncletEpilogue)) {
     FIOffset = TFI->getWin64EHFrameIndexRef(MF, FrameIndex, BasePtr);
   } else {
-    FIOffset = TFI->getFrameIndexReference(MF, FrameIndex, BasePtr);
+    FIOffset = TFI->getFrameIndexReference(MF, FrameIndex, BasePtr).getFixed();
   }
 
   // LOCAL_ESCAPE uses a single offset, with no register. It only works in the

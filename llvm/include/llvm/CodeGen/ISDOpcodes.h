@@ -283,6 +283,16 @@ enum NodeType {
   ADDCARRY,
   SUBCARRY,
 
+  /// Carry-using overflow-aware nodes for multiple precision addition and
+  /// subtraction. These nodes take three operands: The first two are normal lhs
+  /// and rhs to the add or sub, and the third is a boolean indicating if there
+  /// is an incoming carry. They produce two results: the normal result of the
+  /// add or sub, and a boolean that indicates if an overflow occured (*not*
+  /// flag, because it may be a store to memory, etc.). If the type of the
+  /// boolean is not i1 then the high bits conform to getBooleanContents.
+  SADDO_CARRY,
+  SSUBO_CARRY,
+
   /// RESULT, BOOL = [SU]ADDO(LHS, RHS) - Overflow-aware nodes for addition.
   /// These nodes take two operands: the normal LHS and RHS to the add. They
   /// produce two results: the normal result of the add, and a boolean that
@@ -1096,6 +1106,10 @@ enum NodeType {
   /// known nonzero constant. The only operand here is the chain.
   GET_DYNAMIC_AREA_OFFSET,
 
+  /// Pseudo probe for AutoFDO, as a place holder in a basic block to improve
+  /// the sample counts quality.
+  PSEUDO_PROBE,
+
   /// VSCALE(IMM) - Returns the runtime scaling factor used to calculate the
   /// number of elements within a scalable vector. IMM is a constant integer
   /// multiplier that is applied to the runtime value.
@@ -1155,6 +1169,10 @@ static const int FIRST_TARGET_STRICTFP_OPCODE = BUILTIN_OP_END + 400;
 /// this value. Those that do must not be less than this value, and can
 /// be used with SelectionDAG::getMemIntrinsicNode.
 static const int FIRST_TARGET_MEMORY_OPCODE = BUILTIN_OP_END + 500;
+
+/// Get underlying scalar opcode for VECREDUCE opcode.
+/// For example ISD::AND for ISD::VECREDUCE_AND.
+NodeType getVecReduceBaseOpcode(unsigned VecReduceOpcode);
 
 //===--------------------------------------------------------------------===//
 /// MemIndexedMode enum - This enum defines the load / store indexed
