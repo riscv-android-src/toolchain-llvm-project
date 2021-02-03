@@ -85,10 +85,6 @@ ifneq (,$(filter armeabi%,$(TARGET_ARCH_ABI)))
     libcxx_export_ldflags += -Wl,--exclude-libs,libunwind.a
 endif
 
-ifeq ($(TARGET_ARCH_ABI),arm64-v8a)
-    libcxx_cxxflags += -mbranch-protection=standard
-endif
-
 ifneq ($(LIBCXX_FORCE_REBUILD),true)
 
 $(call ndk_log,Using prebuilt libc++ libraries)
