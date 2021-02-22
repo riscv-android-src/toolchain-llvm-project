@@ -5142,8 +5142,11 @@ static EvalStmtResult EvaluateStmt(StmtResult &Result, EvalInfo &Info,
   case Stmt::ReturnStmtClass: {
     const Expr *RetExpr = cast<ReturnStmt>(S)->getRetValue();
     FullExpressionRAII Scope(Info);
-    if (RetExpr && RetExpr->isValueDependent())
-      return EvaluateDependentExpr(RetExpr, Info) ? ESR_Returned : ESR_Failed;
+    if (RetExpr && RetExpr->isValueDependent()) {
+      EvaluateDependentExpr(RetExpr, Info);
+      // We know we returned, but we don't know what the value is.
+      return ESR_Failed;
+    }
     if (RetExpr &&
         !(Result.Slot
               ? EvaluateInPlace(Result.Value, Info, *Result.Slot, RetExpr)
@@ -10965,7 +10968,7 @@ EvaluateBuiltinClassifyType(QualType T, const LangOptions &LangOpts) {
 #define SVE_TYPE(Name, Id, SingletonId) \
     case BuiltinType::Id:
 #include "clang/Basic/AArch64SVEACLETypes.def"
-#define PPC_MMA_VECTOR_TYPE(Name, Id, Size) \
+#define PPC_VECTOR_TYPE(Name, Id, Size) \
     case BuiltinType::Id:
 #include "clang/Basic/PPCTypes.def"
       return GCCTypeClass::None;
@@ -11405,9 +11408,9 @@ static bool tryEvaluateBuiltinObjectSize(const Expr *E, unsigned Type,
       return false;
   }
 
-  // If we point to before the start of the object, there are no accessible
-  // bytes.
-  if (LVal.getLValueOffset().isNegative()) {
+  // If we point outside of the object, there are no accessible bytes.
+  if (LVal.getLValueOffset().isNegative() ||
+      ((Type & 1) && !LVal.Designator.isValidSubobject())) {
     Size = 0;
     return true;
   }

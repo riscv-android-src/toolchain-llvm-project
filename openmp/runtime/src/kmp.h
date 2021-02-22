@@ -66,6 +66,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits>
+#include <type_traits>
 /* include <ctype.h> don't use; problems with /MD on Windows* OS NT due to bad
    Microsoft library. Some macros provided below to replace these functions  */
 #ifndef __ABSOFT_WIN
@@ -694,6 +696,9 @@ public:
     virtual int begin() const { return 0; }
     virtual int end() const { return 0; }
     virtual int next(int previous) const { return 0; }
+#if KMP_OS_WINDOWS
+    virtual int set_process_affinity(bool abort_on_error) const { return -1; }
+#endif
     // Set the system's affinity to this affinity mask's value
     virtual int set_system_affinity(bool abort_on_error) const { return -1; }
     // Set this affinity mask to the current system affinity
@@ -885,7 +890,7 @@ extern int __kmp_hws_abs_flag; // absolute or per-item number requested
 typedef uintptr_t omp_uintptr_t;
 
 typedef enum {
-  omp_atk_threadmodel = 1,
+  omp_atk_sync_hint = 1,
   omp_atk_alignment = 2,
   omp_atk_access = 3,
   omp_atk_pool_size = 4,
@@ -898,10 +903,10 @@ typedef enum {
 typedef enum {
   omp_atv_false = 0,
   omp_atv_true = 1,
-  omp_atv_default = 2,
   omp_atv_contended = 3,
   omp_atv_uncontended = 4,
-  omp_atv_sequential = 5,
+  omp_atv_serialized = 5,
+  omp_atv_sequential = omp_atv_serialized, // (deprecated)
   omp_atv_private = 6,
   omp_atv_all = 7,
   omp_atv_thread = 8,
@@ -916,6 +921,7 @@ typedef enum {
   omp_atv_blocked = 17,
   omp_atv_interleaved = 18
 } omp_alloctrait_value_t;
+#define omp_atv_default ((omp_uintptr_t)-1)
 
 typedef void *omp_memspace_handle_t;
 extern omp_memspace_handle_t const omp_default_mem_space;
@@ -2376,7 +2382,7 @@ struct kmp_taskdata { /* aligned during dynamic allocation       */
   kmp_depnode_t
       *td_depnode; // Pointer to graph node if this task has dependencies
   kmp_task_team_t *td_task_team;
-  kmp_int32 td_size_alloc; // The size of task structure, including shareds etc.
+  size_t td_size_alloc; // Size of task structure, including shareds etc.
 #if defined(KMP_GOMP_COMPAT)
   // 4 or 8 byte integers for the loop bounds in GOMP_taskloop
   kmp_int32 td_size_loop_bounds;
@@ -3587,7 +3593,7 @@ extern void __kmp_user_set_library(enum library_type arg);
 extern void __kmp_aux_set_library(enum library_type arg);
 extern void __kmp_aux_set_stacksize(size_t arg);
 extern void __kmp_aux_set_blocktime(int arg, kmp_info_t *thread, int tid);
-extern void __kmp_aux_set_defaults(char const *str, int len);
+extern void __kmp_aux_set_defaults(char const *str, size_t len);
 
 /* Functions called from __kmp_aux_env_initialize() in kmp_settings.cpp */
 void kmpc_set_blocktime(int arg);
@@ -3780,6 +3786,12 @@ KMP_EXPORT void __kmpc_taskloop(ident_t *loc, kmp_int32 gtid, kmp_task_t *task,
                                 kmp_uint64 *ub, kmp_int64 st, kmp_int32 nogroup,
                                 kmp_int32 sched, kmp_uint64 grainsize,
                                 void *task_dup);
+KMP_EXPORT void __kmpc_taskloop_5(ident_t *loc, kmp_int32 gtid,
+                                  kmp_task_t *task, kmp_int32 if_val,
+                                  kmp_uint64 *lb, kmp_uint64 *ub, kmp_int64 st,
+                                  kmp_int32 nogroup, kmp_int32 sched,
+                                  kmp_uint64 grainsize, kmp_int32 modifier,
+                                  void *task_dup);
 KMP_EXPORT void *__kmpc_task_reduction_init(int gtid, int num_data, void *data);
 KMP_EXPORT void *__kmpc_taskred_init(int gtid, int num_data, void *data);
 KMP_EXPORT void *__kmpc_task_reduction_get_th_data(int gtid, void *tg, void *d);
@@ -4018,5 +4030,172 @@ int __kmp_execute_tasks_oncore(kmp_info_t *thread, kmp_int32 gtid,
                                void *itt_sync_obj,
 #endif /* USE_ITT_BUILD */
                                kmp_int32 is_constrained);
+
+/// This class safely opens and closes a C-style FILE* object using RAII
+/// semantics. There are also methods which allow using stdout or stderr as
+/// the underlying FILE* object. With the implicit conversion operator to
+/// FILE*, an object with this type can be used in any function which takes
+/// a FILE* object e.g., fprintf().
+/// No close method is needed at use sites.
+class kmp_safe_raii_file_t {
+  FILE *f;
+
+  void close() {
+    if (f && f != stdout && f != stderr) {
+      fclose(f);
+      f = nullptr;
+    }
+  }
+
+public:
+  kmp_safe_raii_file_t() : f(nullptr) {}
+  kmp_safe_raii_file_t(const char *filename, const char *mode,
+                       const char *env_var = nullptr)
+      : f(nullptr) {
+    open(filename, mode, env_var);
+  }
+  ~kmp_safe_raii_file_t() { close(); }
+
+  /// Open filename using mode. This is automatically closed in the destructor.
+  /// The env_var parameter indicates the environment variable the filename
+  /// came from if != nullptr.
+  void open(const char *filename, const char *mode,
+            const char *env_var = nullptr) {
+    KMP_ASSERT(!f);
+    f = fopen(filename, mode);
+    if (!f) {
+      int code = errno;
+      if (env_var) {
+        __kmp_fatal(KMP_MSG(CantOpenFileForReading, filename), KMP_ERR(code),
+                    KMP_HNT(CheckEnvVar, env_var, filename), __kmp_msg_null);
+      } else {
+        __kmp_fatal(KMP_MSG(CantOpenFileForReading, filename), KMP_ERR(code),
+                    __kmp_msg_null);
+      }
+    }
+  }
+  /// Set the FILE* object to stdout and output there
+  /// No open call should happen before this call.
+  void set_stdout() {
+    KMP_ASSERT(!f);
+    f = stdout;
+  }
+  /// Set the FILE* object to stderr and output there
+  /// No open call should happen before this call.
+  void set_stderr() {
+    KMP_ASSERT(!f);
+    f = stderr;
+  }
+  operator bool() { return bool(f); }
+  operator FILE *() { return f; }
+};
+
+template <typename SourceType, typename TargetType,
+          bool isSourceSmaller = (sizeof(SourceType) < sizeof(TargetType)),
+          bool isSourceEqual = (sizeof(SourceType) == sizeof(TargetType)),
+          bool isSourceSigned = std::is_signed<SourceType>::value,
+          bool isTargetSigned = std::is_signed<TargetType>::value>
+struct kmp_convert {};
+
+// Both types are signed; Source smaller
+template <typename SourceType, typename TargetType>
+struct kmp_convert<SourceType, TargetType, true, false, true, true> {
+  static TargetType to(SourceType src) { return (TargetType)src; }
+};
+// Source equal
+template <typename SourceType, typename TargetType>
+struct kmp_convert<SourceType, TargetType, false, true, true, true> {
+  static TargetType to(SourceType src) { return src; }
+};
+// Source bigger
+template <typename SourceType, typename TargetType>
+struct kmp_convert<SourceType, TargetType, false, false, true, true> {
+  static TargetType to(SourceType src) {
+    KMP_ASSERT(src <= static_cast<SourceType>(
+                          (std::numeric_limits<TargetType>::max)()));
+    KMP_ASSERT(src >= static_cast<SourceType>(
+                          (std::numeric_limits<TargetType>::min)()));
+    return (TargetType)src;
+  }
+};
+
+// Source signed, Target unsigned
+// Source smaller
+template <typename SourceType, typename TargetType>
+struct kmp_convert<SourceType, TargetType, true, false, true, false> {
+  static TargetType to(SourceType src) {
+    KMP_ASSERT(src >= 0);
+    return (TargetType)src;
+  }
+};
+// Source equal
+template <typename SourceType, typename TargetType>
+struct kmp_convert<SourceType, TargetType, false, true, true, false> {
+  static TargetType to(SourceType src) {
+    KMP_ASSERT(src >= 0);
+    return (TargetType)src;
+  }
+};
+// Source bigger
+template <typename SourceType, typename TargetType>
+struct kmp_convert<SourceType, TargetType, false, false, true, false> {
+  static TargetType to(SourceType src) {
+    KMP_ASSERT(src >= 0);
+    KMP_ASSERT(src <= static_cast<SourceType>(
+                          (std::numeric_limits<TargetType>::max)()));
+    return (TargetType)src;
+  }
+};
+
+// Source unsigned, Target signed
+// Source smaller
+template <typename SourceType, typename TargetType>
+struct kmp_convert<SourceType, TargetType, true, false, false, true> {
+  static TargetType to(SourceType src) { return (TargetType)src; }
+};
+// Source equal
+template <typename SourceType, typename TargetType>
+struct kmp_convert<SourceType, TargetType, false, true, false, true> {
+  static TargetType to(SourceType src) {
+    KMP_ASSERT(src <= static_cast<SourceType>(
+                          (std::numeric_limits<TargetType>::max)()));
+    return (TargetType)src;
+  }
+};
+// Source bigger
+template <typename SourceType, typename TargetType>
+struct kmp_convert<SourceType, TargetType, false, false, false, true> {
+  static TargetType to(SourceType src) {
+    KMP_ASSERT(src <= static_cast<SourceType>(
+                          (std::numeric_limits<TargetType>::max)()));
+    return (TargetType)src;
+  }
+};
+
+// Source unsigned, Target unsigned
+// Source smaller
+template <typename SourceType, typename TargetType>
+struct kmp_convert<SourceType, TargetType, true, false, false, false> {
+  static TargetType to(SourceType src) { return (TargetType)src; }
+};
+// Source equal
+template <typename SourceType, typename TargetType>
+struct kmp_convert<SourceType, TargetType, false, true, false, false> {
+  static TargetType to(SourceType src) { return src; }
+};
+// Source bigger
+template <typename SourceType, typename TargetType>
+struct kmp_convert<SourceType, TargetType, false, false, false, false> {
+  static TargetType to(SourceType src) {
+    KMP_ASSERT(src <= static_cast<SourceType>(
+                          (std::numeric_limits<TargetType>::max)()));
+    return (TargetType)src;
+  }
+};
+
+template <typename T1, typename T2>
+static inline void __kmp_type_convert(T1 src, T2 *dest) {
+  *dest = kmp_convert<T1, T2>::to(src);
+}
 
 #endif /* KMP_H */

@@ -157,8 +157,10 @@ static void CheckExplicitDataArg(const characteristics::DummyDataObject &dummy,
       // Sequence association (15.5.2.11) applies -- rank need not match
       // if the actual argument is an array or array element designator.
     } else {
+      // Let CheckConformance accept scalars; storage association
+      // cases are checked here below.
       CheckConformance(messages, dummy.type.shape(), actualType.shape(),
-          "dummy argument", "actual argument");
+          "dummy argument", "actual argument", true, true);
     }
   } else {
     const auto &len{actualType.LEN()};
@@ -263,10 +265,10 @@ static void CheckExplicitDataArg(const characteristics::DummyDataObject &dummy,
   // Rank and shape checks
   const auto *actualLastSymbol{evaluate::GetLastSymbol(actual)};
   if (actualLastSymbol) {
-    actualLastSymbol = GetAssociationRoot(*actualLastSymbol);
+    actualLastSymbol = &ResolveAssociations(*actualLastSymbol);
   }
   const ObjectEntityDetails *actualLastObject{actualLastSymbol
-          ? actualLastSymbol->GetUltimate().detailsIf<ObjectEntityDetails>()
+          ? actualLastSymbol->detailsIf<ObjectEntityDetails>()
           : nullptr};
   int actualRank{evaluate::GetRank(actualType.shape())};
   bool actualIsPointer{(actualLastSymbol && IsPointer(*actualLastSymbol)) ||
@@ -351,7 +353,7 @@ static void CheckExplicitDataArg(const characteristics::DummyDataObject &dummy,
       dummy.attrs.test(characteristics::DummyDataObject::Attr::Pointer)};
   bool dummyIsContiguous{
       dummy.attrs.test(characteristics::DummyDataObject::Attr::Contiguous)};
-  bool actualIsContiguous{IsSimplyContiguous(actual, context.intrinsics())};
+  bool actualIsContiguous{IsSimplyContiguous(actual, context)};
   bool dummyIsAssumedRank{dummy.type.attrs().test(
       characteristics::TypeAndShape::Attr::AssumedRank)};
   bool dummyIsAssumedShape{dummy.type.attrs().test(
@@ -535,9 +537,20 @@ static void CheckProcedureArg(evaluate::ActualArgument &arg,
           }
           if (interface.HasExplicitInterface()) {
             if (interface != argInterface) {
-              messages.Say(
-                  "Actual argument procedure has interface incompatible with %s"_err_en_US,
-                  dummyName);
+              // 15.5.2.9(1): Explicit interfaces must match
+              if (argInterface.HasExplicitInterface()) {
+                messages.Say(
+                    "Actual procedure argument has interface incompatible with %s"_err_en_US,
+                    dummyName);
+                return;
+              } else {
+                messages.Say(
+                    "Actual procedure argument has an implicit interface "
+                    "which is not known to be compatible with %s which has an "
+                    "explcit interface"_err_en_US,
+                    dummyName);
+                return;
+              }
             }
           } else { // 15.5.2.9(2,3)
             if (interface.IsSubroutine() && argInterface.IsFunction()) {
@@ -645,7 +658,7 @@ static void CheckExplicitInterfaceArg(evaluate::ActualArgument &arg,
             CheckProcedureArg(arg, proc, dummyName, context);
           },
           [&](const characteristics::AlternateReturn &) {
-            // TODO check alternate return
+            // All semantic checking is done elsewhere
           },
       },
       dummy.u);

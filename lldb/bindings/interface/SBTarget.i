@@ -11,40 +11,40 @@ namespace lldb {
 %feature("docstring",
 "Represents the target program running under the debugger.
 
-SBTarget supports module, breakpoint, and watchpoint iterations. For example,
+SBTarget supports module, breakpoint, and watchpoint iterations. For example, ::
 
     for m in target.module_iter():
         print m
 
 produces:
 
-(x86_64) /Volumes/data/lldb/svn/trunk/test/python_api/lldbutil/iter/a.out
-(x86_64) /usr/lib/dyld
-(x86_64) /usr/lib/libstdc++.6.dylib
-(x86_64) /usr/lib/libSystem.B.dylib
-(x86_64) /usr/lib/system/libmathCommon.A.dylib
-(x86_64) /usr/lib/libSystem.B.dylib(__commpage)
+    (x86_64) /Volumes/data/lldb/svn/trunk/test/python_api/lldbutil/iter/a.out
+    (x86_64) /usr/lib/dyld
+    (x86_64) /usr/lib/libstdc++.6.dylib
+    (x86_64) /usr/lib/libSystem.B.dylib
+    (x86_64) /usr/lib/system/libmathCommon.A.dylib
+    (x86_64) /usr/lib/libSystem.B.dylib(__commpage)
 
-and,
+and, ::
 
     for b in target.breakpoint_iter():
         print b
 
-produces:
+produces: ::
 
-SBBreakpoint: id = 1, file ='main.cpp', line = 66, locations = 1
-SBBreakpoint: id = 2, file ='main.cpp', line = 85, locations = 1
+    SBBreakpoint: id = 1, file ='main.cpp', line = 66, locations = 1
+    SBBreakpoint: id = 2, file ='main.cpp', line = 85, locations = 1
 
-and,
+and, ::
 
     for wp_loc in target.watchpoint_iter():
         print wp_loc
 
-produces:
+produces: ::
 
-Watchpoint 1: addr = 0x1034ca048 size = 4 state = enabled type = rw
-    declare @ '/Volumes/data/lldb/svn/trunk/test/python_api/watchpoint/main.c:12'
-    hw_index = 0  hit_count = 2     ignore_count = 0"
+    Watchpoint 1: addr = 0x1034ca048 size = 4 state = enabled type = rw
+        declare @ '/Volumes/data/lldb/svn/trunk/test/python_api/watchpoint/main.c:12'
+        hw_index = 0  hit_count = 2     ignore_count = 0"
 ) SBTarget;
 class SBTarget
 {
@@ -578,6 +578,12 @@ public:
     BreakpointCreateByLocation (const lldb::SBFileSpec &file_spec, uint32_t line,
                                 uint32_t column, lldb::addr_t offset,
                                 SBFileSpecList &module_list);
+
+    lldb::SBBreakpoint
+    BreakpointCreateByLocation (const lldb::SBFileSpec &file_spec, uint32_t line,
+                                uint32_t column, lldb::addr_t offset,
+                                SBFileSpecList &module_list,
+                                bool move_to_nearest_code);
 
     lldb::SBBreakpoint
     BreakpointCreateByName (const char *symbol_name, const char *module_name = NULL);

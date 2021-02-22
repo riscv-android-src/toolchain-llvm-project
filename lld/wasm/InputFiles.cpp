@@ -11,6 +11,7 @@
 #include "InputChunks.h"
 #include "InputEvent.h"
 #include "InputGlobal.h"
+#include "InputTable.h"
 #include "OutputSegment.h"
 #include "SymbolTable.h"
 #include "lld/Common/ErrorHandler.h"
@@ -94,7 +95,8 @@ void ObjFile::dumpInfo() const {
       "\n              Symbols : " + Twine(symbols.size()) +
       "\n     Function Imports : " + Twine(wasmObj->getNumImportedFunctions()) +
       "\n       Global Imports : " + Twine(wasmObj->getNumImportedGlobals()) +
-      "\n        Event Imports : " + Twine(wasmObj->getNumImportedEvents()));
+      "\n        Event Imports : " + Twine(wasmObj->getNumImportedEvents()) +
+      "\n        Table Imports : " + Twine(wasmObj->getNumImportedTables()));
 }
 
 // Relocations contain either symbol or type indices.  This function takes a
@@ -123,6 +125,7 @@ uint64_t ObjFile::calcNewAddend(const WasmRelocation &reloc) const {
   case R_WASM_MEMORY_ADDR_REL_SLEB64:
   case R_WASM_MEMORY_ADDR_I32:
   case R_WASM_MEMORY_ADDR_I64:
+  case R_WASM_MEMORY_ADDR_TLS_SLEB:
   case R_WASM_FUNCTION_OFFSET_I32:
   case R_WASM_FUNCTION_OFFSET_I64:
     return reloc.Addend;
@@ -187,7 +190,8 @@ uint64_t ObjFile::calcExpectedValue(const WasmRelocation &reloc) const {
   case R_WASM_FUNCTION_INDEX_LEB:
   case R_WASM_GLOBAL_INDEX_LEB:
   case R_WASM_GLOBAL_INDEX_I32:
-  case R_WASM_EVENT_INDEX_LEB: {
+  case R_WASM_EVENT_INDEX_LEB:
+  case R_WASM_TABLE_NUMBER_LEB: {
     const WasmSymbol &sym = wasmObj->syms()[reloc.Index];
     return sym.Info.ElementIndex;
   }
@@ -269,6 +273,8 @@ uint64_t ObjFile::calcNewValue(const WasmRelocation &reloc, uint64_t tombstone) 
   }
   case R_WASM_SECTION_OFFSET_I32:
     return getSectionSymbol(reloc.Index)->section->outputOffset + reloc.Addend;
+  case R_WASM_TABLE_NUMBER_LEB:
+    return getTableSymbol(reloc.Index)->getTableNumber();
   default:
     llvm_unreachable("unknown relocation type");
   }
@@ -341,6 +347,12 @@ void ObjFile::parse(bool ignoreComdats) {
     }
   }
 
+  ArrayRef<StringRef> comdats = wasmObj->linkingData().Comdats;
+  for (StringRef comdat : comdats) {
+    bool isNew = ignoreComdats || symtab->addComdat(comdat);
+    keptComdats.push_back(isNew);
+  }
+
   uint32_t sectionIndex = 0;
 
   // Bool for each symbol, true if called directly.  This allows us to implement
@@ -360,7 +372,9 @@ void ObjFile::parse(bool ignoreComdats) {
       assert(!dataSection);
       dataSection = &section;
     } else if (section.Type == WASM_SEC_CUSTOM) {
-      customSections.emplace_back(make<InputSection>(section, this));
+      auto *customSec = make<InputSection>(section, this);
+      customSec->discarded = isExcludedByComdat(customSec);
+      customSections.emplace_back(customSec);
       customSections.back()->setRelocations(section.Relocations);
       customSectionsByIndex[sectionIndex] = customSections.back();
     }
@@ -374,11 +388,6 @@ void ObjFile::parse(bool ignoreComdats) {
   typeMap.resize(getWasmObj()->types().size());
   typeIsUsed.resize(getWasmObj()->types().size(), false);
 
-  ArrayRef<StringRef> comdats = wasmObj->linkingData().Comdats;
-  for (StringRef comdat : comdats) {
-    bool isNew = ignoreComdats || symtab->addComdat(comdat);
-    keptComdats.push_back(isNew);
-  }
 
   // Populate `Segments`.
   for (const WasmSegment &s : wasmObj->dataSegments()) {
@@ -400,6 +409,10 @@ void ObjFile::parse(bool ignoreComdats) {
     functions.emplace_back(func);
   }
   setRelocs(functions, codeSection);
+
+  // Populate `Tables`.
+  for (const WasmTable &t : wasmObj->tables())
+    tables.emplace_back(make<InputTable>(t, this));
 
   // Populate `Globals`.
   for (const WasmGlobal &g : wasmObj->globals())
@@ -445,6 +458,10 @@ EventSymbol *ObjFile::getEventSymbol(uint32_t index) const {
   return cast<EventSymbol>(symbols[index]);
 }
 
+TableSymbol *ObjFile::getTableSymbol(uint32_t index) const {
+  return cast<TableSymbol>(symbols[index]);
+}
+
 SectionSymbol *ObjFile::getSectionSymbol(uint32_t index) const {
   return cast<SectionSymbol>(symbols[index]);
 }
@@ -487,6 +504,10 @@ Symbol *ObjFile::createDefined(const WasmSymbol &sym) {
   case WASM_SYMBOL_TYPE_SECTION: {
     InputSection *section = customSectionsByIndex[sym.Info.ElementIndex];
     assert(sym.isBindingLocal());
+    // Need to return null if discarded here? data and func only do that when
+    // binding is not local.
+    if (section->discarded)
+      return nullptr;
     return make<SectionSymbol>(flags, section, this);
   }
   case WASM_SYMBOL_TYPE_EVENT: {
@@ -495,6 +516,13 @@ Symbol *ObjFile::createDefined(const WasmSymbol &sym) {
     if (sym.isBindingLocal())
       return make<DefinedEvent>(name, flags, this, event);
     return symtab->addDefinedEvent(name, flags, this, event);
+  }
+  case WASM_SYMBOL_TYPE_TABLE: {
+    InputTable *table =
+        tables[sym.Info.ElementIndex - wasmObj->getNumImportedTables()];
+    if (sym.isBindingLocal())
+      return make<DefinedTable>(name, flags, this, table);
+    return symtab->addDefinedTable(name, flags, this, table);
   }
   }
   llvm_unreachable("unknown symbol kind");
@@ -525,6 +553,14 @@ Symbol *ObjFile::createUndefined(const WasmSymbol &sym, bool isCalledDirectly) {
     return symtab->addUndefinedGlobal(name, sym.Info.ImportName,
                                       sym.Info.ImportModule, flags, this,
                                       sym.GlobalType);
+  case WASM_SYMBOL_TYPE_TABLE:
+    if (sym.isBindingLocal())
+      return make<UndefinedTable>(name, sym.Info.ImportName,
+                                  sym.Info.ImportModule, flags, this,
+                                  sym.TableType);
+    return symtab->addUndefinedTable(name, sym.Info.ImportName,
+                                     sym.Info.ImportModule, flags, this,
+                                     sym.TableType);
   case WASM_SYMBOL_TYPE_SECTION:
     llvm_unreachable("section symbols cannot be undefined");
   }

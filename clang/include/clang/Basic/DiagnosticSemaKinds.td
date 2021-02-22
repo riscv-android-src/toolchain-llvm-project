@@ -470,8 +470,9 @@ def err_decomp_decl_not_alone : Error<
 def err_decomp_decl_requires_init : Error<
   "decomposition declaration %0 requires an initializer">;
 def err_decomp_decl_wrong_number_bindings : Error<
-  "type %0 decomposes into %2 elements, but %select{only |}3%1 "
-  "names were provided">;
+  "type %0 decomposes into %3 %plural{1:element|:elements}2, but "
+  "%select{%plural{0:no|:only %1}1|%1}4 "
+  "%plural{1:name was|:names were}1 provided">;
 def err_decomp_decl_unbindable_type : Error<
   "cannot decompose %select{union|non-class, non-array}1 type %2">;
 def err_decomp_decl_multiple_bases_with_members : Error<
@@ -740,6 +741,13 @@ def note_strncat_wrong_size : Note<
 def warn_assume_side_effects : Warning<
   "the argument to %0 has side effects that will be discarded">,
   InGroup<DiagGroup<"assume">>;
+def warn_assume_attribute_string_unknown : Warning<
+  "unknown assumption string '%0'; attribute is potentially ignored">,
+  InGroup<UnknownAssumption>;
+def warn_assume_attribute_string_unknown_suggested : Warning<
+  "unknown assumption string '%0' may be misspelled; attribute is potentially "
+  "ignored, did you mean '%1'?">,
+  InGroup<MisspelledAssumption>;
 
 def warn_builtin_chk_overflow : Warning<
   "'%0' will always overflow; destination buffer has size %1,"
@@ -847,6 +855,8 @@ def err_pragma_options_align_mac68k_target_unsupported : Error<
 def warn_pragma_pack_invalid_alignment : Warning<
   "expected #pragma pack parameter to be '1', '2', '4', '8', or '16'">,
   InGroup<IgnoredPragmas>;
+def err_pragma_pack_invalid_alignment : Error<
+  warn_pragma_pack_invalid_alignment.Text>;
 def warn_pragma_pack_non_default_at_include : Warning<
   "non-default #pragma pack value changes the alignment of struct or union "
   "members in the included file">, InGroup<PragmaPackSuspiciousInclude>,
@@ -880,6 +890,8 @@ def warn_cxx_ms_struct :
   Warning<"ms_struct may not produce Microsoft-compatible layouts for classes "
           "with base classes or virtual functions">,
   DefaultError, InGroup<IncompatibleMSStruct>;
+def err_pragma_pack_identifer_not_supported : Error<
+  "specifying an identifier within `#pragma pack` is not supported on this target">;
 def err_section_conflict : Error<"%0 causes a section type conflict with %1">;
 def err_no_base_classes : Error<"invalid use of '__super', %0 has no base classes">;
 def err_invalid_super_scope : Error<"invalid use of '__super', "
@@ -1062,6 +1074,10 @@ def warn_objc_direct_property_ignored : Warning<
   InGroup<IgnoredAttributes>;
 def err_objc_direct_dynamic_property : Error<
   "direct property cannot be @dynamic">;
+def err_objc_direct_protocol_conformance : Error<
+  "%select{category %1|class extension}0 cannot conform to protocol %2 because "
+  "of direct members declared in interface %3">;
+def note_direct_member_here : Note<"direct member declared here">;
 
 def warn_conflicting_overriding_ret_types : Warning<
   "conflicting return type in "
@@ -2448,7 +2464,7 @@ def err_for_range_decl_must_be_var : Error<
   "for range declaration must declare a variable">;
 def err_for_range_storage_class : Error<
   "loop variable %0 may not be declared %select{'extern'|'static'|"
-  "'__private_extern__'|'auto'|'register'|'constexpr'}1">;
+  "'__private_extern__'|'auto'|'register'|'constexpr'|'thread_local'}1">;
 def err_type_defined_in_for_range : Error<
   "types may not be defined in a for range declaration">;
 def err_for_range_deduction_failure : Error<
@@ -2839,7 +2855,8 @@ def warn_unsupported_target_attribute
               "attribute ignored">,
       InGroup<IgnoredAttributes>;
 def err_attribute_unsupported
-    : Error<"%0 attribute is not supported for this target">;
+    : Error<"%0 attribute is not supported on targets missing %1;"
+            " specify an appropriate -march= or -mcpu=">;
 // The err_*_attribute_argument_not_int are separate because they're used by
 // VerifyIntegerConstantExpression.
 def err_aligned_attribute_argument_not_int : Error<
@@ -3251,7 +3268,7 @@ def warn_attribute_dllexport_explicit_instantiation_def : Warning<
   "'dllexport' attribute ignored on explicit instantiation definition">,
   InGroup<IgnoredAttributes>;
 def warn_invalid_initializer_from_system_header : Warning<
-  "invalid constructor form class in system header, should not be explicit">,
+  "invalid constructor from class in system header, should not be explicit">,
   InGroup<DiagGroup<"invalid-initializer-from-system-header">>;
 def note_used_in_initialization_here : Note<"used in initialization here">;
 def err_attribute_dll_member_of_dll_class : Error<
@@ -3937,6 +3954,43 @@ def note_protocol_decl : Note<
   "protocol is declared here">;
 def note_protocol_decl_undefined : Note<
   "protocol %0 has no definition">;
+def err_attribute_preferred_name_arg_invalid : Error<
+  "argument %0 to 'preferred_name' attribute is not a typedef for "
+  "a specialization of %1">;
+
+// called-once attribute diagnostics.
+def err_called_once_attribute_wrong_type : Error<
+  "'called_once' attribute only applies to function-like parameters">;
+
+def warn_completion_handler_never_called : Warning<
+  "%select{|captured }1completion handler is never called">,
+  InGroup<CompletionHandler>, DefaultIgnore;
+def warn_called_once_never_called : Warning<
+  "%select{|captured }1%0 parameter marked 'called_once' is never called">,
+  InGroup<CalledOnceParameter>;
+
+def warn_completion_handler_never_called_when : Warning<
+  "completion handler is never %select{used|called}1 when "
+  "%select{taking true branch|taking false branch|"
+  "handling this case|none of the cases applies|"
+  "entering the loop|skipping the loop|taking one of the branches}2">,
+  InGroup<CompletionHandler>, DefaultIgnore;
+def warn_called_once_never_called_when : Warning<
+  "%0 parameter marked 'called_once' is never %select{used|called}1 when "
+  "%select{taking true branch|taking false branch|"
+  "handling this case|none of the cases applies|"
+  "entering the loop|skipping the loop|taking one of the branches}2">,
+  InGroup<CalledOnceParameter>;
+
+def warn_completion_handler_called_twice : Warning<
+  "completion handler is called twice">,
+  InGroup<CompletionHandler>, DefaultIgnore;
+def warn_called_once_gets_called_twice : Warning<
+  "%0 parameter marked 'called_once' is called twice">,
+  InGroup<CalledOnceParameter>;
+def note_called_once_gets_called_twice : Note<
+  "previous call is here%select{; set to nil to indicate "
+  "it cannot be called afterwards|}0">;
 
 // objc_designated_initializer attribute diagnostics.
 def warn_objc_designated_init_missing_super_call : Warning<
@@ -4028,7 +4082,12 @@ def warn_attr_swift_name_subscript_getter_newValue
   : Warning<"%0 attribute for 'subscript' getter cannot have a 'newValue:' parameter">,
     InGroup<SwiftNameAttribute>;
 def warn_attr_swift_name_num_params
-  : Warning<"too %select{few|many}0 parameters in %1 attribute (expected %2; got %3)">,
+  : Warning<"too %select{few|many}0 parameters in the signature specified by "
+            "the %1 attribute (expected %2; got %3)">,
+    InGroup<SwiftNameAttribute>;
+def warn_attr_swift_name_decl_missing_params
+  : Warning<"%0 attribute cannot be applied to a %select{function|method}1 "
+            "with no parameters">,
     InGroup<SwiftNameAttribute>;
 
 def err_attr_swift_error_no_error_parameter : Error<
@@ -4037,6 +4096,13 @@ def err_attr_swift_error_no_error_parameter : Error<
 def err_attr_swift_error_return_type : Error<
   "%0 attribute with '%1' convention can only be applied to a "
   "%select{function|method}2 returning %select{an integral type|a pointer}3">;
+
+def err_swift_async_no_access : Error<
+  "first argument to 'swift_async' must be either 'none', 'swift_private', or "
+  "'not_swift_private'">;
+def err_swift_async_bad_block_type : Error<
+  "'swift_async' completion handler parameter must have block type returning"
+  " 'void', type here is %0">;
 
 def warn_ignored_objc_externally_retained : Warning<
   "'objc_externally_retained' can only be applied to local variables "
@@ -7543,7 +7609,7 @@ def err_no_typeid_with_fno_rtti : Error<
 def err_no_dynamic_cast_with_fno_rtti : Error<
   "use of dynamic_cast requires -frtti">;
 def warn_no_dynamic_cast_with_rtti_disabled: Warning<
-  "dynamic_cast will not work since RTTI data is disabled by " 
+  "dynamic_cast will not work since RTTI data is disabled by "
   "%select{-fno-rtti-data|/GR-}0">, InGroup<RTTI>;
 def warn_no_typeid_with_rtti_disabled: Warning<
   "typeid will not work since RTTI data is disabled by "
@@ -7559,8 +7625,7 @@ def warn_condition_is_assignment : Warning<"using the result of an "
   InGroup<Parentheses>;
 def warn_free_nonheap_object
   : Warning<"attempt to call %0 on non-heap object %1">,
-    InGroup<DiagGroup<"free-nonheap-object">>,
-    DefaultIgnore; // FIXME: add to -Wall after sufficient testing
+    InGroup<FreeNonHeapObject>;
 
 // Completely identical except off by default.
 def warn_condition_is_idiomatic_assignment : Warning<"using the result "
@@ -7753,21 +7818,11 @@ def ext_typecheck_convert_incompatible_pointer_sign : ExtWarn<
   "|%diff{sending $ to parameter of type $|"
   "sending to parameter of different type}0,1"
   "|%diff{casting $ to type $|casting between types}0,1}2"
-  " converts between pointers to integer types with different sign">,
+  " converts between pointers to integer types %select{with different sign|"
+  "where one is of the unique plain 'char' type and the other is not}3">,
   InGroup<DiagGroup<"pointer-sign">>;
-def err_typecheck_convert_incompatible_pointer_sign : Error<
-  "%select{%diff{assigning to $ from $|assigning to different types}0,1"
-  "|%diff{passing $ to parameter of type $|"
-  "passing to parameter of different type}0,1"
-  "|%diff{returning $ from a function with result type $|"
-  "returning from function with different return type}0,1"
-  "|%diff{converting $ to type $|converting between types}0,1"
-  "|%diff{initializing $ with an expression of type $|"
-  "initializing with expression of different type}0,1"
-  "|%diff{sending $ to parameter of type $|"
-  "sending to parameter of different type}0,1"
-  "|%diff{casting $ to type $|casting between types}0,1}2"
-  " converts between pointers to integer types with different sign">;
+def err_typecheck_convert_incompatible_pointer_sign :
+  Error<ext_typecheck_convert_incompatible_pointer_sign.Text>;
 def ext_typecheck_convert_incompatible_pointer : ExtWarn<
   "incompatible pointer types "
   "%select{%diff{assigning to $ from $|assigning to different types}0,1"
@@ -11055,4 +11110,11 @@ def err_probability_not_constant_float : Error<
 def err_probability_out_of_range : Error<
    "probability argument to __builtin_expect_with_probability is outside the "
    "range [0.0, 1.0]">;
+
+// TCB warnings
+def err_tcb_conflicting_attributes : Error<
+  "attributes '%0(\"%2\")' and '%1(\"%2\")' are mutually exclusive">;
+def warn_tcb_enforcement_violation : Warning<
+  "calling %0 is a violation of trusted computing base '%1'">,
+  InGroup<DiagGroup<"tcb-enforcement">>;
 } // end of sema component.

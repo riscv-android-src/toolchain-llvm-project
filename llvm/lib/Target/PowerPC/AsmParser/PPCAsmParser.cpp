@@ -774,12 +774,18 @@ void PPCAsmParser::ProcessInstruction(MCInst &Inst,
   }
   case PPC::DCBFx:
   case PPC::DCBFL:
-  case PPC::DCBFLP: {
+  case PPC::DCBFLP:
+  case PPC::DCBFPS:
+  case PPC::DCBSTPS: {
     int L = 0;
     if (Opcode == PPC::DCBFL)
       L = 1;
     else if (Opcode == PPC::DCBFLP)
       L = 3;
+    else if (Opcode == PPC::DCBFPS)
+      L = 4;
+    else if (Opcode == PPC::DCBSTPS)
+      L = 6;
 
     MCInst TmpInst;
     TmpInst.setOpcode(PPC::DCBF);
@@ -1650,11 +1656,7 @@ bool PPCAsmParser::ParseDirectiveMachine(SMLoc L) {
 
   // FIXME: Right now, the parser always allows any available
   // instruction, so the .machine directive is not useful.
-  // Implement ".machine any" (by doing nothing) for the benefit
-  // of existing assembler code.  Likewise, we can then implement
-  // ".machine push" and ".machine pop" as no-op.
-  if (CPU != "any" && CPU != "push" && CPU != "pop" && CPU != "ppc64")
-    return TokError("unrecognized machine type");
+  // In the wild, any/push/pop/ppc64/altivec/power[4-9] are seen.
 
   Parser.Lex();
 
@@ -1714,8 +1716,9 @@ bool PPCAsmParser::ParseDirectiveLocalEntry(SMLoc L) {
 /// Force static initialization.
 extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializePowerPCAsmParser() {
   RegisterMCAsmParser<PPCAsmParser> A(getThePPC32Target());
-  RegisterMCAsmParser<PPCAsmParser> B(getThePPC64Target());
-  RegisterMCAsmParser<PPCAsmParser> C(getThePPC64LETarget());
+  RegisterMCAsmParser<PPCAsmParser> B(getThePPC32LETarget());
+  RegisterMCAsmParser<PPCAsmParser> C(getThePPC64Target());
+  RegisterMCAsmParser<PPCAsmParser> D(getThePPC64LETarget());
 }
 
 #define GET_REGISTER_MATCHER
