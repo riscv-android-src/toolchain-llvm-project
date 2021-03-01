@@ -45,6 +45,10 @@ libcxxabi_cflags := -D__STDC_FORMAT_MACROS
 libcxxabi_cppflags := -std=c++11 -Wno-unknown-attributes -DHAS_THREAD_LOCAL
 libcxxabi_cppflags += -DLIBCXXABI_USE_LLVM_UNWINDER=1
 
+ifeq ($(TARGET_ARCH_ABI),arm64-v8a)
+    libcxxabi_cppflags += -mbranch-protection=standard
+endif
+
 ifneq ($(LIBCXX_FORCE_REBUILD),true) # Using prebuilt
 
 include $(CLEAR_VARS)
