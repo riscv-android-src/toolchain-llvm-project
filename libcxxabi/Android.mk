@@ -97,9 +97,14 @@ ifeq ($(use_llvm_unwinder),true)
 endif
 include $(BUILD_STATIC_LIBRARY)
 
-$(call import-add-path, $(LOCAL_PATH)/../..)
-$(call import-module, toolchain/llvm-project/libunwind)
-
 endif # Prebuilt/building
+
+# Define a prebuilt module for libunwind.a so that ndk-build adds it to the
+# linker command-line before any shared libraries, ensuring that the unwinder
+# is linked statically even if a shared library dependency exports an unwinder.
+include $(CLEAR_VARS)
+LOCAL_MODULE := libunwind
+LOCAL_SRC_FILES := $(NDK_TOOLCHAIN_LIB_DIR)/$(TARGET_TOOLCHAIN_ARCH_LIB_DIR)/libunwind.a
+include $(PREBUILT_STATIC_LIBRARY)
 
 $(call import-module, android/support)
