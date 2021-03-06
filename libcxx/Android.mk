@@ -138,6 +138,16 @@ ifeq ($(TARGET_ARCH_ABI),armeabi-v7a)
 endif
 include $(PREBUILT_SHARED_LIBRARY)
 
+ifeq ($(TARGET_ARCH_ABI),armeabi-v7a)
+# We define this module here rather than in a separate cxx-stl/libunwind because
+# we don't actually want to make the API available (yet).
+include $(CLEAR_VARS)
+LOCAL_MODULE := libunwind
+LOCAL_SRC_FILES := libs/$(TARGET_ARCH_ABI)/$(LOCAL_MODULE)$(TARGET_LIB_EXTENSION)
+LOCAL_EXPORT_LDLIBS := -ldl
+include $(PREBUILT_STATIC_LIBRARY)
+endif
+
 $(call import-module, cxx-stl/llvm-libc++abi)
 
 else
