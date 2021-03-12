@@ -98,7 +98,7 @@ protected:
 
 class ImportSection : public SyntheticSection {
 public:
-  ImportSection() : SyntheticSection(llvm::wasm::WASM_SEC_IMPORT) {}
+  ImportSection();
   bool isNeeded() const override { return getNumImports() > 0; }
   void writeBody() override;
   void addImport(Symbol *sym);
@@ -117,6 +117,10 @@ public:
     assert(isSealed);
     return numImportedEvents;
   }
+  uint32_t getNumImportedTables() const {
+    assert(isSealed);
+    return numImportedTables;
+  }
 
   std::vector<const Symbol *> importedSymbols;
   std::vector<const Symbol *> gotSymbols;
@@ -126,6 +130,7 @@ protected:
   unsigned numImportedGlobals = 0;
   unsigned numImportedFunctions = 0;
   unsigned numImportedEvents = 0;
+  unsigned numImportedTables = 0;
 };
 
 class FunctionSection : public SyntheticSection {
@@ -146,18 +151,19 @@ public:
   TableSection() : SyntheticSection(llvm::wasm::WASM_SEC_TABLE) {}
 
   bool isNeeded() const override {
-    // Always output a table section (or table import), even if there are no
-    // indirect calls.  There are two reasons for this:
-    //  1. For executables it is useful to have an empty table slot at 0
-    //     which can be filled with a null function call handler.
-    //  2. If we don't do this, any program that contains a call_indirect but
-    //     no address-taken function will fail at validation time since it is
-    //     a validation error to include a call_indirect instruction if there
-    //     is not table.
-    return !config->importTable;
+    // The linker currently always writes an indirect function table to the
+    // output, so unless the indirect function table is imported, we need a
+    // table section.  FIXME: Treat __indirect_function_table as a normal
+    // symbol, and only residualize a table section as needed.
+    if (!config->importTable)
+      return true;
+    return inputTables.size() > 0;
   }
 
   void writeBody() override;
+  void addTable(InputTable *table);
+
+  std::vector<InputTable *> inputTables;
 };
 
 class MemorySection : public SyntheticSection {
@@ -203,7 +209,6 @@ public:
   void assignIndexes() override;
   void writeBody() override;
   void addGlobal(InputGlobal *global);
-  void addDataAddressGlobal(DefinedData *global);
 
   // Add an internal GOT entry global that corresponds to the given symbol.
   // Normally GOT entries are imported and assigned by the external dynamic
@@ -218,6 +223,7 @@ public:
   // specific relocation types combined with linker relaxation which could
   // transform a `global.get` to an `i32.const`.
   void addInternalGOTEntry(Symbol *sym);
+  bool needsRelocations() { return internalGotSymbols.size(); }
   void generateRelocationCode(raw_ostream &os) const;
 
   std::vector<const DefinedData *> dataAddressGlobals;
@@ -240,14 +246,9 @@ public:
 
 class StartSection : public SyntheticSection {
 public:
-  StartSection(bool hasInitializedSegments)
-      : SyntheticSection(llvm::wasm::WASM_SEC_START),
-        hasInitializedSegments(hasInitializedSegments) {}
+  StartSection() : SyntheticSection(llvm::wasm::WASM_SEC_START) {}
   bool isNeeded() const override;
   void writeBody() override;
-
-protected:
-  bool hasInitializedSegments;
 };
 
 class ElemSection : public SyntheticSection {
@@ -297,7 +298,9 @@ protected:
 // Create the custom "name" section containing debug symbol names.
 class NameSection : public SyntheticSection {
 public:
-  NameSection() : SyntheticSection(llvm::wasm::WASM_SEC_CUSTOM, "name") {}
+  NameSection(ArrayRef<OutputSegment *> segments)
+      : SyntheticSection(llvm::wasm::WASM_SEC_CUSTOM, "name"),
+        segments(segments) {}
   bool isNeeded() const override {
     return !config->stripDebug && !config->stripAll && numNames() > 0;
   }
@@ -305,6 +308,10 @@ public:
   unsigned numNames() const { return numNamedGlobals() + numNamedFunctions(); }
   unsigned numNamedGlobals() const;
   unsigned numNamedFunctions() const;
+  unsigned numNamedDataSegments() const;
+
+protected:
+  ArrayRef<OutputSegment *> segments;
 };
 
 class ProducersSection : public SyntheticSection {

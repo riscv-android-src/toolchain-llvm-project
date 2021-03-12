@@ -357,6 +357,7 @@ Error WasmObjectFile::parseDylinkSection(ReadContext &Ctx) {
 Error WasmObjectFile::parseNameSection(ReadContext &Ctx) {
   llvm::DenseSet<uint64_t> SeenFunctions;
   llvm::DenseSet<uint64_t> SeenGlobals;
+  llvm::DenseSet<uint64_t> SeenSegments;
   if (FunctionTypes.size() && !SeenCodeSection) {
     return make_error<GenericBinaryError>("Names must come after code section",
                                           object_error::parse_failed);
@@ -368,11 +369,13 @@ Error WasmObjectFile::parseNameSection(ReadContext &Ctx) {
     const uint8_t *SubSectionEnd = Ctx.Ptr + Size;
     switch (Type) {
     case wasm::WASM_NAMES_FUNCTION:
-    case wasm::WASM_NAMES_GLOBAL: {
+    case wasm::WASM_NAMES_GLOBAL:
+    case wasm::WASM_NAMES_DATA_SEGMENT: {
       uint32_t Count = readVaruint32(Ctx);
       while (Count--) {
         uint32_t Index = readVaruint32(Ctx);
         StringRef Name = readString(Ctx);
+        wasm::NameType nameType = wasm::NameType::FUNCTION;
         if (Type == wasm::WASM_NAMES_FUNCTION) {
           if (!SeenFunctions.insert(Index).second)
             return make_error<GenericBinaryError>(
@@ -383,18 +386,24 @@ Error WasmObjectFile::parseNameSection(ReadContext &Ctx) {
 
           if (isDefinedFunctionIndex(Index))
             getDefinedFunction(Index).DebugName = Name;
-        } else {
+        } else if (Type == wasm::WASM_NAMES_GLOBAL) {
+          nameType = wasm::NameType::GLOBAL;
           if (!SeenGlobals.insert(Index).second)
             return make_error<GenericBinaryError>("Global named more than once",
                                                   object_error::parse_failed);
           if (!isValidGlobalIndex(Index) || Name.empty())
             return make_error<GenericBinaryError>("Invalid name entry",
                                                   object_error::parse_failed);
+        } else {
+          nameType = wasm::NameType::DATA_SEGMENT;
+          if (!SeenSegments.insert(Index).second)
+            return make_error<GenericBinaryError>(
+                "Segment named more than once", object_error::parse_failed);
+          if (Index > DataSegments.size())
+            return make_error<GenericBinaryError>("Invalid named data segment",
+                                                  object_error::parse_failed);
         }
-        wasm::NameType T = Type == wasm::WASM_NAMES_FUNCTION
-                               ? wasm::NameType::FUNCTION
-                               : wasm::NameType::GLOBAL;
-        DebugNames.push_back(wasm::WasmDebugName{T, Index, Name});
+        DebugNames.push_back(wasm::WasmDebugName{nameType, Index, Name});
       }
       break;
     }
@@ -518,7 +527,7 @@ Error WasmObjectFile::parseLinkingSectionSymtab(ReadContext &Ctx) {
     wasm::WasmSymbolInfo Info;
     const wasm::WasmSignature *Signature = nullptr;
     const wasm::WasmGlobalType *GlobalType = nullptr;
-    uint8_t TableType = 0;
+    const wasm::WasmTableType *TableType = nullptr;
     const wasm::WasmEventType *EventType = nullptr;
 
     Info.Kind = readUint8(Ctx);
@@ -600,7 +609,7 @@ Error WasmObjectFile::parseLinkingSectionSymtab(ReadContext &Ctx) {
         Info.Name = readString(Ctx);
         unsigned TableIndex = Info.ElementIndex - NumImportedTables;
         wasm::WasmTable &Table = Tables[TableIndex];
-        TableType = Table.Type.ElemType;
+        TableType = &Table.Type;
         if (Table.SymbolName.empty())
           Table.SymbolName = Info.Name;
       } else {
@@ -611,8 +620,7 @@ Error WasmObjectFile::parseLinkingSectionSymtab(ReadContext &Ctx) {
         } else {
           Info.Name = Import.Field;
         }
-        TableType = Import.Table.ElemType;
-        // FIXME: Parse limits here too.
+        TableType = &Import.Table;
         if (!Import.Module.empty()) {
           Info.ImportModule = Import.Module;
         }
@@ -744,6 +752,15 @@ Error WasmObjectFile::parseLinkingSectionComdat(ReadContext &Ctx) {
           return make_error<GenericBinaryError>("Function in two COMDATs",
                                                 object_error::parse_failed);
         getDefinedFunction(Index).Comdat = ComdatIndex;
+        break;
+      case wasm::WASM_COMDAT_SECTION:
+        if (Index >= Sections.size())
+          return make_error<GenericBinaryError>(
+              "COMDAT section index out of range", object_error::parse_failed);
+        if (Sections[Index].Type != wasm::WASM_SEC_CUSTOM)
+          return make_error<GenericBinaryError>(
+              "Non-custom section in a COMDAT", object_error::parse_failed);
+        Sections[Index].Comdat = ComdatIndex;
         break;
       }
     }

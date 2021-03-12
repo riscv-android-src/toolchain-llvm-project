@@ -422,6 +422,7 @@ BasicAAResult::DecomposeGEPExpression(const Value *V, const DataLayout &DL,
   // Limit recursion depth to limit compile time in crazy cases.
   unsigned MaxLookup = MaxLookupSearchDepth;
   SearchTimes++;
+  const Instruction *CxtI = dyn_cast<Instruction>(V);
 
   unsigned MaxPointerSize = getMaxPointerSize(DL);
   DecomposedGEP Decomposed;
@@ -584,7 +585,7 @@ BasicAAResult::DecomposeGEPExpression(const Value *V, const DataLayout &DL,
       Scale = adjustToPointerSize(Scale, PointerSize);
 
       if (!!Scale) {
-        VariableGEPIndex Entry = {Index, ZExtBits, SExtBits, Scale};
+        VariableGEPIndex Entry = {Index, ZExtBits, SExtBits, Scale, CxtI};
         Decomposed.VarIndices.push_back(Entry);
       }
     }
@@ -805,8 +806,12 @@ AliasResult BasicAAResult::alias(const MemoryLocation &LocA,
   if (Locs.first.Ptr > Locs.second.Ptr)
     std::swap(Locs.first, Locs.second);
   auto CacheIt = AAQI.AliasCache.find(Locs);
-  if (CacheIt != AAQI.AliasCache.end())
-    return CacheIt->second;
+  if (CacheIt != AAQI.AliasCache.end()) {
+    // This code exists to skip a second BasicAA call while recursing into
+    // BestAA. Don't make use of assumptions here.
+    const auto &Entry = CacheIt->second;
+    return Entry.isDefinitive() ? Entry.Result : MayAlias;
+  }
 
   AliasResult Alias = aliasCheck(LocA.Ptr, LocA.Size, LocA.AATags, LocB.Ptr,
                                  LocB.Size, LocB.AATags, AAQI);
@@ -1030,126 +1035,6 @@ ModRefInfo BasicAAResult::getModRefInfo(const CallBase *Call1,
   return AAResultBase::getModRefInfo(Call1, Call2, AAQI);
 }
 
-/// Provide ad-hoc rules to disambiguate accesses through two GEP operators,
-/// both having the exact same pointer operand.
-static AliasResult aliasSameBasePointerGEPs(const GEPOperator *GEP1,
-                                            LocationSize MaybeV1Size,
-                                            const GEPOperator *GEP2,
-                                            LocationSize MaybeV2Size,
-                                            const DataLayout &DL) {
-  assert(GEP1->getPointerOperand()->stripPointerCastsAndInvariantGroups() ==
-             GEP2->getPointerOperand()->stripPointerCastsAndInvariantGroups() &&
-         GEP1->getPointerOperandType() == GEP2->getPointerOperandType() &&
-         "Expected GEPs with the same pointer operand");
-
-  // Try to determine whether GEP1 and GEP2 index through arrays, into structs,
-  // such that the struct field accesses provably cannot alias.
-  // We also need at least two indices (the pointer, and the struct field).
-  if (GEP1->getNumIndices() != GEP2->getNumIndices() ||
-      GEP1->getNumIndices() < 2)
-    return MayAlias;
-
-  // If we don't know the size of the accesses through both GEPs, we can't
-  // determine whether the struct fields accessed can't alias.
-  if (!MaybeV1Size.hasValue() || !MaybeV2Size.hasValue())
-    return MayAlias;
-
-  const uint64_t V1Size = MaybeV1Size.getValue();
-  const uint64_t V2Size = MaybeV2Size.getValue();
-
-  ConstantInt *C1 =
-      dyn_cast<ConstantInt>(GEP1->getOperand(GEP1->getNumOperands() - 1));
-  ConstantInt *C2 =
-      dyn_cast<ConstantInt>(GEP2->getOperand(GEP2->getNumOperands() - 1));
-
-  // If the last (struct) indices are constants and are equal, the other indices
-  // might be also be dynamically equal, so the GEPs can alias.
-  if (C1 && C2) {
-    unsigned BitWidth = std::max(C1->getBitWidth(), C2->getBitWidth());
-    if (C1->getValue().sextOrSelf(BitWidth) ==
-        C2->getValue().sextOrSelf(BitWidth))
-      return MayAlias;
-  }
-
-  // Find the last-indexed type of the GEP, i.e., the type you'd get if
-  // you stripped the last index.
-  // On the way, look at each indexed type.  If there's something other
-  // than an array, different indices can lead to different final types.
-  SmallVector<Value *, 8> IntermediateIndices;
-
-  // Insert the first index; we don't need to check the type indexed
-  // through it as it only drops the pointer indirection.
-  assert(GEP1->getNumIndices() > 1 && "Not enough GEP indices to examine");
-  IntermediateIndices.push_back(GEP1->getOperand(1));
-
-  // Insert all the remaining indices but the last one.
-  // Also, check that they all index through arrays.
-  for (unsigned i = 1, e = GEP1->getNumIndices() - 1; i != e; ++i) {
-    if (!isa<ArrayType>(GetElementPtrInst::getIndexedType(
-            GEP1->getSourceElementType(), IntermediateIndices)))
-      return MayAlias;
-    IntermediateIndices.push_back(GEP1->getOperand(i + 1));
-  }
-
-  auto *Ty = GetElementPtrInst::getIndexedType(
-    GEP1->getSourceElementType(), IntermediateIndices);
-  if (isa<ArrayType>(Ty) || isa<VectorType>(Ty)) {
-    // We know that:
-    // - both GEPs begin indexing from the exact same pointer;
-    // - the last indices in both GEPs are constants, indexing into a sequential
-    //   type (array or vector);
-    // - both GEPs only index through arrays prior to that.
-    //
-    // Because array indices greater than the number of elements are valid in
-    // GEPs, unless we know the intermediate indices are identical between
-    // GEP1 and GEP2 we cannot guarantee that the last indexed arrays don't
-    // partially overlap. We also need to check that the loaded size matches
-    // the element size, otherwise we could still have overlap.
-    Type *LastElementTy = GetElementPtrInst::getTypeAtIndex(Ty, (uint64_t)0);
-    const uint64_t ElementSize =
-        DL.getTypeStoreSize(LastElementTy).getFixedSize();
-    if (V1Size != ElementSize || V2Size != ElementSize)
-      return MayAlias;
-
-    for (unsigned i = 0, e = GEP1->getNumIndices() - 1; i != e; ++i)
-      if (GEP1->getOperand(i + 1) != GEP2->getOperand(i + 1))
-        return MayAlias;
-
-    // Now we know that the array/pointer that GEP1 indexes into and that
-    // that GEP2 indexes into must either precisely overlap or be disjoint.
-    // Because they cannot partially overlap and because fields in an array
-    // cannot overlap, if we can prove the final indices are different between
-    // GEP1 and GEP2, we can conclude GEP1 and GEP2 don't alias.
-
-    // If the last indices are constants, we've already checked they don't
-    // equal each other so we can exit early.
-    if (C1 && C2)
-      return NoAlias;
-    {
-      Value *GEP1LastIdx = GEP1->getOperand(GEP1->getNumOperands() - 1);
-      Value *GEP2LastIdx = GEP2->getOperand(GEP2->getNumOperands() - 1);
-      if (isa<PHINode>(GEP1LastIdx) || isa<PHINode>(GEP2LastIdx)) {
-        // If one of the indices is a PHI node, be safe and only use
-        // computeKnownBits so we don't make any assumptions about the
-        // relationships between the two indices. This is important if we're
-        // asking about values from different loop iterations. See PR32314.
-        // TODO: We may be able to change the check so we only do this when
-        // we definitely looked through a PHINode.
-        if (GEP1LastIdx != GEP2LastIdx &&
-            GEP1LastIdx->getType() == GEP2LastIdx->getType()) {
-          KnownBits Known1 = computeKnownBits(GEP1LastIdx, DL);
-          KnownBits Known2 = computeKnownBits(GEP2LastIdx, DL);
-          if (Known1.Zero.intersects(Known2.One) ||
-              Known1.One.intersects(Known2.Zero))
-            return NoAlias;
-        }
-      } else if (isKnownNonEqual(GEP1LastIdx, GEP2LastIdx, DL))
-        return NoAlias;
-    }
-  }
-  return MayAlias;
-}
-
 // If a we have (a) a GEP and (b) a pointer based on an alloca, and the
 // beginning of the object the GEP points would have a negative offset with
 // repsect to the alloca, that means the GEP can not alias pointer (b).
@@ -1266,21 +1151,6 @@ AliasResult BasicAAResult::aliasGEP(
       return BaseAlias;
     }
 
-    // Otherwise, we have a MustAlias.  Since the base pointers alias each other
-    // exactly, see if the computed offset from the common pointer tells us
-    // about the relation of the resulting pointer.
-    // If we know the two GEPs are based off of the exact same pointer (and not
-    // just the same underlying object), see if that tells us anything about
-    // the resulting pointers.
-    if (GEP1->getPointerOperand()->stripPointerCastsAndInvariantGroups() ==
-            GEP2->getPointerOperand()->stripPointerCastsAndInvariantGroups() &&
-        GEP1->getPointerOperandType() == GEP2->getPointerOperandType()) {
-      AliasResult R = aliasSameBasePointerGEPs(GEP1, V1Size, GEP2, V2Size, DL);
-      // If we couldn't find anything interesting, don't abandon just yet.
-      if (R != MayAlias)
-        return R;
-    }
-
     // Subtract the GEP2 pointer from the GEP1 pointer to find out their
     // symbolic difference.
     DecompGEP1.Offset -= DecompGEP2.Offset;
@@ -1360,9 +1230,9 @@ AliasResult BasicAAResult::aliasGEP(
         // the Value this cycle may not hold in the next cycle. We'll just
         // give up if we can't determine conditions that hold for every cycle:
         const Value *V = DecompGEP1.VarIndices[i].V;
+        const Instruction *CxtI = DecompGEP1.VarIndices[i].CxtI;
 
-        KnownBits Known =
-            computeKnownBits(V, DL, 0, &AC, dyn_cast<Instruction>(GEP1), DT);
+        KnownBits Known = computeKnownBits(V, DL, 0, &AC, CxtI, DT);
         bool SignKnownZero = Known.isNonNegative();
         bool SignKnownOne = Known.isNegative();
 
@@ -1407,6 +1277,39 @@ AliasResult BasicAAResult::aliasGEP(
     if (AllNonPositive && V1Size.hasValue() &&
         (-DecompGEP1.Offset).uge(V1Size.getValue()))
       return NoAlias;
+
+    if (V1Size.hasValue() && V2Size.hasValue()) {
+      // Try to determine whether abs(VarIndex) > 0.
+      Optional<APInt> MinAbsVarIndex;
+      if (DecompGEP1.VarIndices.size() == 1) {
+        // VarIndex = Scale*V. If V != 0 then abs(VarIndex) >= abs(Scale).
+        const VariableGEPIndex &Var = DecompGEP1.VarIndices[0];
+        if (isKnownNonZero(Var.V, DL, 0, &AC, Var.CxtI, DT))
+          MinAbsVarIndex = Var.Scale.abs();
+      } else if (DecompGEP1.VarIndices.size() == 2) {
+        // VarIndex = Scale*V0 + (-Scale)*V1.
+        // If V0 != V1 then abs(VarIndex) >= abs(Scale).
+        // Check that VisitedPhiBBs is empty, to avoid reasoning about
+        // inequality of values across loop iterations.
+        const VariableGEPIndex &Var0 = DecompGEP1.VarIndices[0];
+        const VariableGEPIndex &Var1 = DecompGEP1.VarIndices[1];
+        if (Var0.Scale == -Var1.Scale && Var0.ZExtBits == Var1.ZExtBits &&
+            Var0.SExtBits == Var1.SExtBits && VisitedPhiBBs.empty() &&
+            isKnownNonEqual(Var0.V, Var1.V, DL, &AC, /* CxtI */ nullptr, DT))
+          MinAbsVarIndex = Var0.Scale.abs();
+      }
+
+      if (MinAbsVarIndex) {
+        // The constant offset will have added at least +/-MinAbsVarIndex to it.
+        APInt OffsetLo = DecompGEP1.Offset - *MinAbsVarIndex;
+        APInt OffsetHi = DecompGEP1.Offset + *MinAbsVarIndex;
+        // Check that an access at OffsetLo or lower, and an access at OffsetHi
+        // or higher both do not alias.
+        if (OffsetLo.isNegative() && (-OffsetLo).uge(V1Size.getValue()) &&
+            OffsetHi.isNonNegative() && OffsetHi.uge(V2Size.getValue()))
+          return NoAlias;
+      }
+    }
 
     if (constantOffsetHeuristic(DecompGEP1.VarIndices, V1Size, V2Size,
                                 DecompGEP1.Offset, &AC, DT))
@@ -1477,42 +1380,20 @@ AliasResult BasicAAResult::aliasPHI(const PHINode *PN, LocationSize PNSize,
   // on corresponding edges.
   if (const PHINode *PN2 = dyn_cast<PHINode>(V2))
     if (PN2->getParent() == PN->getParent()) {
-      AAQueryInfo::LocPair Locs(MemoryLocation(PN, PNSize, PNAAInfo),
-                                MemoryLocation(V2, V2Size, V2AAInfo));
-      if (PN > V2)
-        std::swap(Locs.first, Locs.second);
-      // Analyse the PHIs' inputs under the assumption that the PHIs are
-      // NoAlias.
-      // If the PHIs are May/MustAlias there must be (recursively) an input
-      // operand from outside the PHIs' cycle that is MayAlias/MustAlias or
-      // there must be an operation on the PHIs within the PHIs' value cycle
-      // that causes a MayAlias.
-      // Pretend the phis do not alias.
-      AliasResult Alias = NoAlias;
-      AliasResult OrigAliasResult;
-      {
-        // Limited lifetime iterator invalidated by the aliasCheck call below.
-        auto CacheIt = AAQI.AliasCache.find(Locs);
-        assert((CacheIt != AAQI.AliasCache.end()) &&
-               "There must exist an entry for the phi node");
-        OrigAliasResult = CacheIt->second;
-        CacheIt->second = NoAlias;
-      }
-
+      Optional<AliasResult> Alias;
       for (unsigned i = 0, e = PN->getNumIncomingValues(); i != e; ++i) {
         AliasResult ThisAlias =
             aliasCheck(PN->getIncomingValue(i), PNSize, PNAAInfo,
                        PN2->getIncomingValueForBlock(PN->getIncomingBlock(i)),
                        V2Size, V2AAInfo, AAQI);
-        Alias = MergeAliasResults(ThisAlias, Alias);
-        if (Alias == MayAlias)
+        if (Alias)
+          *Alias = MergeAliasResults(*Alias, ThisAlias);
+        else
+          Alias = ThisAlias;
+        if (*Alias == MayAlias)
           break;
       }
-
-      // Reset if speculation failed.
-      if (Alias != NoAlias)
-        AAQI.updateResult(Locs, OrigAliasResult);
-      return Alias;
+      return *Alias;
     }
 
   SmallVector<Value *, 4> V1Srcs;
@@ -1731,64 +1612,106 @@ AliasResult BasicAAResult::aliasCheck(const Value *V1, LocationSize V1Size,
                             MemoryLocation(V2, V2Size, V2AAInfo));
   if (V1 > V2)
     std::swap(Locs.first, Locs.second);
-  std::pair<AAQueryInfo::AliasCacheT::iterator, bool> Pair =
-      AAQI.AliasCache.try_emplace(Locs, MayAlias);
-  if (!Pair.second)
-    return Pair.first->second;
+  const auto &Pair = AAQI.AliasCache.try_emplace(
+      Locs, AAQueryInfo::CacheEntry{NoAlias, 0});
+  if (!Pair.second) {
+    auto &Entry = Pair.first->second;
+    if (!Entry.isDefinitive()) {
+      // Remember that we used an assumption.
+      ++Entry.NumAssumptionUses;
+      ++NumAssumptionUses;
+    }
+    return Entry.Result;
+  }
 
+  int OrigNumAssumptionUses = NumAssumptionUses;
+  unsigned OrigNumAssumptionBasedResults = AssumptionBasedResults.size();
+  AliasResult Result = aliasCheckRecursive(V1, V1Size, V1AAInfo, V2, V2Size,
+                                           V2AAInfo, AAQI, O1, O2);
+
+  auto It = AAQI.AliasCache.find(Locs);
+  assert(It != AAQI.AliasCache.end() && "Must be in cache");
+  auto &Entry = It->second;
+
+  // Check whether a NoAlias assumption has been used, but disproven.
+  bool AssumptionDisproven = Entry.NumAssumptionUses > 0 && Result != NoAlias;
+  if (AssumptionDisproven)
+    Result = MayAlias;
+
+  // This is a definitive result now, when considered as a root query.
+  NumAssumptionUses -= Entry.NumAssumptionUses;
+  Entry.Result = Result;
+  Entry.NumAssumptionUses = -1;
+
+  // If the assumption has been disproven, remove any results that may have
+  // been based on this assumption. Do this after the Entry updates above to
+  // avoid iterator invalidation.
+  if (AssumptionDisproven)
+    while (AssumptionBasedResults.size() > OrigNumAssumptionBasedResults)
+      AAQI.AliasCache.erase(AssumptionBasedResults.pop_back_val());
+
+  // The result may still be based on assumptions higher up in the chain.
+  // Remember it, so it can be purged from the cache later.
+  if (OrigNumAssumptionUses != NumAssumptionUses && Result != MayAlias)
+    AssumptionBasedResults.push_back(Locs);
+  return Result;
+}
+
+AliasResult BasicAAResult::aliasCheckRecursive(
+    const Value *V1, LocationSize V1Size, const AAMDNodes &V1AAInfo,
+    const Value *V2, LocationSize V2Size, const AAMDNodes &V2AAInfo,
+    AAQueryInfo &AAQI, const Value *O1, const Value *O2) {
   if (const GEPOperator *GV1 = dyn_cast<GEPOperator>(V1)) {
     AliasResult Result =
         aliasGEP(GV1, V1Size, V1AAInfo, V2, V2Size, V2AAInfo, O1, O2, AAQI);
     if (Result != MayAlias)
-      return AAQI.updateResult(Locs, Result);
+      return Result;
   } else if (const GEPOperator *GV2 = dyn_cast<GEPOperator>(V2)) {
     AliasResult Result =
         aliasGEP(GV2, V2Size, V2AAInfo, V1, V1Size, V1AAInfo, O2, O1, AAQI);
     if (Result != MayAlias)
-      return AAQI.updateResult(Locs, Result);
+      return Result;
   }
 
   if (const PHINode *PN = dyn_cast<PHINode>(V1)) {
     AliasResult Result =
         aliasPHI(PN, V1Size, V1AAInfo, V2, V2Size, V2AAInfo, O2, AAQI);
     if (Result != MayAlias)
-      return AAQI.updateResult(Locs, Result);
+      return Result;
   } else if (const PHINode *PN = dyn_cast<PHINode>(V2)) {
     AliasResult Result =
         aliasPHI(PN, V2Size, V2AAInfo, V1, V1Size, V1AAInfo, O1, AAQI);
     if (Result != MayAlias)
-      return AAQI.updateResult(Locs, Result);
+      return Result;
   }
 
   if (const SelectInst *S1 = dyn_cast<SelectInst>(V1)) {
     AliasResult Result =
         aliasSelect(S1, V1Size, V1AAInfo, V2, V2Size, V2AAInfo, O2, AAQI);
     if (Result != MayAlias)
-      return AAQI.updateResult(Locs, Result);
+      return Result;
   } else if (const SelectInst *S2 = dyn_cast<SelectInst>(V2)) {
     AliasResult Result =
         aliasSelect(S2, V2Size, V2AAInfo, V1, V1Size, V1AAInfo, O1, AAQI);
     if (Result != MayAlias)
-      return AAQI.updateResult(Locs, Result);
+      return Result;
   }
 
   // If both pointers are pointing into the same object and one of them
   // accesses the entire object, then the accesses must overlap in some way.
-  if (O1 == O2)
+  if (O1 == O2) {
+    bool NullIsValidLocation = NullPointerIsDefined(&F);
     if (V1Size.isPrecise() && V2Size.isPrecise() &&
         (isObjectSize(O1, V1Size.getValue(), DL, TLI, NullIsValidLocation) ||
          isObjectSize(O2, V2Size.getValue(), DL, TLI, NullIsValidLocation)))
-      return AAQI.updateResult(Locs, PartialAlias);
+      return PartialAlias;
+  }
 
   // Recurse back into the best AA results we have, potentially with refined
   // memory locations. We have already ensured that BasicAA has a MayAlias
   // cache result for these, so any recursion back into BasicAA won't loop.
-  AliasResult Result = getBestAAResults().alias(Locs.first, Locs.second, AAQI);
-  if (Result != MayAlias)
-    return AAQI.updateResult(Locs, Result);
-
-  // MayAlias is already in the cache.
-  return MayAlias;
+  return getBestAAResults().alias(MemoryLocation(V1, V1Size, V1AAInfo),
+                                  MemoryLocation(V2, V2Size, V2AAInfo), AAQI);
 }
 
 /// Check whether two Values can be considered equivalent.
@@ -1857,7 +1780,7 @@ void BasicAAResult::GetIndexDifference(
 
     // If we didn't consume this entry, add it to the end of the Dest list.
     if (!!Scale) {
-      VariableGEPIndex Entry = {V, ZExtBits, SExtBits, -Scale};
+      VariableGEPIndex Entry = {V, ZExtBits, SExtBits, -Scale, Src[i].CxtI};
       Dest.push_back(Entry);
     }
   }
@@ -1976,9 +1899,9 @@ bool BasicAAWrapperPass::runOnFunction(Function &F) {
 
 void BasicAAWrapperPass::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.setPreservesAll();
-  AU.addRequired<AssumptionCacheTracker>();
-  AU.addRequired<DominatorTreeWrapperPass>();
-  AU.addRequired<TargetLibraryInfoWrapperPass>();
+  AU.addRequiredTransitive<AssumptionCacheTracker>();
+  AU.addRequiredTransitive<DominatorTreeWrapperPass>();
+  AU.addRequiredTransitive<TargetLibraryInfoWrapperPass>();
   AU.addUsedIfAvailable<PhiValuesWrapperPass>();
 }
 

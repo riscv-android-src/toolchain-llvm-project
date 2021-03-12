@@ -44,7 +44,7 @@ public:
       ASSERT_FP_EQ(negZero, func(negZero, exp));
       ASSERT_FP_EQ(inf, func(inf, exp));
       ASSERT_FP_EQ(negInf, func(negInf, exp));
-      ASSERT_NE(isnan(func(nan, exp)), 0);
+      ASSERT_FP_EQ(nan, func(nan, exp));
     }
   }
 
@@ -131,11 +131,11 @@ public:
     // The result should not be infinity.
     x = NormalFloat(-FPBits::exponentBias + 1, NormalFloat::one >> 10, 0);
     exp = FPBits::maxExponent + 5;
-    ASSERT_EQ(isinf(func(x, exp)), 0);
+    ASSERT_FALSE(FPBits(func(x, exp)).isInf());
     // But if the exp is large enough to oversome than the normalization shift,
     // then it should result in infinity.
     exp = FPBits::maxExponent + 15;
-    ASSERT_NE(isinf(func(x, exp)), 0);
+    ASSERT_FP_EQ(func(x, exp), inf);
   }
 };
 

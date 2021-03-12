@@ -114,7 +114,6 @@ class SubtargetEmitter {
                            SchedClassTables &SchedTables);
   void EmitSchedClassTables(SchedClassTables &SchedTables, raw_ostream &OS);
   void EmitProcessorModels(raw_ostream &OS);
-  void EmitProcessorLookup(raw_ostream &OS);
   void EmitSchedModelHelpers(const std::string &ClassName, raw_ostream &OS);
   void emitSchedModelHelpersImpl(raw_ostream &OS,
                                  bool OnlyExpandMCInstPredicates = false);
@@ -1008,8 +1007,7 @@ void SubtargetEmitter::GenSchedClassTables(const CodeGenProcModel &ProcModel,
     bool HasVariants = false;
     for (const CodeGenSchedTransition &CGT :
            make_range(SC.Transitions.begin(), SC.Transitions.end())) {
-      if (CGT.ProcIndices[0] == 0 ||
-          is_contained(CGT.ProcIndices, ProcModel.Index)) {
+      if (CGT.ProcIndex == ProcModel.Index) {
         HasVariants = true;
         break;
       }
@@ -1222,11 +1220,8 @@ void SubtargetEmitter::GenSchedClassTables(const CodeGenProcModel &ProcModel,
     }
     else {
       SCDesc.WriteLatencyIdx = SchedTables.WriteLatencies.size();
-      SchedTables.WriteLatencies.insert(SchedTables.WriteLatencies.end(),
-                                        WriteLatencies.begin(),
-                                        WriteLatencies.end());
-      SchedTables.WriterNames.insert(SchedTables.WriterNames.end(),
-                                     WriterNames.begin(), WriterNames.end());
+      llvm::append_range(SchedTables.WriteLatencies, WriteLatencies);
+      llvm::append_range(SchedTables.WriterNames, WriterNames);
     }
     // ReadAdvanceEntries must remain in operand order.
     SCDesc.NumReadAdvanceEntries = ReadAdvanceEntries.size();
@@ -1238,8 +1233,7 @@ void SubtargetEmitter::GenSchedClassTables(const CodeGenProcModel &ProcModel,
       SCDesc.ReadAdvanceIdx = RAPos - SchedTables.ReadAdvanceEntries.begin();
     else {
       SCDesc.ReadAdvanceIdx = SchedTables.ReadAdvanceEntries.size();
-      SchedTables.ReadAdvanceEntries.insert(RAPos, ReadAdvanceEntries.begin(),
-                                            ReadAdvanceEntries.end());
+      llvm::append_range(SchedTables.ReadAdvanceEntries, ReadAdvanceEntries);
     }
   }
 }
@@ -1552,9 +1546,8 @@ static void collectProcessorIndices(const CodeGenSchedClass &SC,
   // transition rules specified by variant class `SC`.
   for (const CodeGenSchedTransition &T : SC.Transitions) {
     IdxVec PI;
-    std::set_union(T.ProcIndices.begin(), T.ProcIndices.end(),
-                   ProcIndices.begin(), ProcIndices.end(),
-                   std::back_inserter(PI));
+    std::set_union(&T.ProcIndex, &T.ProcIndex + 1, ProcIndices.begin(),
+                   ProcIndices.end(), std::back_inserter(PI));
     ProcIndices.swap(PI);
   }
 }
@@ -1608,7 +1601,7 @@ void SubtargetEmitter::emitSchedModelHelpersImpl(
       // Now emit transitions associated with processor PI.
       const CodeGenSchedTransition *FinalT = nullptr;
       for (const CodeGenSchedTransition &T : SC.Transitions) {
-        if (PI != 0 && !count(T.ProcIndices, PI))
+        if (PI != 0 && T.ProcIndex != PI)
           continue;
 
         // Emit only transitions based on MCSchedPredicate, if it's the case.

@@ -86,6 +86,9 @@ func @standard_instrs(tensor<4x4x?xf32>, f32, i32, index, i64, f16) {
   // CHECK: %[[I6:.*]] = muli %[[I2]], %[[I2]] : i32
   %i6 = muli %i2, %i2 : i32
 
+  // CHECK: %[[F7:.*]] = powf %[[F2]], %[[F2]] : f32
+  %f7 = powf %f2, %f2 : f32
+
   // CHECK: %[[C0:.*]] = create_complex %[[F2]], %[[F2]] : complex<f32>
   %c0 = "std.create_complex"(%f2, %f2) : (f32, f32) -> complex<f32>
 
@@ -134,27 +137,27 @@ func @standard_instrs(tensor<4x4x?xf32>, f32, i32, index, i64, f16) {
   // CHECK: %cst_5 = constant dense<0> : vector<42xi32>
   %vci32 = constant dense<0> : vector<42 x i32>
 
-  // CHECK: %{{[0-9]+}} = cmpi "eq", %{{[0-9]+}}, %{{[0-9]+}} : i32
-  %14 = cmpi "eq", %i3, %i4 : i32
+  // CHECK: %{{[0-9]+}} = cmpi eq, %{{[0-9]+}}, %{{[0-9]+}} : i32
+  %14 = cmpi eq, %i3, %i4 : i32
 
   // Predicate 1 means inequality comparison.
-  // CHECK: %{{[0-9]+}} = cmpi "ne", %{{[0-9]+}}, %{{[0-9]+}} : i32
+  // CHECK: %{{[0-9]+}} = cmpi ne, %{{[0-9]+}}, %{{[0-9]+}} : i32
   %15 = "std.cmpi"(%i3, %i4) {predicate = 1} : (i32, i32) -> i1
 
-  // CHECK: %{{[0-9]+}} = cmpi "slt", %cst_3, %cst_3 : vector<4xi32>
-  %16 = cmpi "slt", %13, %13 : vector<4 x i32>
+  // CHECK: %{{[0-9]+}} = cmpi slt, %cst_3, %cst_3 : vector<4xi32>
+  %16 = cmpi slt, %13, %13 : vector<4 x i32>
 
-  // CHECK: %{{[0-9]+}} = cmpi "ne", %cst_3, %cst_3 : vector<4xi32>
+  // CHECK: %{{[0-9]+}} = cmpi ne, %cst_3, %cst_3 : vector<4xi32>
   %17 = "std.cmpi"(%13, %13) {predicate = 1} : (vector<4 x i32>, vector<4 x i32>) -> vector<4 x i1>
 
-  // CHECK: %{{[0-9]+}} = cmpi "slt", %arg3, %arg3 : index
-  %18 = cmpi "slt", %idx, %idx : index
+  // CHECK: %{{[0-9]+}} = cmpi slt, %arg3, %arg3 : index
+  %18 = cmpi slt, %idx, %idx : index
 
-  // CHECK: %{{[0-9]+}} = cmpi "eq", %cst_4, %cst_4 : tensor<42xi32>
-  %19 = cmpi "eq", %tci32, %tci32 : tensor<42 x i32>
+  // CHECK: %{{[0-9]+}} = cmpi eq, %cst_4, %cst_4 : tensor<42xi32>
+  %19 = cmpi eq, %tci32, %tci32 : tensor<42 x i32>
 
-  // CHECK: %{{[0-9]+}} = cmpi "eq", %cst_5, %cst_5 : vector<42xi32>
-  %20 = cmpi "eq", %vci32, %vci32 : vector<42 x i32>
+  // CHECK: %{{[0-9]+}} = cmpi eq, %cst_5, %cst_5 : vector<42xi32>
+  %20 = cmpi eq, %vci32, %vci32 : vector<42 x i32>
 
   // CHECK: %{{[0-9]+}} = select %{{[0-9]+}}, %arg3, %arg3 : index
   %21 = select %18, %idx, %idx : index
@@ -289,24 +292,24 @@ func @standard_instrs(tensor<4x4x?xf32>, f32, i32, index, i64, f16) {
   %tcf32 = constant dense<0.> : tensor<42 x f32>
   %vcf32 = constant dense<0.> : vector<4 x f32>
 
-  // CHECK: %{{[0-9]+}} = cmpf "ogt", %{{[0-9]+}}, %{{[0-9]+}} : f32
-  %65 = cmpf "ogt", %f3, %f4 : f32
+  // CHECK: %{{[0-9]+}} = cmpf ogt, %{{[0-9]+}}, %{{[0-9]+}} : f32
+  %65 = cmpf ogt, %f3, %f4 : f32
 
   // Predicate 0 means ordered equality comparison.
-  // CHECK: %{{[0-9]+}} = cmpf "oeq", %{{[0-9]+}}, %{{[0-9]+}} : f32
+  // CHECK: %{{[0-9]+}} = cmpf oeq, %{{[0-9]+}}, %{{[0-9]+}} : f32
   %66 = "std.cmpf"(%f3, %f4) {predicate = 1} : (f32, f32) -> i1
 
-  // CHECK: %{{[0-9]+}} = cmpf "olt", %cst_8, %cst_8 : vector<4xf32>
-  %67 = cmpf "olt", %vcf32, %vcf32 : vector<4 x f32>
+  // CHECK: %{{[0-9]+}} = cmpf olt, %cst_8, %cst_8 : vector<4xf32>
+  %67 = cmpf olt, %vcf32, %vcf32 : vector<4 x f32>
 
-  // CHECK: %{{[0-9]+}} = cmpf "oeq", %cst_8, %cst_8 : vector<4xf32>
+  // CHECK: %{{[0-9]+}} = cmpf oeq, %cst_8, %cst_8 : vector<4xf32>
   %68 = "std.cmpf"(%vcf32, %vcf32) {predicate = 1} : (vector<4 x f32>, vector<4 x f32>) -> vector<4 x i1>
 
-  // CHECK: %{{[0-9]+}} = cmpf "oeq", %cst_7, %cst_7 : tensor<42xf32>
-  %69 = cmpf "oeq", %tcf32, %tcf32 : tensor<42 x f32>
+  // CHECK: %{{[0-9]+}} = cmpf oeq, %cst_7, %cst_7 : tensor<42xf32>
+  %69 = cmpf oeq, %tcf32, %tcf32 : tensor<42 x f32>
 
-  // CHECK: %{{[0-9]+}} = cmpf "oeq", %cst_8, %cst_8 : vector<4xf32>
-  %70 = cmpf "oeq", %vcf32, %vcf32 : vector<4 x f32>
+  // CHECK: %{{[0-9]+}} = cmpf oeq, %cst_8, %cst_8 : vector<4xf32>
+  %70 = cmpf oeq, %vcf32, %vcf32 : vector<4 x f32>
 
   // CHECK: %{{[0-9]+}} = rank %arg0 : tensor<4x4x?xf32>
   %71 = "std.rank"(%t) : (tensor<4x4x?xf32>) -> index
@@ -672,19 +675,6 @@ func @calls(%arg0: i32) {
   return
 }
 
-// CHECK-LABEL: func @extract_element(%arg0: tensor<*xi32>, %arg1: tensor<4x4xf32>) -> i32 {
-func @extract_element(%arg0: tensor<*xi32>, %arg1 : tensor<4x4xf32>) -> i32 {
-  %c0 = "std.constant"() {value = 0: index} : () -> index
-
-  // CHECK: %0 = extract_element %arg0[%c0, %c0, %c0, %c0] : tensor<*xi32>
-  %0 = extract_element %arg0[%c0, %c0, %c0, %c0] : tensor<*xi32>
-
-  // CHECK: %1 = extract_element %arg1[%c0, %c0] : tensor<4x4xf32>
-  %1 = extract_element %arg1[%c0, %c0] : tensor<4x4xf32>
-
-  return %0 : i32
-}
-
 // CHECK-LABEL: func @tensor_from_elements() {
 func @tensor_from_elements() {
   %c0 = "std.constant"() {value = 0: index} : () -> index
@@ -702,23 +692,6 @@ func @tensor_from_elements() {
 
   // CHECK: tensor_from_elements : tensor<0xindex>
   %3 = tensor_from_elements : tensor<0xindex>
-
-  return
-}
-
-// CHECK-LABEL: func @tensor_cast(%arg0
-func @tensor_cast(%arg0: tensor<*xf32>, %arg1 : tensor<4x4xf32>, %arg2: tensor<?x?xf32>) {
-  // CHECK: %0 = tensor_cast %arg0 : tensor<*xf32> to tensor<?x?xf32>
-  %0 = tensor_cast %arg0 : tensor<*xf32> to tensor<?x?xf32>
-
-  // CHECK: %1 = tensor_cast %arg1 : tensor<4x4xf32> to tensor<*xf32>
-  %1 = tensor_cast %arg1 : tensor<4x4xf32> to tensor<*xf32>
-
-  // CHECK: %2 = tensor_cast %arg2 : tensor<?x?xf32> to tensor<4x?xf32>
-  %2 = tensor_cast %arg2 : tensor<?x?xf32> to tensor<4x?xf32>
-
-  // CHECK: %3 = tensor_cast %2 : tensor<4x?xf32> to tensor<?x?xf32>
-  %3 = tensor_cast %2 : tensor<4x?xf32> to tensor<?x?xf32>
 
   return
 }
@@ -902,8 +875,8 @@ func @unranked_tensor_load_store(%0 : memref<*xi32>) {
 // CHECK-LABEL: func @atomic_rmw
 // CHECK-SAME: ([[BUF:%.*]]: memref<10xf32>, [[VAL:%.*]]: f32, [[I:%.*]]: index)
 func @atomic_rmw(%I: memref<10xf32>, %val: f32, %i : index) {
-  %x = atomic_rmw "addf" %val, %I[%i] : (f32, memref<10xf32>) -> f32
-  // CHECK: atomic_rmw "addf" [[VAL]], [[BUF]]{{\[}}[[I]]]
+  %x = atomic_rmw addf %val, %I[%i] : (f32, memref<10xf32>) -> f32
+  // CHECK: atomic_rmw addf [[VAL]], [[BUF]]{{\[}}[[I]]]
   return
 }
 
@@ -969,7 +942,3 @@ func @subtensor_insert(%t: tensor<8x16x4xf32>, %t2: tensor<16x32x8xf32>, %idx : 
 
   return
 }
-
-// CHECK-LABEL: func private @legacy_visibility_syntax
-func @legacy_visibility_syntax() attributes { sym_visibility = "private" }
-

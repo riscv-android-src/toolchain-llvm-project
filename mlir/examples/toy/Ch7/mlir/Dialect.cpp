@@ -244,7 +244,7 @@ static mlir::LogicalResult verifyConstantForType(mlir::Type type,
 
   // Check that each of the elements are valid.
   llvm::ArrayRef<mlir::Attribute> attrElementValues = attrValue.getValue();
-  for (const auto &it : llvm::zip(resultElementTypes, attrElementValues))
+  for (const auto it : llvm::zip(resultElementTypes, attrElementValues))
     if (failed(verifyConstantForType(std::get<0>(it), std::get<1>(it), op)))
       return mlir::failure();
   return mlir::success();
@@ -298,7 +298,7 @@ void GenericCallOp::build(mlir::OpBuilder &builder, mlir::OperationState &state,
 /// Return the callee of the generic call operation, this is required by the
 /// call interface.
 CallInterfaceCallable GenericCallOp::getCallableForCallee() {
-  return getAttrOfType<SymbolRefAttr>("callee");
+  return (*this)->getAttrOfType<SymbolRefAttr>("callee");
 }
 
 /// Get the argument operands to the called function, this is required by the
@@ -324,7 +324,7 @@ void MulOp::inferShapes() { getResult().setType(getOperand(0).getType()); }
 static mlir::LogicalResult verify(ReturnOp op) {
   // We know that the parent operation is a function, because of the 'HasParent'
   // trait attached to the operation definition.
-  auto function = cast<FuncOp>(op.getParentOp());
+  auto function = cast<FuncOp>(op->getParentOp());
 
   /// ReturnOps can only have a single optional operand.
   if (op.getNumOperands() > 1)

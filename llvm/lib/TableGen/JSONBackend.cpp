@@ -29,7 +29,6 @@ private:
   RecordKeeper &Records;
 
   json::Value translateInit(const Init &I);
-  json::Array listSuperclasses(const Record &R);
 
 public:
   JSONEmitter(RecordKeeper &R);
@@ -145,7 +144,7 @@ void JSONEmitter::run(raw_ostream &OS) {
     for (const RecordVal &RV : Def.getValues()) {
       if (!Def.isTemplateArg(RV.getNameInit())) {
         auto Name = RV.getNameInitAsString();
-        if (RV.getPrefix())
+        if (RV.isNonconcreteOK())
           fields.push_back(Name);
         obj[Name] = translateInit(*RV.getValue());
       }

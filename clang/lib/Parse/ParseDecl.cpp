@@ -833,6 +833,7 @@ void Parser::ParseNullabilityTypeSpecifiers(ParsedAttributes &attrs) {
     switch (Tok.getKind()) {
     case tok::kw__Nonnull:
     case tok::kw__Nullable:
+    case tok::kw__Nullable_result:
     case tok::kw__Null_unspecified: {
       IdentifierInfo *AttrName = Tok.getIdentifierInfo();
       SourceLocation AttrNameLoc = ConsumeToken();
@@ -1118,7 +1119,7 @@ void Parser::ParseAvailabilityAttribute(IdentifierInfo &Availability,
       // Also reject wide string literals.
       if (StringLiteral *MessageStringLiteral =
               cast_or_null<StringLiteral>(MessageExpr.get())) {
-        if (MessageStringLiteral->getCharByteWidth() != 1) {
+        if (!MessageStringLiteral->isAscii()) {
           Diag(MessageStringLiteral->getSourceRange().getBegin(),
                diag::err_expected_string_literal)
             << /*Source='availability attribute'*/ 2;
@@ -3536,6 +3537,7 @@ void Parser::ParseDeclarationSpecifiers(DeclSpec &DS,
     // Nullability type specifiers.
     case tok::kw__Nonnull:
     case tok::kw__Nullable:
+    case tok::kw__Nullable_result:
     case tok::kw__Null_unspecified:
       ParseNullabilityTypeSpecifiers(DS.getAttributes());
       continue;
@@ -3628,12 +3630,13 @@ void Parser::ParseDeclarationSpecifiers(DeclSpec &DS,
     case tok::kw_virtual:
       // C++ for OpenCL does not allow virtual function qualifier, to avoid
       // function pointers restricted in OpenCL v2.0 s6.9.a.
-      if (getLangOpts().OpenCLCPlusPlus) {
+      if (getLangOpts().OpenCLCPlusPlus &&
+          !getActions().getOpenCLOptions().isEnabled(
+              "__cl_clang_function_pointers")) {
         DiagID = diag::err_openclcxx_virtual_function;
         PrevSpec = Tok.getIdentifierInfo()->getNameStart();
         isInvalid = true;
-      }
-      else {
+      } else {
         isInvalid = DS.setFunctionSpecVirtual(Loc, PrevSpec, DiagID);
       }
       break;
@@ -5022,6 +5025,7 @@ bool Parser::isTypeSpecifierQualifier() {
 
   case tok::kw__Nonnull:
   case tok::kw__Nullable:
+  case tok::kw__Nullable_result:
   case tok::kw__Null_unspecified:
 
   case tok::kw___kindof:
@@ -5249,6 +5253,7 @@ bool Parser::isDeclarationSpecifier(bool DisambiguatingWithExpression) {
 
   case tok::kw__Nonnull:
   case tok::kw__Nullable:
+  case tok::kw__Nullable_result:
   case tok::kw__Null_unspecified:
 
   case tok::kw___kindof:
@@ -5524,6 +5529,7 @@ void Parser::ParseTypeQualifierListOpt(
     // Nullability type specifiers.
     case tok::kw__Nonnull:
     case tok::kw__Nullable:
+    case tok::kw__Nullable_result:
     case tok::kw__Null_unspecified:
       ParseNullabilityTypeSpecifiers(DS.getAttributes());
       continue;
