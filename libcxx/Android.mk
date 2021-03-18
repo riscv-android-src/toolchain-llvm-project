@@ -80,6 +80,10 @@ libcxx_cxxflags := \
 libcxx_ldflags :=
 libcxx_export_ldflags :=
 
+ifeq ($(TARGET_ARCH_ABI),arm64-v8a)
+    libcxx_cxxflags += -mbranch-protection=standard
+endif
+
 ifneq ($(LIBCXX_FORCE_REBUILD),true)
 
 $(call ndk_log,Using prebuilt libc++ libraries)
