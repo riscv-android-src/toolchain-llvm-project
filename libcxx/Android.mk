@@ -79,10 +79,9 @@ libcxx_cxxflags := \
 
 libcxx_ldflags :=
 libcxx_export_ldflags :=
-# Need to make sure the unwinder is always linked with hidden visibility.
-ifneq (,$(filter armeabi%,$(TARGET_ARCH_ABI)))
-    libcxx_ldflags += -Wl,--exclude-libs,libunwind.a
-    libcxx_export_ldflags += -Wl,--exclude-libs,libunwind.a
+
+ifeq ($(TARGET_ARCH_ABI),arm64-v8a)
+    libcxx_cxxflags += -mbranch-protection=standard
 endif
 
 ifneq ($(LIBCXX_FORCE_REBUILD),true)
@@ -108,10 +107,7 @@ ifeq ($(NDK_PLATFORM_NEEDS_ANDROID_SUPPORT),true)
     LOCAL_EXPORT_STATIC_LIBRARIES += libandroid_support
 endif
 
-# We use the LLVM unwinder for 32-bit ARM.
-ifeq ($(TARGET_ARCH_ABI),armeabi-v7a)
-    LOCAL_EXPORT_STATIC_LIBRARIES += libunwind
-endif
+LOCAL_EXPORT_STATIC_LIBRARIES += libunwind
 include $(PREBUILT_STATIC_LIBRARY)
 
 include $(CLEAR_VARS)
@@ -132,21 +128,8 @@ ifeq ($(NDK_PLATFORM_NEEDS_ANDROID_SUPPORT),true)
     LOCAL_EXPORT_STATIC_LIBRARIES := libandroid_support
 endif
 
-# We use the LLVM unwinder for 32-bit ARM.
-ifeq ($(TARGET_ARCH_ABI),armeabi-v7a)
-    LOCAL_EXPORT_STATIC_LIBRARIES += libunwind
-endif
+LOCAL_EXPORT_STATIC_LIBRARIES += libunwind
 include $(PREBUILT_SHARED_LIBRARY)
-
-ifeq ($(TARGET_ARCH_ABI),armeabi-v7a)
-# We define this module here rather than in a separate cxx-stl/libunwind because
-# we don't actually want to make the API available (yet).
-include $(CLEAR_VARS)
-LOCAL_MODULE := libunwind
-LOCAL_SRC_FILES := libs/$(TARGET_ARCH_ABI)/$(LOCAL_MODULE)$(TARGET_LIB_EXTENSION)
-LOCAL_EXPORT_LDLIBS := -ldl
-include $(PREBUILT_STATIC_LIBRARY)
-endif
 
 $(call import-module, cxx-stl/llvm-libc++abi)
 
@@ -171,12 +154,8 @@ ifeq ($(NDK_PLATFORM_NEEDS_ANDROID_SUPPORT),true)
     LOCAL_STATIC_LIBRARIES += android_support
 endif
 
-# We use the LLVM unwinder for all the 32-bit ARM targets.
-ifeq ($(TARGET_ARCH_ABI),armeabi-v7a)
-    LOCAL_STATIC_LIBRARIES += libunwind
-    LOCAL_EXPORT_STATIC_LIBRARIES += libunwind
-endif
-
+LOCAL_STATIC_LIBRARIES += libunwind
+LOCAL_EXPORT_STATIC_LIBRARIES += libunwind
 include $(BUILD_STATIC_LIBRARY)
 
 include $(CLEAR_VARS)
@@ -199,12 +178,8 @@ LOCAL_LDFLAGS := $(libcxx_ldflags)
 # See https://github.com/android-ndk/ndk/issues/105
 LOCAL_LDFLAGS += -Wl,--as-needed
 LOCAL_ARM_NEON := false
-
-# We use the LLVM unwinder for all the 32-bit ARM targets.
-ifneq (,$(filter armeabi%,$(TARGET_ARCH_ABI)))
-    LOCAL_STATIC_LIBRARIES += libunwind
-    LOCAL_EXPORT_STATIC_LIBRARIES += libunwind
-endif
+LOCAL_STATIC_LIBRARIES += libunwind
+LOCAL_EXPORT_STATIC_LIBRARIES += libunwind
 
 # But only need -latomic for armeabi.
 ifeq ($(TARGET_ARCH_ABI),armeabi)

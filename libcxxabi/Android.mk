@@ -43,13 +43,10 @@ libcxxabi_includes := \
 
 libcxxabi_cflags := -D__STDC_FORMAT_MACROS
 libcxxabi_cppflags := -std=c++11 -Wno-unknown-attributes -DHAS_THREAD_LOCAL
+libcxxabi_cppflags += -DLIBCXXABI_USE_LLVM_UNWINDER=1
 
-ifneq (,$(filter armeabi%,$(TARGET_ARCH_ABI)))
-    use_llvm_unwinder := true
-    libcxxabi_cppflags += -DLIBCXXABI_USE_LLVM_UNWINDER=1
-else
-    use_llvm_unwinder := false
-    libcxxabi_cppflags += -DLIBCXXABI_USE_LLVM_UNWINDER=0
+ifeq ($(TARGET_ARCH_ABI),arm64-v8a)
+    libcxxabi_cppflags += -mbranch-protection=standard
 endif
 
 ifneq ($(LIBCXX_FORCE_REBUILD),true) # Using prebuilt
@@ -63,10 +60,8 @@ LOCAL_EXPORT_C_INCLUDES := $(LOCAL_PATH)/include
 # on static libraries and topologically sort them to determine link order.
 # Though there is no link step, without this we may link libunwind before
 # libc++abi, which won't succeed.
-ifeq ($(use_llvm_unwinder),true)
-    LOCAL_STATIC_LIBRARIES += libunwind
-    LOCAL_EXPORT_STATIC_LIBRARIES := libunwind
-endif
+LOCAL_STATIC_LIBRARIES += libunwind
+LOCAL_EXPORT_STATIC_LIBRARIES := libunwind
 include $(PREBUILT_STATIC_LIBRARY)
 
 else # Building
@@ -91,15 +86,18 @@ endif
 # on static libraries and topologically sort them to determine link order.
 # Though there is no link step, without this we may link libunwind before
 # libc++abi, which won't succeed.
-ifeq ($(use_llvm_unwinder),true)
-    LOCAL_STATIC_LIBRARIES += libunwind
-    LOCAL_EXPORT_STATIC_LIBRARIES := libunwind
-endif
+LOCAL_STATIC_LIBRARIES += libunwind
+LOCAL_EXPORT_STATIC_LIBRARIES := libunwind
 include $(BUILD_STATIC_LIBRARY)
 
-$(call import-add-path, $(LOCAL_PATH)/../..)
-$(call import-module, toolchain/llvm-project/libunwind)
-
 endif # Prebuilt/building
+
+# Define a prebuilt module for libunwind.a so that ndk-build adds it to the
+# linker command-line before any shared libraries, ensuring that the unwinder
+# is linked statically even if a shared library dependency exports an unwinder.
+include $(CLEAR_VARS)
+LOCAL_MODULE := libunwind
+LOCAL_SRC_FILES := $(NDK_TOOLCHAIN_LIB_DIR)/$(TARGET_TOOLCHAIN_ARCH_LIB_DIR)/libunwind.a
+include $(PREBUILT_STATIC_LIBRARY)
 
 $(call import-module, android/support)
