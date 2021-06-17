@@ -71,7 +71,7 @@ define void @trunc_v16i16_to_v16i8(<32 x i8>* %L, <16 x i8>* %S) nounwind {
 ; AVX1-LABEL: trunc_v16i16_to_v16i8:
 ; AVX1:       # %bb.0:
 ; AVX1-NEXT:    vmovaps (%rdi), %ymm0
-; AVX1-NEXT:    vandps {{.*}}(%rip), %ymm0, %ymm0
+; AVX1-NEXT:    vandps {{\.?LCPI[0-9]+_[0-9]+}}(%rip), %ymm0, %ymm0
 ; AVX1-NEXT:    vextractf128 $1, %ymm0, %xmm1
 ; AVX1-NEXT:    vpackuswb %xmm1, %xmm0, %xmm0
 ; AVX1-NEXT:    vmovdqa %xmm0, (%rsi)
@@ -81,7 +81,7 @@ define void @trunc_v16i16_to_v16i8(<32 x i8>* %L, <16 x i8>* %S) nounwind {
 ; AVX2-LABEL: trunc_v16i16_to_v16i8:
 ; AVX2:       # %bb.0:
 ; AVX2-NEXT:    vmovdqa (%rdi), %ymm0
-; AVX2-NEXT:    vpand {{.*}}(%rip), %ymm0, %ymm0
+; AVX2-NEXT:    vpand {{\.?LCPI[0-9]+_[0-9]+}}(%rip), %ymm0, %ymm0
 ; AVX2-NEXT:    vextracti128 $1, %ymm0, %xmm1
 ; AVX2-NEXT:    vpackuswb %xmm1, %xmm0, %xmm0
 ; AVX2-NEXT:    vmovdqa %xmm0, (%rsi)
@@ -1245,10 +1245,10 @@ define void @trunc_v4i64_to_v4i8(<32 x i8>* %L, <4 x i8>* %S) nounwind {
 define <16 x i8> @negative(<32 x i8> %v, <32 x i8> %w) nounwind {
 ; AVX1-LABEL: negative:
 ; AVX1:       # %bb.0:
-; AVX1-NEXT:    vextractf128 $1, %ymm0, %xmm2
-; AVX1-NEXT:    vpshufb {{.*#+}} xmm2 = xmm2[u,u,u,u,u,u,u,u,0,2,4,6,8,10,12,14]
-; AVX1-NEXT:    vpshufb {{.*#+}} xmm0 = xmm0[u,2,4,6,8,10,12,14,u,u,u,u,u,u,u,u]
-; AVX1-NEXT:    vpblendw {{.*#+}} xmm0 = xmm0[0,1,2,3],xmm2[4,5,6,7]
+; AVX1-NEXT:    vpshufb {{.*#+}} xmm2 = xmm0[u,2,4,6,8,10,12,14],zero,zero,zero,zero,zero,zero,zero,zero
+; AVX1-NEXT:    vextractf128 $1, %ymm0, %xmm0
+; AVX1-NEXT:    vpshufb {{.*#+}} xmm0 = xmm0[u],zero,zero,zero,zero,zero,zero,zero,xmm0[0,2,4,6,8,10,12,14]
+; AVX1-NEXT:    vpor %xmm2, %xmm0, %xmm0
 ; AVX1-NEXT:    vmovdqa {{.*#+}} xmm2 = [0,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255]
 ; AVX1-NEXT:    vpblendvb %xmm2, %xmm0, %xmm1, %xmm0
 ; AVX1-NEXT:    vzeroupper
@@ -1277,10 +1277,8 @@ define <16 x i8> @negative(<32 x i8> %v, <32 x i8> %w) nounwind {
 ; AVX512VL-LABEL: negative:
 ; AVX512VL:       # %bb.0:
 ; AVX512VL-NEXT:    vpshufb {{.*#+}} ymm0 = zero,ymm0[2,4,6,8,10,12,14,u,u,u,u,u,u,u,u,u,u,u,u,u,u,u,u,16,18,20,22,24,26,28,30]
-; AVX512VL-NEXT:    vbroadcasti128 {{.*#+}} ymm2 = [0,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,0,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255]
-; AVX512VL-NEXT:    # ymm2 = mem[0,1,0,1]
-; AVX512VL-NEXT:    vpternlogq $206, %ymm1, %ymm0, %ymm2
-; AVX512VL-NEXT:    vpermq {{.*#+}} ymm0 = ymm2[0,3,2,3]
+; AVX512VL-NEXT:    vpermq {{.*#+}} ymm0 = ymm0[0,3,2,3]
+; AVX512VL-NEXT:    vpternlogq $248, {{\.?LCPI[0-9]+_[0-9]+}}(%rip), %xmm1, %xmm0
 ; AVX512VL-NEXT:    # kill: def $xmm0 killed $xmm0 killed $ymm0
 ; AVX512VL-NEXT:    vzeroupper
 ; AVX512VL-NEXT:    retq

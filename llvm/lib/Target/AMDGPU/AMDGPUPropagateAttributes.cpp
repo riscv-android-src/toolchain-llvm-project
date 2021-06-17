@@ -27,11 +27,15 @@
 //===----------------------------------------------------------------------===//
 
 #include "AMDGPU.h"
-#include "AMDGPUSubtarget.h"
+#include "MCTargetDesc/AMDGPUMCTargetDesc.h"
+#include "Utils/AMDGPUBaseInfo.h"
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/CodeGen/TargetPassConfig.h"
+#include "llvm/CodeGen/TargetSubtargetInfo.h"
+#include "llvm/IR/InstrTypes.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Transforms/Utils/Cloning.h"
+
 #define DEBUG_TYPE "amdgpu-propagate-attributes"
 
 using namespace llvm;
@@ -245,7 +249,11 @@ bool AMDGPUPropagateAttributes::process() {
         if (!I)
           continue;
         CallBase *CI = dyn_cast<CallBase>(I);
-        if (!CI)
+        // Only propagate attributes if F is the called function. Specifically,
+        // do not propagate attributes if F is passed as an argument.
+        // FIXME: handle bitcasted callee, e.g.
+        // %retval = call i8* bitcast (i32* ()* @f to i8* ()*)()
+        if (!CI || CI->getCalledOperand() != &F)
           continue;
         Function *Caller = CI->getCaller();
         if (!Caller || !Visited.insert(CI).second)

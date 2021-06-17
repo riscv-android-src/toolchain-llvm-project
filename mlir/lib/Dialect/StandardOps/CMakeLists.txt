@@ -1,7 +1,5 @@
 add_mlir_dialect_library(MLIRStandard
   IR/Ops.cpp
-  EDSC/Builders.cpp
-  EDSC/Intrinsics.cpp
   Utils/Utils.cpp
 
   ADDITIONAL_HEADER_DIRS
@@ -12,8 +10,8 @@ add_mlir_dialect_library(MLIRStandard
 
   LINK_LIBS PUBLIC
   MLIRCallInterfaces
+  MLIRCastInterfaces
   MLIRControlFlowInterfaces
-  MLIREDSC
   MLIRIR
   MLIRSideEffectInterfaces
   MLIRTensor

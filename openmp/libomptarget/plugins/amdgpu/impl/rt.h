@@ -26,10 +26,7 @@ public:
   void GetEnvAll();
 
   int getMaxQueueSize() const { return max_queue_size_; }
-
-  // TODO(ashwinma): int may change to enum if we have more debug modes
   int getDebugMode() const { return debug_mode_; }
-  // TODO(ashwinma): int may change to enum if we have more profile modes
 
 private:
   std::string GetEnv(const char *name) {
@@ -52,27 +49,22 @@ public:
     return instance;
   }
 
-  // init/finalize
-  static atmi_status_t Initialize();
-  static atmi_status_t Finalize();
   // machine info
   static atmi_machine_t *GetMachineInfo();
   // modules
-  static atmi_status_t RegisterModuleFromMemory(
+  static hsa_status_t RegisterModuleFromMemory(
       void *, size_t, atmi_place_t,
-      atmi_status_t (*on_deserialized_data)(void *data, size_t size,
-                                            void *cb_state),
-      void *cb_state);
+      hsa_status_t (*on_deserialized_data)(void *data, size_t size,
+                                           void *cb_state),
+      void *cb_state, std::vector<hsa_executable_t> &HSAExecutables);
 
   // data
-  static atmi_status_t Memcpy(hsa_signal_t, void *, const void *, size_t);
-  static atmi_status_t Memfree(void *);
-  static atmi_status_t Malloc(void **, size_t, atmi_mem_place_t);
+  static hsa_status_t Memcpy(hsa_signal_t, void *, const void *, size_t);
+  static hsa_status_t Memfree(void *);
+  static hsa_status_t Malloc(void **ptr, size_t size, int DeviceId,
+                             atmi_devtype_t DeviceType);
 
-  // environment variables
   int getMaxQueueSize() const { return env_.getMaxQueueSize(); }
-
-  // TODO(ashwinma): int may change to enum if we have more debug modes
   int getDebugMode() const { return env_.getDebugMode(); }
 
 protected:

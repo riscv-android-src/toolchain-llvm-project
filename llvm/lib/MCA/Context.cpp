@@ -21,6 +21,7 @@
 #include "llvm/MCA/Stages/DispatchStage.h"
 #include "llvm/MCA/Stages/EntryStage.h"
 #include "llvm/MCA/Stages/ExecuteStage.h"
+#include "llvm/MCA/Stages/InOrderIssueStage.h"
 #include "llvm/MCA/Stages/MicroOpQueueStage.h"
 #include "llvm/MCA/Stages/RetireStage.h"
 
@@ -30,6 +31,9 @@ namespace mca {
 std::unique_ptr<Pipeline>
 Context::createDefaultPipeline(const PipelineOptions &Opts, SourceMgr &SrcMgr) {
   const MCSchedModel &SM = STI.getSchedModel();
+
+  if (!SM.isOutOfOrder())
+    return createInOrderPipeline(Opts, SrcMgr);
 
   // Create the hardware units defining the backend.
   auto RCU = std::make_unique<RetireControlUnit>(SM);
@@ -61,6 +65,25 @@ Context::createDefaultPipeline(const PipelineOptions &Opts, SourceMgr &SrcMgr) {
   StagePipeline->appendStage(std::move(Dispatch));
   StagePipeline->appendStage(std::move(Execute));
   StagePipeline->appendStage(std::move(Retire));
+  return StagePipeline;
+}
+
+std::unique_ptr<Pipeline>
+Context::createInOrderPipeline(const PipelineOptions &Opts, SourceMgr &SrcMgr) {
+  const MCSchedModel &SM = STI.getSchedModel();
+  auto PRF = std::make_unique<RegisterFile>(SM, MRI, Opts.RegisterFileSize);
+
+  // Create the pipeline stages.
+  auto Entry = std::make_unique<EntryStage>(SrcMgr);
+  auto InOrderIssue = std::make_unique<InOrderIssueStage>(STI, *PRF);
+  auto StagePipeline = std::make_unique<Pipeline>();
+
+  // Pass the ownership of all the hardware units to this Context.
+  addHardwareUnit(std::move(PRF));
+
+  // Build the pipeline.
+  StagePipeline->appendStage(std::move(Entry));
+  StagePipeline->appendStage(std::move(InOrderIssue));
   return StagePipeline;
 }
 

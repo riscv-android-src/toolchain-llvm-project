@@ -84,6 +84,9 @@ class Driver {
   /// LTO mode selected via -f(no-)?lto(=.*)? options.
   LTOKind LTOMode;
 
+  /// LTO mode selected via -f(no-offload-)?lto(=.*)? options.
+  LTOKind OffloadLTOMode;
+
 public:
   enum OpenMPRuntimeKind {
     /// An unknown OpenMP runtime. We can't generate effective OpenMP code
@@ -156,14 +159,17 @@ public:
   /// Information about the host which can be overridden by the user.
   std::string HostBits, HostMachine, HostSystem, HostRelease;
 
+  /// The file to log CC_PRINT_PROC_STAT_FILE output to, if enabled.
+  std::string CCPrintStatReportFilename;
+
   /// The file to log CC_PRINT_OPTIONS output to, if enabled.
-  const char *CCPrintOptionsFilename;
+  std::string CCPrintOptionsFilename;
 
   /// The file to log CC_PRINT_HEADERS output to, if enabled.
-  const char *CCPrintHeadersFilename;
+  std::string CCPrintHeadersFilename;
 
   /// The file to log CC_LOG_DIAGNOSTICS output to, if enabled.
-  const char *CCLogDiagnosticsFilename;
+  std::string CCLogDiagnosticsFilename;
 
   /// A list of inputs and their types for the given arguments.
   typedef SmallVector<std::pair<types::ID, const llvm::opt::Arg *>, 16>
@@ -203,6 +209,10 @@ public:
 
   /// Whether the driver is generating diagnostics for debugging purposes.
   unsigned CCGenDiagnostics : 1;
+
+  /// Set CC_PRINT_PROC_STAT mode, which causes the driver to dump
+  /// performance report to CC_PRINT_PROC_STAT_FILE or to stdout.
+  unsigned CCPrintProcessStats : 1;
 
   /// Pointer to the ExecuteCC1Tool function, if available.
   /// When the clangDriver lib is used through clang.exe, this provides a
@@ -552,10 +562,14 @@ public:
   bool ShouldEmitStaticLibrary(const llvm::opt::ArgList &Args) const;
 
   /// Returns true if we are performing any kind of LTO.
-  bool isUsingLTO() const { return LTOMode != LTOK_None; }
+  bool isUsingLTO(bool IsOffload = false) const {
+    return getLTOMode(IsOffload) != LTOK_None;
+  }
 
   /// Get the specific kind of LTO being performed.
-  LTOKind getLTOMode() const { return LTOMode; }
+  LTOKind getLTOMode(bool IsOffload = false) const {
+    return IsOffload ? OffloadLTOMode : LTOMode;
+  }
 
 private:
 
