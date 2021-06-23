@@ -744,9 +744,14 @@ public:
   ///
   /// This value is used for lazy creation of default constructors.
   bool needsImplicitDefaultConstructor() const {
-    return !data().UserDeclaredConstructor &&
-           !(data().DeclaredSpecialMembers & SMF_DefaultConstructor) &&
-           (!isLambda() || lambdaIsDefaultConstructibleAndAssignable());
+    return (!data().UserDeclaredConstructor &&
+            !(data().DeclaredSpecialMembers & SMF_DefaultConstructor) &&
+            (!isLambda() || lambdaIsDefaultConstructibleAndAssignable())) ||
+           // FIXME: Proposed fix to core wording issue: if a class inherits
+           // a default constructor and doesn't explicitly declare one, one
+           // is declared implicitly.
+           (data().HasInheritedDefaultConstructor &&
+            !(data().DeclaredSpecialMembers & SMF_DefaultConstructor));
   }
 
   /// Determine whether this class has any user-declared constructors.
@@ -1730,6 +1735,12 @@ public:
     getLambdaData().HasKnownInternalLinkage = HasKnownInternalLinkage;
   }
 
+  /// Set the device side mangling number.
+  void setDeviceLambdaManglingNumber(unsigned Num) const;
+
+  /// Retrieve the device side mangling number.
+  unsigned getDeviceLambdaManglingNumber() const;
+
   /// Returns the inheritance model used for this record.
   MSInheritanceModel getMSInheritanceModel() const;
 
@@ -1841,15 +1852,17 @@ private:
   CXXDeductionGuideDecl(ASTContext &C, DeclContext *DC, SourceLocation StartLoc,
                         ExplicitSpecifier ES,
                         const DeclarationNameInfo &NameInfo, QualType T,
-                        TypeSourceInfo *TInfo, SourceLocation EndLocation)
+                        TypeSourceInfo *TInfo, SourceLocation EndLocation,
+                        CXXConstructorDecl *Ctor)
       : FunctionDecl(CXXDeductionGuide, C, DC, StartLoc, NameInfo, T, TInfo,
                      SC_None, false, ConstexprSpecKind::Unspecified),
-        ExplicitSpec(ES) {
+        Ctor(Ctor), ExplicitSpec(ES) {
     if (EndLocation.isValid())
       setRangeEnd(EndLocation);
     setIsCopyDeductionCandidate(false);
   }
 
+  CXXConstructorDecl *Ctor;
   ExplicitSpecifier ExplicitSpec;
   void setExplicitSpecifier(ExplicitSpecifier ES) { ExplicitSpec = ES; }
 
@@ -1860,7 +1873,8 @@ public:
   static CXXDeductionGuideDecl *
   Create(ASTContext &C, DeclContext *DC, SourceLocation StartLoc,
          ExplicitSpecifier ES, const DeclarationNameInfo &NameInfo, QualType T,
-         TypeSourceInfo *TInfo, SourceLocation EndLocation);
+         TypeSourceInfo *TInfo, SourceLocation EndLocation,
+         CXXConstructorDecl *Ctor = nullptr);
 
   static CXXDeductionGuideDecl *CreateDeserialized(ASTContext &C, unsigned ID);
 
@@ -1873,6 +1887,12 @@ public:
   /// Get the template for which this guide performs deduction.
   TemplateDecl *getDeducedTemplate() const {
     return getDeclName().getCXXDeductionGuideTemplate();
+  }
+
+  /// Get the constructor from which this deduction guide was generated, if
+  /// this is an implicit deduction guide.
+  CXXConstructorDecl *getCorrespondingConstructor() const {
+    return Ctor;
   }
 
   void setIsCopyDeductionCandidate(bool isCDC = true) {
@@ -2155,6 +2175,10 @@ class CXXCtorInitializer final {
   llvm::PointerUnion<TypeSourceInfo *, FieldDecl *, IndirectFieldDecl *>
       Initializee;
 
+  /// The argument used to initialize the base or member, which may
+  /// end up constructing an object (when multiple arguments are involved).
+  Stmt *Init;
+
   /// The source location for the field name or, for a base initializer
   /// pack expansion, the location of the ellipsis.
   ///
@@ -2162,10 +2186,6 @@ class CXXCtorInitializer final {
   /// constructor, it will still include the type's source location as the
   /// Initializee points to the CXXConstructorDecl (to allow loop detection).
   SourceLocation MemberOrEllipsisLocation;
-
-  /// The argument used to initialize the base or member, which may
-  /// end up constructing an object (when multiple arguments are involved).
-  Stmt *Init;
 
   /// Location of the left paren of the ctor-initializer.
   SourceLocation LParenLoc;
@@ -2256,7 +2276,8 @@ public:
 
   // For a pack expansion, returns the location of the ellipsis.
   SourceLocation getEllipsisLoc() const {
-    assert(isPackExpansion() && "Initializer is not a pack expansion");
+    if (!isPackExpansion())
+      return {};
     return MemberOrEllipsisLocation;
   }
 
@@ -2413,12 +2434,12 @@ class CXXConstructorDecl final
                      : ExplicitSpecKind::ResolvedFalse);
   }
 
-  enum TraillingAllocKind {
+  enum TrailingAllocKind {
     TAKInheritsConstructor = 1,
     TAKHasTailExplicit = 1 << 1,
   };
 
-  uint64_t getTraillingAllocKind() const {
+  uint64_t getTrailingAllocKind() const {
     return numTrailingObjects(OverloadToken<InheritedConstructor>()) |
            (numTrailingObjects(OverloadToken<ExplicitSpecifier>()) << 1);
   }
@@ -3806,7 +3827,7 @@ public:
 /// DecompositionDecl of type 'int (&)[3]'.
 class BindingDecl : public ValueDecl {
   /// The declaration that this binding binds to part of.
-  LazyDeclPtr Decomp;
+  ValueDecl *Decomp;
   /// The binding represented by this declaration. References to this
   /// declaration are effectively equivalent to this expression (except
   /// that it is only evaluated once at the point of declaration of the
@@ -3832,7 +3853,7 @@ public:
 
   /// Get the decomposition declaration that this binding represents a
   /// decomposition of.
-  ValueDecl *getDecomposedDecl() const;
+  ValueDecl *getDecomposedDecl() const { return Decomp; }
 
   /// Get the variable (if any) that holds the value of evaluating the binding.
   /// Only present for user-defined bindings for tuple-like types.

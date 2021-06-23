@@ -109,9 +109,7 @@ static const SCEV *computeTripCount(const Loop &L, ScalarEvolution &SE) {
   if (isa<SCEVCouldNotCompute>(BackedgeTakenCount) ||
       !isa<SCEVConstant>(BackedgeTakenCount))
     return nullptr;
-
-  return SE.getAddExpr(BackedgeTakenCount,
-                       SE.getOne(BackedgeTakenCount->getType()));
+  return SE.getTripCountFromExitCount(BackedgeTakenCount);
 }
 
 //===----------------------------------------------------------------------===//
@@ -505,8 +503,7 @@ CacheCost::getCacheCost(Loop &Root, LoopStandardAnalysisResults &AR,
   }
 
   LoopVectorTy Loops;
-  for (Loop *L : breadth_first(&Root))
-    Loops.push_back(L);
+  append_range(Loops, breadth_first(&Root));
 
   if (!getInnerMostLoop(Loops)) {
     LLVM_DEBUG(dbgs() << "Cannot compute cache cost of loop nest with more "

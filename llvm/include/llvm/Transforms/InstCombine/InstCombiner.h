@@ -249,8 +249,8 @@ public:
     if (BinaryOperator *BO = dyn_cast<BinaryOperator>(V))
       if (BO->getOpcode() == Instruction::Add ||
           BO->getOpcode() == Instruction::Sub)
-        if (isa<Constant>(BO->getOperand(0)) ||
-            isa<Constant>(BO->getOperand(1)))
+        if (match(BO, PatternMatch::m_c_BinOp(PatternMatch::m_Value(),
+                                              PatternMatch::m_ImmConstant())))
           return WillInvertAllUses;
 
     // Selects with invertible operands are freely invertible
@@ -263,8 +263,7 @@ public:
   }
 
   /// Given i1 V, can every user of V be freely adapted if V is changed to !V ?
-  /// InstCombine's canonicalizeICmpPredicate() must be kept in sync with this
-  /// fn.
+  /// InstCombine's freelyInvertAllUsersOf() must be kept in sync with this fn.
   ///
   /// See also: isFreeToInvert()
   static bool canFreelyInvertAllUsersOf(Value *V, Value *IgnoredUser) {

@@ -105,7 +105,7 @@ values for thread-safety and concept parsimony reasons. Instead, regular values
 are produced by dedicated operations that have the corresponding semantics:
 [`llvm.mlir.constant`](#llvmmlirconstant-mlirllvmconstantop),
 [`llvm.mlir.undef`](#llvmmlirundef-mlirllvmundefop),
-[`llvm.mlir.null`](#llvmmlirnull-mlirnullop). Note how these operations are
+[`llvm.mlir.null`](#llvmmlirnull-mlirllvmnullop). Note how these operations are
 prefixed with `mlir.` to indicate that they don't belong to LLVM IR but are only
 necessary to model it in MLIR. The values produced by these operations are
 usable just like any other value.
@@ -194,7 +194,7 @@ objects, the creation and manipulation of LLVM dialect types is thread-safe.
 MLIR does not support module-scoped named type declarations, e.g. `%s = type
 {i32, i32}` in LLVM IR. Instead, types must be fully specified at each use,
 except for recursive types where only the first reference to a named type needs
-to be fully specified. MLIR [type aliases](LangRef.md#type-aliases) can be used
+to be fully specified. MLIR [type aliases](../LangRef.md/#type-aliases) can be used
 to achieve more compact syntax.
 
 The general syntax of LLVM dialect types is `!llvm.`, followed by a type kind
@@ -223,6 +223,11 @@ Note that only a subset of types that can be represented by a given class is
 compatible. For example, signed and unsigned integers are not compatible. LLVM
 provides a function, `bool LLVM::isCompatibleType(Type)`, that can be used as a
 compatibility check.
+
+Each LLVM IR type corresponds to *exactly one* MLIR type, either built-in or
+LLVM dialect type. For example, because `i32` is LLVM-compatible, there is no
+`!llvm.i32` type. However, `!llvm.ptr<T>` is defined in the LLVM dialect as
+there is no corresponding built-in type.
 
 ### Additional Simple Types
 
