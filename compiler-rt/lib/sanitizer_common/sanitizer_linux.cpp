@@ -1901,6 +1901,7 @@ SignalContext::WriteFlag SignalContext::GetWriteFlag() const {
   u32 instr = *(u32 *)pc;
   return (instr >> 21) & 1 ? WRITE: READ;
 #elif defined(__riscv)
+  #define REG_PC 64
   unsigned long pc = ucontext->uc_mcontext.__gregs[REG_PC];
   unsigned faulty_instruction = *(uint16_t *)pc;
 
