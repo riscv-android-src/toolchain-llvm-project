@@ -70,9 +70,10 @@ struct FuncOrGblEntryTy {
 };
 
 enum ExecutionModeType {
-  SPMD, // constructors, destructors,
-  // combined constructs (`teams distribute parallel for [simd]`)
-  GENERIC, // everything else
+  SPMD,         // constructors, destructors,
+                // combined constructs (`teams distribute parallel for [simd]`)
+  GENERIC,      // everything else
+  SPMD_GENERIC, // Generic kernel with SPMD execution
   NONE
 };
 
@@ -83,6 +84,7 @@ struct KernelTy {
   // execution mode of kernel
   // 0 - SPMD mode (without master warp)
   // 1 - Generic mode (with master warp)
+  // 2 - SPMD mode execution with Generic mode semantics.
   int8_t ExecutionMode;
 
   /// Maximal number of threads per block for this kernel.
@@ -281,6 +283,7 @@ class DeviceRTLTy {
   // OpenMP environment properties
   int EnvNumTeams;
   int EnvTeamLimit;
+  int EnvTeamThreadLimit;
   // OpenMP requires flags
   int64_t RequiresFlags;
 
@@ -436,7 +439,7 @@ public:
 
   DeviceRTLTy()
       : NumberOfDevices(0), EnvNumTeams(-1), EnvTeamLimit(-1),
-        RequiresFlags(OMP_REQ_UNDEFINED) {
+        EnvTeamThreadLimit(-1), RequiresFlags(OMP_REQ_UNDEFINED) {
 
     DP("Start initializing CUDA\n");
 
@@ -466,6 +469,11 @@ public:
       // OMP_TEAM_LIMIT has been set
       EnvTeamLimit = std::stoi(EnvStr);
       DP("Parsed OMP_TEAM_LIMIT=%d\n", EnvTeamLimit);
+    }
+    if (const char *EnvStr = getenv("OMP_TEAMS_THREAD_LIMIT")) {
+      // OMP_TEAMS_THREAD_LIMIT has been set
+      EnvTeamThreadLimit = std::stoi(EnvStr);
+      DP("Parsed OMP_TEAMS_THREAD_LIMIT=%d\n", EnvTeamThreadLimit);
     }
     if (const char *EnvStr = getenv("OMP_NUM_TEAMS")) {
       // OMP_NUM_TEAMS has been set
@@ -596,14 +604,23 @@ public:
       DP("Error getting max block dimension, use default value %d\n",
          DeviceRTLTy::DefaultNumThreads);
       DeviceData[DeviceId].ThreadsPerBlock = DeviceRTLTy::DefaultNumThreads;
-    } else if (MaxBlockDimX <= DeviceRTLTy::HardThreadLimit) {
+    } else {
       DP("Using %d CUDA threads per block\n", MaxBlockDimX);
       DeviceData[DeviceId].ThreadsPerBlock = MaxBlockDimX;
-    } else {
-      DP("Max CUDA threads per block %d exceeds the hard thread limit %d, "
-         "capping at the hard limit\n",
-         MaxBlockDimX, DeviceRTLTy::HardThreadLimit);
-      DeviceData[DeviceId].ThreadsPerBlock = DeviceRTLTy::HardThreadLimit;
+
+      if (EnvTeamThreadLimit > 0 &&
+          DeviceData[DeviceId].ThreadsPerBlock > EnvTeamThreadLimit) {
+        DP("Max CUDA threads per block %d exceeds the thread limit %d set by "
+           "OMP_TEAMS_THREAD_LIMIT, capping at the limit\n",
+           DeviceData[DeviceId].ThreadsPerBlock, EnvTeamThreadLimit);
+        DeviceData[DeviceId].ThreadsPerBlock = EnvTeamThreadLimit;
+      }
+      if (DeviceData[DeviceId].ThreadsPerBlock > DeviceRTLTy::HardThreadLimit) {
+        DP("Max CUDA threads per block %d exceeds the hard thread limit %d, "
+           "capping at the hard limit\n",
+           DeviceData[DeviceId].ThreadsPerBlock, DeviceRTLTy::HardThreadLimit);
+        DeviceData[DeviceId].ThreadsPerBlock = DeviceRTLTy::HardThreadLimit;
+      }
     }
 
     // Get and set warp size
@@ -781,7 +798,7 @@ public:
           return nullptr;
         }
 
-        if (ExecModeVal < 0 || ExecModeVal > 1) {
+        if (ExecModeVal < 0 || ExecModeVal > 2) {
           DP("Error wrong exec_mode value specified in cubin file: %d\n",
              ExecModeVal);
           return nullptr;
@@ -1030,7 +1047,7 @@ public:
           // will execute one iteration of the loop. round up to the nearest
           // integer
           CudaBlocksPerGrid = ((LoopTripCount - 1) / CudaThreadsPerBlock) + 1;
-        } else {
+        } else if (KernelInfo->ExecutionMode == GENERIC) {
           // If we reach this point, then we have a non-combined construct, i.e.
           // `teams distribute` with a nested `parallel for` and each team is
           // assigned one iteration of the `distribute` loop. E.g.:
@@ -1043,6 +1060,14 @@ public:
           //
           // Threads within a team will execute the iterations of the `parallel`
           // loop.
+          CudaBlocksPerGrid = LoopTripCount;
+        } else if (KernelInfo->ExecutionMode == SPMD_GENERIC) {
+          // If we reach this point, then we are executing a kernel that was
+          // transformed from Generic-mode to SPMD-mode. This kernel has
+          // SPMD-mode execution, but needs its blocks to be scheduled
+          // differently because the current loop trip count only applies to the
+          // `teams distribute` region and will create var too few blocks using
+          // the regular SPMD-mode method.
           CudaBlocksPerGrid = LoopTripCount;
         }
         DP("Using %d teams due to loop trip count %" PRIu32
@@ -1068,7 +1093,9 @@ public:
              ? getOffloadEntry(DeviceId, TgtEntryPtr)->name
              : "(null)",
          CudaBlocksPerGrid, CudaThreadsPerBlock,
-         (KernelInfo->ExecutionMode == SPMD) ? "SPMD" : "Generic");
+         (KernelInfo->ExecutionMode != SPMD 
+             ? (KernelInfo->ExecutionMode == GENERIC ? "Generic" : "SPMD-Generic")
+             : "SPMD"));
 
     CUstream Stream = getStream(DeviceId, AsyncInfo);
     Err = cuLaunchKernel(KernelInfo->Func, CudaBlocksPerGrid, /* gridDimY */ 1,

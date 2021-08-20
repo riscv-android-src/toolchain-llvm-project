@@ -123,6 +123,9 @@ global atomic_int z = ATOMIC_VAR_INIT(99);
 #if cl_khr_subgroup_clustered_reduce != 1
 #error "Incorrectly defined cl_khr_subgroup_clustered_reduce"
 #endif
+#if cl_khr_extended_bit_ops != 1
+#error "Incorrectly defined cl_khr_extended_bit_ops"
+#endif
 
 #else
 
@@ -147,11 +150,20 @@ global atomic_int z = ATOMIC_VAR_INIT(99);
 #ifdef cl_khr_subgroup_clustered_reduce
 #error "Incorrect cl_khr_subgroup_clustered_reduce define"
 #endif
+#ifdef cl_khr_extended_bit_ops
+#error "Incorrect cl_khr_extended_bit_ops define"
+#endif
 
 #endif //(defined(__OPENCL_CPP_VERSION__) || __OPENCL_C_VERSION__ >= 200)
 
 // OpenCL C features.
-#if (defined(__OPENCL_CPP_VERSION__) || __OPENCL_C_VERSION__ == 200)
+#if (__OPENCL_C_VERSION__ == 300)
+
+#if __opencl_c_atomic_scope_all_devices != 1
+#error "Incorrectly defined feature macro __opencl_c_atomic_scope_all_devices"
+#endif
+
+#elif (defined(__OPENCL_CPP_VERSION__) || __OPENCL_C_VERSION__ == 200)
 
 #ifndef  __opencl_c_pipes
 #error "Feature macro __opencl_c_pipes should be defined"

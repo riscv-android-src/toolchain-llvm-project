@@ -4,10 +4,370 @@
 ; RUN: llc -mtriple=riscv64 -mattr=+d,+experimental-zfh,+experimental-v -target-abi=lp64d \
 ; RUN:     -verify-machineinstrs < %s | FileCheck %s
 
+define <vscale x 1 x half> @vsitofp_nxv1i1_nxv1f16(<vscale x 1 x i1> %va) {
+; CHECK-LABEL: vsitofp_nxv1i1_nxv1f16:
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    vsetvli a0, zero, e16, mf4, ta, mu
+; CHECK-NEXT:    vmv.v.i v25, 0
+; CHECK-NEXT:    vmerge.vim v25, v25, -1, v0
+; CHECK-NEXT:    vfcvt.f.x.v v8, v25
+; CHECK-NEXT:    ret
+  %evec = sitofp <vscale x 1 x i1> %va to <vscale x 1 x half>
+  ret <vscale x 1 x half> %evec
+}
+
+define <vscale x 1 x half> @vuitofp_nxv1i1_nxv1f16(<vscale x 1 x i1> %va) {
+; CHECK-LABEL: vuitofp_nxv1i1_nxv1f16:
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    vsetvli a0, zero, e16, mf4, ta, mu
+; CHECK-NEXT:    vmv.v.i v25, 0
+; CHECK-NEXT:    vmerge.vim v25, v25, 1, v0
+; CHECK-NEXT:    vfcvt.f.xu.v v8, v25
+; CHECK-NEXT:    ret
+  %evec = uitofp <vscale x 1 x i1> %va to <vscale x 1 x half>
+  ret <vscale x 1 x half> %evec
+}
+
+define <vscale x 1 x float> @vsitofp_nxv1i1_nxv1f32(<vscale x 1 x i1> %va) {
+; CHECK-LABEL: vsitofp_nxv1i1_nxv1f32:
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    vsetvli a0, zero, e32, mf2, ta, mu
+; CHECK-NEXT:    vmv.v.i v25, 0
+; CHECK-NEXT:    vmerge.vim v25, v25, -1, v0
+; CHECK-NEXT:    vfcvt.f.x.v v8, v25
+; CHECK-NEXT:    ret
+  %evec = sitofp <vscale x 1 x i1> %va to <vscale x 1 x float>
+  ret <vscale x 1 x float> %evec
+}
+
+define <vscale x 1 x float> @vuitofp_nxv1i1_nxv1f32(<vscale x 1 x i1> %va) {
+; CHECK-LABEL: vuitofp_nxv1i1_nxv1f32:
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    vsetvli a0, zero, e32, mf2, ta, mu
+; CHECK-NEXT:    vmv.v.i v25, 0
+; CHECK-NEXT:    vmerge.vim v25, v25, 1, v0
+; CHECK-NEXT:    vfcvt.f.xu.v v8, v25
+; CHECK-NEXT:    ret
+  %evec = uitofp <vscale x 1 x i1> %va to <vscale x 1 x float>
+  ret <vscale x 1 x float> %evec
+}
+
+define <vscale x 1 x double> @vsitofp_nxv1i1_nxv1f64(<vscale x 1 x i1> %va) {
+; CHECK-LABEL: vsitofp_nxv1i1_nxv1f64:
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    vsetvli a0, zero, e64, m1, ta, mu
+; CHECK-NEXT:    vmv.v.i v25, 0
+; CHECK-NEXT:    vmerge.vim v25, v25, -1, v0
+; CHECK-NEXT:    vfcvt.f.x.v v8, v25
+; CHECK-NEXT:    ret
+  %evec = sitofp <vscale x 1 x i1> %va to <vscale x 1 x double>
+  ret <vscale x 1 x double> %evec
+}
+
+define <vscale x 1 x double> @vuitofp_nxv1i1_nxv1f64(<vscale x 1 x i1> %va) {
+; CHECK-LABEL: vuitofp_nxv1i1_nxv1f64:
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    vsetvli a0, zero, e64, m1, ta, mu
+; CHECK-NEXT:    vmv.v.i v25, 0
+; CHECK-NEXT:    vmerge.vim v25, v25, 1, v0
+; CHECK-NEXT:    vfcvt.f.xu.v v8, v25
+; CHECK-NEXT:    ret
+  %evec = uitofp <vscale x 1 x i1> %va to <vscale x 1 x double>
+  ret <vscale x 1 x double> %evec
+}
+
+define <vscale x 2 x half> @vsitofp_nxv2i1_nxv2f16(<vscale x 2 x i1> %va) {
+; CHECK-LABEL: vsitofp_nxv2i1_nxv2f16:
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    vsetvli a0, zero, e16, mf2, ta, mu
+; CHECK-NEXT:    vmv.v.i v25, 0
+; CHECK-NEXT:    vmerge.vim v25, v25, -1, v0
+; CHECK-NEXT:    vfcvt.f.x.v v8, v25
+; CHECK-NEXT:    ret
+  %evec = sitofp <vscale x 2 x i1> %va to <vscale x 2 x half>
+  ret <vscale x 2 x half> %evec
+}
+
+define <vscale x 2 x half> @vuitofp_nxv2i1_nxv2f16(<vscale x 2 x i1> %va) {
+; CHECK-LABEL: vuitofp_nxv2i1_nxv2f16:
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    vsetvli a0, zero, e16, mf2, ta, mu
+; CHECK-NEXT:    vmv.v.i v25, 0
+; CHECK-NEXT:    vmerge.vim v25, v25, 1, v0
+; CHECK-NEXT:    vfcvt.f.xu.v v8, v25
+; CHECK-NEXT:    ret
+  %evec = uitofp <vscale x 2 x i1> %va to <vscale x 2 x half>
+  ret <vscale x 2 x half> %evec
+}
+
+define <vscale x 2 x float> @vsitofp_nxv2i1_nxv2f32(<vscale x 2 x i1> %va) {
+; CHECK-LABEL: vsitofp_nxv2i1_nxv2f32:
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    vsetvli a0, zero, e32, m1, ta, mu
+; CHECK-NEXT:    vmv.v.i v25, 0
+; CHECK-NEXT:    vmerge.vim v25, v25, -1, v0
+; CHECK-NEXT:    vfcvt.f.x.v v8, v25
+; CHECK-NEXT:    ret
+  %evec = sitofp <vscale x 2 x i1> %va to <vscale x 2 x float>
+  ret <vscale x 2 x float> %evec
+}
+
+define <vscale x 2 x float> @vuitofp_nxv2i1_nxv2f32(<vscale x 2 x i1> %va) {
+; CHECK-LABEL: vuitofp_nxv2i1_nxv2f32:
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    vsetvli a0, zero, e32, m1, ta, mu
+; CHECK-NEXT:    vmv.v.i v25, 0
+; CHECK-NEXT:    vmerge.vim v25, v25, 1, v0
+; CHECK-NEXT:    vfcvt.f.xu.v v8, v25
+; CHECK-NEXT:    ret
+  %evec = uitofp <vscale x 2 x i1> %va to <vscale x 2 x float>
+  ret <vscale x 2 x float> %evec
+}
+
+define <vscale x 2 x double> @vsitofp_nxv2i1_nxv2f64(<vscale x 2 x i1> %va) {
+; CHECK-LABEL: vsitofp_nxv2i1_nxv2f64:
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    vsetvli a0, zero, e64, m2, ta, mu
+; CHECK-NEXT:    vmv.v.i v26, 0
+; CHECK-NEXT:    vmerge.vim v26, v26, -1, v0
+; CHECK-NEXT:    vfcvt.f.x.v v8, v26
+; CHECK-NEXT:    ret
+  %evec = sitofp <vscale x 2 x i1> %va to <vscale x 2 x double>
+  ret <vscale x 2 x double> %evec
+}
+
+define <vscale x 2 x double> @vuitofp_nxv2i1_nxv2f64(<vscale x 2 x i1> %va) {
+; CHECK-LABEL: vuitofp_nxv2i1_nxv2f64:
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    vsetvli a0, zero, e64, m2, ta, mu
+; CHECK-NEXT:    vmv.v.i v26, 0
+; CHECK-NEXT:    vmerge.vim v26, v26, 1, v0
+; CHECK-NEXT:    vfcvt.f.xu.v v8, v26
+; CHECK-NEXT:    ret
+  %evec = uitofp <vscale x 2 x i1> %va to <vscale x 2 x double>
+  ret <vscale x 2 x double> %evec
+}
+
+define <vscale x 4 x half> @vsitofp_nxv4i1_nxv4f16(<vscale x 4 x i1> %va) {
+; CHECK-LABEL: vsitofp_nxv4i1_nxv4f16:
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    vsetvli a0, zero, e16, m1, ta, mu
+; CHECK-NEXT:    vmv.v.i v25, 0
+; CHECK-NEXT:    vmerge.vim v25, v25, -1, v0
+; CHECK-NEXT:    vfcvt.f.x.v v8, v25
+; CHECK-NEXT:    ret
+  %evec = sitofp <vscale x 4 x i1> %va to <vscale x 4 x half>
+  ret <vscale x 4 x half> %evec
+}
+
+define <vscale x 4 x half> @vuitofp_nxv4i1_nxv4f16(<vscale x 4 x i1> %va) {
+; CHECK-LABEL: vuitofp_nxv4i1_nxv4f16:
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    vsetvli a0, zero, e16, m1, ta, mu
+; CHECK-NEXT:    vmv.v.i v25, 0
+; CHECK-NEXT:    vmerge.vim v25, v25, 1, v0
+; CHECK-NEXT:    vfcvt.f.xu.v v8, v25
+; CHECK-NEXT:    ret
+  %evec = uitofp <vscale x 4 x i1> %va to <vscale x 4 x half>
+  ret <vscale x 4 x half> %evec
+}
+
+define <vscale x 4 x float> @vsitofp_nxv4i1_nxv4f32(<vscale x 4 x i1> %va) {
+; CHECK-LABEL: vsitofp_nxv4i1_nxv4f32:
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    vsetvli a0, zero, e32, m2, ta, mu
+; CHECK-NEXT:    vmv.v.i v26, 0
+; CHECK-NEXT:    vmerge.vim v26, v26, -1, v0
+; CHECK-NEXT:    vfcvt.f.x.v v8, v26
+; CHECK-NEXT:    ret
+  %evec = sitofp <vscale x 4 x i1> %va to <vscale x 4 x float>
+  ret <vscale x 4 x float> %evec
+}
+
+define <vscale x 4 x float> @vuitofp_nxv4i1_nxv4f32(<vscale x 4 x i1> %va) {
+; CHECK-LABEL: vuitofp_nxv4i1_nxv4f32:
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    vsetvli a0, zero, e32, m2, ta, mu
+; CHECK-NEXT:    vmv.v.i v26, 0
+; CHECK-NEXT:    vmerge.vim v26, v26, 1, v0
+; CHECK-NEXT:    vfcvt.f.xu.v v8, v26
+; CHECK-NEXT:    ret
+  %evec = uitofp <vscale x 4 x i1> %va to <vscale x 4 x float>
+  ret <vscale x 4 x float> %evec
+}
+
+define <vscale x 4 x double> @vsitofp_nxv4i1_nxv4f64(<vscale x 4 x i1> %va) {
+; CHECK-LABEL: vsitofp_nxv4i1_nxv4f64:
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    vsetvli a0, zero, e64, m4, ta, mu
+; CHECK-NEXT:    vmv.v.i v28, 0
+; CHECK-NEXT:    vmerge.vim v28, v28, -1, v0
+; CHECK-NEXT:    vfcvt.f.x.v v8, v28
+; CHECK-NEXT:    ret
+  %evec = sitofp <vscale x 4 x i1> %va to <vscale x 4 x double>
+  ret <vscale x 4 x double> %evec
+}
+
+define <vscale x 4 x double> @vuitofp_nxv4i1_nxv4f64(<vscale x 4 x i1> %va) {
+; CHECK-LABEL: vuitofp_nxv4i1_nxv4f64:
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    vsetvli a0, zero, e64, m4, ta, mu
+; CHECK-NEXT:    vmv.v.i v28, 0
+; CHECK-NEXT:    vmerge.vim v28, v28, 1, v0
+; CHECK-NEXT:    vfcvt.f.xu.v v8, v28
+; CHECK-NEXT:    ret
+  %evec = uitofp <vscale x 4 x i1> %va to <vscale x 4 x double>
+  ret <vscale x 4 x double> %evec
+}
+
+define <vscale x 8 x half> @vsitofp_nxv8i1_nxv8f16(<vscale x 8 x i1> %va) {
+; CHECK-LABEL: vsitofp_nxv8i1_nxv8f16:
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    vsetvli a0, zero, e16, m2, ta, mu
+; CHECK-NEXT:    vmv.v.i v26, 0
+; CHECK-NEXT:    vmerge.vim v26, v26, -1, v0
+; CHECK-NEXT:    vfcvt.f.x.v v8, v26
+; CHECK-NEXT:    ret
+  %evec = sitofp <vscale x 8 x i1> %va to <vscale x 8 x half>
+  ret <vscale x 8 x half> %evec
+}
+
+define <vscale x 8 x half> @vuitofp_nxv8i1_nxv8f16(<vscale x 8 x i1> %va) {
+; CHECK-LABEL: vuitofp_nxv8i1_nxv8f16:
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    vsetvli a0, zero, e16, m2, ta, mu
+; CHECK-NEXT:    vmv.v.i v26, 0
+; CHECK-NEXT:    vmerge.vim v26, v26, 1, v0
+; CHECK-NEXT:    vfcvt.f.xu.v v8, v26
+; CHECK-NEXT:    ret
+  %evec = uitofp <vscale x 8 x i1> %va to <vscale x 8 x half>
+  ret <vscale x 8 x half> %evec
+}
+
+define <vscale x 8 x float> @vsitofp_nxv8i1_nxv8f32(<vscale x 8 x i1> %va) {
+; CHECK-LABEL: vsitofp_nxv8i1_nxv8f32:
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    vsetvli a0, zero, e32, m4, ta, mu
+; CHECK-NEXT:    vmv.v.i v28, 0
+; CHECK-NEXT:    vmerge.vim v28, v28, -1, v0
+; CHECK-NEXT:    vfcvt.f.x.v v8, v28
+; CHECK-NEXT:    ret
+  %evec = sitofp <vscale x 8 x i1> %va to <vscale x 8 x float>
+  ret <vscale x 8 x float> %evec
+}
+
+define <vscale x 8 x float> @vuitofp_nxv8i1_nxv8f32(<vscale x 8 x i1> %va) {
+; CHECK-LABEL: vuitofp_nxv8i1_nxv8f32:
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    vsetvli a0, zero, e32, m4, ta, mu
+; CHECK-NEXT:    vmv.v.i v28, 0
+; CHECK-NEXT:    vmerge.vim v28, v28, 1, v0
+; CHECK-NEXT:    vfcvt.f.xu.v v8, v28
+; CHECK-NEXT:    ret
+  %evec = uitofp <vscale x 8 x i1> %va to <vscale x 8 x float>
+  ret <vscale x 8 x float> %evec
+}
+
+define <vscale x 8 x double> @vsitofp_nxv8i1_nxv8f64(<vscale x 8 x i1> %va) {
+; CHECK-LABEL: vsitofp_nxv8i1_nxv8f64:
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    vsetvli a0, zero, e64, m8, ta, mu
+; CHECK-NEXT:    vmv.v.i v8, 0
+; CHECK-NEXT:    vmerge.vim v8, v8, -1, v0
+; CHECK-NEXT:    vfcvt.f.x.v v8, v8
+; CHECK-NEXT:    ret
+  %evec = sitofp <vscale x 8 x i1> %va to <vscale x 8 x double>
+  ret <vscale x 8 x double> %evec
+}
+
+define <vscale x 8 x double> @vuitofp_nxv8i1_nxv8f64(<vscale x 8 x i1> %va) {
+; CHECK-LABEL: vuitofp_nxv8i1_nxv8f64:
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    vsetvli a0, zero, e64, m8, ta, mu
+; CHECK-NEXT:    vmv.v.i v8, 0
+; CHECK-NEXT:    vmerge.vim v8, v8, 1, v0
+; CHECK-NEXT:    vfcvt.f.xu.v v8, v8
+; CHECK-NEXT:    ret
+  %evec = uitofp <vscale x 8 x i1> %va to <vscale x 8 x double>
+  ret <vscale x 8 x double> %evec
+}
+
+define <vscale x 16 x half> @vsitofp_nxv16i1_nxv16f16(<vscale x 16 x i1> %va) {
+; CHECK-LABEL: vsitofp_nxv16i1_nxv16f16:
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    vsetvli a0, zero, e16, m4, ta, mu
+; CHECK-NEXT:    vmv.v.i v28, 0
+; CHECK-NEXT:    vmerge.vim v28, v28, -1, v0
+; CHECK-NEXT:    vfcvt.f.x.v v8, v28
+; CHECK-NEXT:    ret
+  %evec = sitofp <vscale x 16 x i1> %va to <vscale x 16 x half>
+  ret <vscale x 16 x half> %evec
+}
+
+define <vscale x 16 x half> @vuitofp_nxv16i1_nxv16f16(<vscale x 16 x i1> %va) {
+; CHECK-LABEL: vuitofp_nxv16i1_nxv16f16:
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    vsetvli a0, zero, e16, m4, ta, mu
+; CHECK-NEXT:    vmv.v.i v28, 0
+; CHECK-NEXT:    vmerge.vim v28, v28, 1, v0
+; CHECK-NEXT:    vfcvt.f.xu.v v8, v28
+; CHECK-NEXT:    ret
+  %evec = uitofp <vscale x 16 x i1> %va to <vscale x 16 x half>
+  ret <vscale x 16 x half> %evec
+}
+
+define <vscale x 16 x float> @vsitofp_nxv16i1_nxv16f32(<vscale x 16 x i1> %va) {
+; CHECK-LABEL: vsitofp_nxv16i1_nxv16f32:
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    vsetvli a0, zero, e32, m8, ta, mu
+; CHECK-NEXT:    vmv.v.i v8, 0
+; CHECK-NEXT:    vmerge.vim v8, v8, -1, v0
+; CHECK-NEXT:    vfcvt.f.x.v v8, v8
+; CHECK-NEXT:    ret
+  %evec = sitofp <vscale x 16 x i1> %va to <vscale x 16 x float>
+  ret <vscale x 16 x float> %evec
+}
+
+define <vscale x 16 x float> @vuitofp_nxv16i1_nxv16f32(<vscale x 16 x i1> %va) {
+; CHECK-LABEL: vuitofp_nxv16i1_nxv16f32:
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    vsetvli a0, zero, e32, m8, ta, mu
+; CHECK-NEXT:    vmv.v.i v8, 0
+; CHECK-NEXT:    vmerge.vim v8, v8, 1, v0
+; CHECK-NEXT:    vfcvt.f.xu.v v8, v8
+; CHECK-NEXT:    ret
+  %evec = uitofp <vscale x 16 x i1> %va to <vscale x 16 x float>
+  ret <vscale x 16 x float> %evec
+}
+
+define <vscale x 32 x half> @vsitofp_nxv32i1_nxv32f16(<vscale x 32 x i1> %va) {
+; CHECK-LABEL: vsitofp_nxv32i1_nxv32f16:
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    vsetvli a0, zero, e16, m8, ta, mu
+; CHECK-NEXT:    vmv.v.i v8, 0
+; CHECK-NEXT:    vmerge.vim v8, v8, -1, v0
+; CHECK-NEXT:    vfcvt.f.x.v v8, v8
+; CHECK-NEXT:    ret
+  %evec = sitofp <vscale x 32 x i1> %va to <vscale x 32 x half>
+  ret <vscale x 32 x half> %evec
+}
+
+define <vscale x 32 x half> @vuitofp_nxv32i1_nxv32f16(<vscale x 32 x i1> %va) {
+; CHECK-LABEL: vuitofp_nxv32i1_nxv32f16:
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    vsetvli a0, zero, e16, m8, ta, mu
+; CHECK-NEXT:    vmv.v.i v8, 0
+; CHECK-NEXT:    vmerge.vim v8, v8, 1, v0
+; CHECK-NEXT:    vfcvt.f.xu.v v8, v8
+; CHECK-NEXT:    ret
+  %evec = uitofp <vscale x 32 x i1> %va to <vscale x 32 x half>
+  ret <vscale x 32 x half> %evec
+}
+
 define <vscale x 1 x half> @vsitofp_nxv1i8_nxv1f16(<vscale x 1 x i8> %va) {
 ; CHECK-LABEL: vsitofp_nxv1i8_nxv1f16:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e8,mf8,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e8, mf8, ta, mu
 ; CHECK-NEXT:    vfwcvt.f.x.v v25, v8
 ; CHECK-NEXT:    vmv1r.v v8, v25
 ; CHECK-NEXT:    ret
@@ -18,7 +378,7 @@ define <vscale x 1 x half> @vsitofp_nxv1i8_nxv1f16(<vscale x 1 x i8> %va) {
 define <vscale x 1 x half> @vuitofp_nxv1i8_nxv1f16(<vscale x 1 x i8> %va) {
 ; CHECK-LABEL: vuitofp_nxv1i8_nxv1f16:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e8,mf8,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e8, mf8, ta, mu
 ; CHECK-NEXT:    vfwcvt.f.xu.v v25, v8
 ; CHECK-NEXT:    vmv1r.v v8, v25
 ; CHECK-NEXT:    ret
@@ -29,7 +389,7 @@ define <vscale x 1 x half> @vuitofp_nxv1i8_nxv1f16(<vscale x 1 x i8> %va) {
 define <vscale x 1 x float> @vsitofp_nxv1i8_nxv1f32(<vscale x 1 x i8> %va) {
 ; CHECK-LABEL: vsitofp_nxv1i8_nxv1f32:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e32,mf2,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e32, mf2, ta, mu
 ; CHECK-NEXT:    vsext.vf4 v25, v8
 ; CHECK-NEXT:    vfcvt.f.x.v v8, v25
 ; CHECK-NEXT:    ret
@@ -40,7 +400,7 @@ define <vscale x 1 x float> @vsitofp_nxv1i8_nxv1f32(<vscale x 1 x i8> %va) {
 define <vscale x 1 x float> @vuitofp_nxv1i8_nxv1f32(<vscale x 1 x i8> %va) {
 ; CHECK-LABEL: vuitofp_nxv1i8_nxv1f32:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e32,mf2,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e32, mf2, ta, mu
 ; CHECK-NEXT:    vzext.vf4 v25, v8
 ; CHECK-NEXT:    vfcvt.f.xu.v v8, v25
 ; CHECK-NEXT:    ret
@@ -51,7 +411,7 @@ define <vscale x 1 x float> @vuitofp_nxv1i8_nxv1f32(<vscale x 1 x i8> %va) {
 define <vscale x 1 x double> @vsitofp_nxv1i8_nxv1f64(<vscale x 1 x i8> %va) {
 ; CHECK-LABEL: vsitofp_nxv1i8_nxv1f64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e64,m1,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e64, m1, ta, mu
 ; CHECK-NEXT:    vsext.vf8 v25, v8
 ; CHECK-NEXT:    vfcvt.f.x.v v8, v25
 ; CHECK-NEXT:    ret
@@ -62,7 +422,7 @@ define <vscale x 1 x double> @vsitofp_nxv1i8_nxv1f64(<vscale x 1 x i8> %va) {
 define <vscale x 1 x double> @vuitofp_nxv1i8_nxv1f64(<vscale x 1 x i8> %va) {
 ; CHECK-LABEL: vuitofp_nxv1i8_nxv1f64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e64,m1,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e64, m1, ta, mu
 ; CHECK-NEXT:    vzext.vf8 v25, v8
 ; CHECK-NEXT:    vfcvt.f.xu.v v8, v25
 ; CHECK-NEXT:    ret
@@ -73,7 +433,7 @@ define <vscale x 1 x double> @vuitofp_nxv1i8_nxv1f64(<vscale x 1 x i8> %va) {
 define <vscale x 2 x half> @vsitofp_nxv2i8_nxv2f16(<vscale x 2 x i8> %va) {
 ; CHECK-LABEL: vsitofp_nxv2i8_nxv2f16:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e8,mf4,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e8, mf4, ta, mu
 ; CHECK-NEXT:    vfwcvt.f.x.v v25, v8
 ; CHECK-NEXT:    vmv1r.v v8, v25
 ; CHECK-NEXT:    ret
@@ -84,7 +444,7 @@ define <vscale x 2 x half> @vsitofp_nxv2i8_nxv2f16(<vscale x 2 x i8> %va) {
 define <vscale x 2 x half> @vuitofp_nxv2i8_nxv2f16(<vscale x 2 x i8> %va) {
 ; CHECK-LABEL: vuitofp_nxv2i8_nxv2f16:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e8,mf4,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e8, mf4, ta, mu
 ; CHECK-NEXT:    vfwcvt.f.xu.v v25, v8
 ; CHECK-NEXT:    vmv1r.v v8, v25
 ; CHECK-NEXT:    ret
@@ -95,7 +455,7 @@ define <vscale x 2 x half> @vuitofp_nxv2i8_nxv2f16(<vscale x 2 x i8> %va) {
 define <vscale x 2 x float> @vsitofp_nxv2i8_nxv2f32(<vscale x 2 x i8> %va) {
 ; CHECK-LABEL: vsitofp_nxv2i8_nxv2f32:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e32,m1,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e32, m1, ta, mu
 ; CHECK-NEXT:    vsext.vf4 v25, v8
 ; CHECK-NEXT:    vfcvt.f.x.v v8, v25
 ; CHECK-NEXT:    ret
@@ -106,7 +466,7 @@ define <vscale x 2 x float> @vsitofp_nxv2i8_nxv2f32(<vscale x 2 x i8> %va) {
 define <vscale x 2 x float> @vuitofp_nxv2i8_nxv2f32(<vscale x 2 x i8> %va) {
 ; CHECK-LABEL: vuitofp_nxv2i8_nxv2f32:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e32,m1,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e32, m1, ta, mu
 ; CHECK-NEXT:    vzext.vf4 v25, v8
 ; CHECK-NEXT:    vfcvt.f.xu.v v8, v25
 ; CHECK-NEXT:    ret
@@ -117,7 +477,7 @@ define <vscale x 2 x float> @vuitofp_nxv2i8_nxv2f32(<vscale x 2 x i8> %va) {
 define <vscale x 2 x double> @vsitofp_nxv2i8_nxv2f64(<vscale x 2 x i8> %va) {
 ; CHECK-LABEL: vsitofp_nxv2i8_nxv2f64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e64,m2,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e64, m2, ta, mu
 ; CHECK-NEXT:    vsext.vf8 v26, v8
 ; CHECK-NEXT:    vfcvt.f.x.v v8, v26
 ; CHECK-NEXT:    ret
@@ -128,7 +488,7 @@ define <vscale x 2 x double> @vsitofp_nxv2i8_nxv2f64(<vscale x 2 x i8> %va) {
 define <vscale x 2 x double> @vuitofp_nxv2i8_nxv2f64(<vscale x 2 x i8> %va) {
 ; CHECK-LABEL: vuitofp_nxv2i8_nxv2f64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e64,m2,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e64, m2, ta, mu
 ; CHECK-NEXT:    vzext.vf8 v26, v8
 ; CHECK-NEXT:    vfcvt.f.xu.v v8, v26
 ; CHECK-NEXT:    ret
@@ -139,7 +499,7 @@ define <vscale x 2 x double> @vuitofp_nxv2i8_nxv2f64(<vscale x 2 x i8> %va) {
 define <vscale x 4 x half> @vsitofp_nxv4i8_nxv4f16(<vscale x 4 x i8> %va) {
 ; CHECK-LABEL: vsitofp_nxv4i8_nxv4f16:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e8,mf2,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e8, mf2, ta, mu
 ; CHECK-NEXT:    vfwcvt.f.x.v v25, v8
 ; CHECK-NEXT:    vmv1r.v v8, v25
 ; CHECK-NEXT:    ret
@@ -150,7 +510,7 @@ define <vscale x 4 x half> @vsitofp_nxv4i8_nxv4f16(<vscale x 4 x i8> %va) {
 define <vscale x 4 x half> @vuitofp_nxv4i8_nxv4f16(<vscale x 4 x i8> %va) {
 ; CHECK-LABEL: vuitofp_nxv4i8_nxv4f16:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e8,mf2,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e8, mf2, ta, mu
 ; CHECK-NEXT:    vfwcvt.f.xu.v v25, v8
 ; CHECK-NEXT:    vmv1r.v v8, v25
 ; CHECK-NEXT:    ret
@@ -161,7 +521,7 @@ define <vscale x 4 x half> @vuitofp_nxv4i8_nxv4f16(<vscale x 4 x i8> %va) {
 define <vscale x 4 x float> @vsitofp_nxv4i8_nxv4f32(<vscale x 4 x i8> %va) {
 ; CHECK-LABEL: vsitofp_nxv4i8_nxv4f32:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e32,m2,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e32, m2, ta, mu
 ; CHECK-NEXT:    vsext.vf4 v26, v8
 ; CHECK-NEXT:    vfcvt.f.x.v v8, v26
 ; CHECK-NEXT:    ret
@@ -172,7 +532,7 @@ define <vscale x 4 x float> @vsitofp_nxv4i8_nxv4f32(<vscale x 4 x i8> %va) {
 define <vscale x 4 x float> @vuitofp_nxv4i8_nxv4f32(<vscale x 4 x i8> %va) {
 ; CHECK-LABEL: vuitofp_nxv4i8_nxv4f32:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e32,m2,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e32, m2, ta, mu
 ; CHECK-NEXT:    vzext.vf4 v26, v8
 ; CHECK-NEXT:    vfcvt.f.xu.v v8, v26
 ; CHECK-NEXT:    ret
@@ -183,7 +543,7 @@ define <vscale x 4 x float> @vuitofp_nxv4i8_nxv4f32(<vscale x 4 x i8> %va) {
 define <vscale x 4 x double> @vsitofp_nxv4i8_nxv4f64(<vscale x 4 x i8> %va) {
 ; CHECK-LABEL: vsitofp_nxv4i8_nxv4f64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e64,m4,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e64, m4, ta, mu
 ; CHECK-NEXT:    vsext.vf8 v28, v8
 ; CHECK-NEXT:    vfcvt.f.x.v v8, v28
 ; CHECK-NEXT:    ret
@@ -194,7 +554,7 @@ define <vscale x 4 x double> @vsitofp_nxv4i8_nxv4f64(<vscale x 4 x i8> %va) {
 define <vscale x 4 x double> @vuitofp_nxv4i8_nxv4f64(<vscale x 4 x i8> %va) {
 ; CHECK-LABEL: vuitofp_nxv4i8_nxv4f64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e64,m4,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e64, m4, ta, mu
 ; CHECK-NEXT:    vzext.vf8 v28, v8
 ; CHECK-NEXT:    vfcvt.f.xu.v v8, v28
 ; CHECK-NEXT:    ret
@@ -205,7 +565,7 @@ define <vscale x 4 x double> @vuitofp_nxv4i8_nxv4f64(<vscale x 4 x i8> %va) {
 define <vscale x 8 x half> @vsitofp_nxv8i8_nxv8f16(<vscale x 8 x i8> %va) {
 ; CHECK-LABEL: vsitofp_nxv8i8_nxv8f16:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e8,m1,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e8, m1, ta, mu
 ; CHECK-NEXT:    vfwcvt.f.x.v v26, v8
 ; CHECK-NEXT:    vmv2r.v v8, v26
 ; CHECK-NEXT:    ret
@@ -216,7 +576,7 @@ define <vscale x 8 x half> @vsitofp_nxv8i8_nxv8f16(<vscale x 8 x i8> %va) {
 define <vscale x 8 x half> @vuitofp_nxv8i8_nxv8f16(<vscale x 8 x i8> %va) {
 ; CHECK-LABEL: vuitofp_nxv8i8_nxv8f16:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e8,m1,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e8, m1, ta, mu
 ; CHECK-NEXT:    vfwcvt.f.xu.v v26, v8
 ; CHECK-NEXT:    vmv2r.v v8, v26
 ; CHECK-NEXT:    ret
@@ -227,7 +587,7 @@ define <vscale x 8 x half> @vuitofp_nxv8i8_nxv8f16(<vscale x 8 x i8> %va) {
 define <vscale x 8 x float> @vsitofp_nxv8i8_nxv8f32(<vscale x 8 x i8> %va) {
 ; CHECK-LABEL: vsitofp_nxv8i8_nxv8f32:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e32,m4,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e32, m4, ta, mu
 ; CHECK-NEXT:    vsext.vf4 v28, v8
 ; CHECK-NEXT:    vfcvt.f.x.v v8, v28
 ; CHECK-NEXT:    ret
@@ -238,7 +598,7 @@ define <vscale x 8 x float> @vsitofp_nxv8i8_nxv8f32(<vscale x 8 x i8> %va) {
 define <vscale x 8 x float> @vuitofp_nxv8i8_nxv8f32(<vscale x 8 x i8> %va) {
 ; CHECK-LABEL: vuitofp_nxv8i8_nxv8f32:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e32,m4,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e32, m4, ta, mu
 ; CHECK-NEXT:    vzext.vf4 v28, v8
 ; CHECK-NEXT:    vfcvt.f.xu.v v8, v28
 ; CHECK-NEXT:    ret
@@ -249,7 +609,7 @@ define <vscale x 8 x float> @vuitofp_nxv8i8_nxv8f32(<vscale x 8 x i8> %va) {
 define <vscale x 8 x double> @vsitofp_nxv8i8_nxv8f64(<vscale x 8 x i8> %va) {
 ; CHECK-LABEL: vsitofp_nxv8i8_nxv8f64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e64,m8,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e64, m8, ta, mu
 ; CHECK-NEXT:    vsext.vf8 v16, v8
 ; CHECK-NEXT:    vfcvt.f.x.v v8, v16
 ; CHECK-NEXT:    ret
@@ -260,7 +620,7 @@ define <vscale x 8 x double> @vsitofp_nxv8i8_nxv8f64(<vscale x 8 x i8> %va) {
 define <vscale x 8 x double> @vuitofp_nxv8i8_nxv8f64(<vscale x 8 x i8> %va) {
 ; CHECK-LABEL: vuitofp_nxv8i8_nxv8f64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e64,m8,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e64, m8, ta, mu
 ; CHECK-NEXT:    vzext.vf8 v16, v8
 ; CHECK-NEXT:    vfcvt.f.xu.v v8, v16
 ; CHECK-NEXT:    ret
@@ -271,7 +631,7 @@ define <vscale x 8 x double> @vuitofp_nxv8i8_nxv8f64(<vscale x 8 x i8> %va) {
 define <vscale x 16 x half> @vsitofp_nxv16i8_nxv16f16(<vscale x 16 x i8> %va) {
 ; CHECK-LABEL: vsitofp_nxv16i8_nxv16f16:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e8,m2,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e8, m2, ta, mu
 ; CHECK-NEXT:    vfwcvt.f.x.v v28, v8
 ; CHECK-NEXT:    vmv4r.v v8, v28
 ; CHECK-NEXT:    ret
@@ -282,7 +642,7 @@ define <vscale x 16 x half> @vsitofp_nxv16i8_nxv16f16(<vscale x 16 x i8> %va) {
 define <vscale x 16 x half> @vuitofp_nxv16i8_nxv16f16(<vscale x 16 x i8> %va) {
 ; CHECK-LABEL: vuitofp_nxv16i8_nxv16f16:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e8,m2,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e8, m2, ta, mu
 ; CHECK-NEXT:    vfwcvt.f.xu.v v28, v8
 ; CHECK-NEXT:    vmv4r.v v8, v28
 ; CHECK-NEXT:    ret
@@ -293,7 +653,7 @@ define <vscale x 16 x half> @vuitofp_nxv16i8_nxv16f16(<vscale x 16 x i8> %va) {
 define <vscale x 16 x float> @vsitofp_nxv16i8_nxv16f32(<vscale x 16 x i8> %va) {
 ; CHECK-LABEL: vsitofp_nxv16i8_nxv16f32:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e32,m8,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e32, m8, ta, mu
 ; CHECK-NEXT:    vsext.vf4 v16, v8
 ; CHECK-NEXT:    vfcvt.f.x.v v8, v16
 ; CHECK-NEXT:    ret
@@ -304,7 +664,7 @@ define <vscale x 16 x float> @vsitofp_nxv16i8_nxv16f32(<vscale x 16 x i8> %va) {
 define <vscale x 16 x float> @vuitofp_nxv16i8_nxv16f32(<vscale x 16 x i8> %va) {
 ; CHECK-LABEL: vuitofp_nxv16i8_nxv16f32:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e32,m8,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e32, m8, ta, mu
 ; CHECK-NEXT:    vzext.vf4 v16, v8
 ; CHECK-NEXT:    vfcvt.f.xu.v v8, v16
 ; CHECK-NEXT:    ret
@@ -315,7 +675,7 @@ define <vscale x 16 x float> @vuitofp_nxv16i8_nxv16f32(<vscale x 16 x i8> %va) {
 define <vscale x 32 x half> @vsitofp_nxv32i8_nxv32f16(<vscale x 32 x i8> %va) {
 ; CHECK-LABEL: vsitofp_nxv32i8_nxv32f16:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e8,m4,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e8, m4, ta, mu
 ; CHECK-NEXT:    vfwcvt.f.x.v v16, v8
 ; CHECK-NEXT:    vmv8r.v v8, v16
 ; CHECK-NEXT:    ret
@@ -326,7 +686,7 @@ define <vscale x 32 x half> @vsitofp_nxv32i8_nxv32f16(<vscale x 32 x i8> %va) {
 define <vscale x 32 x half> @vuitofp_nxv32i8_nxv32f16(<vscale x 32 x i8> %va) {
 ; CHECK-LABEL: vuitofp_nxv32i8_nxv32f16:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e8,m4,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e8, m4, ta, mu
 ; CHECK-NEXT:    vfwcvt.f.xu.v v16, v8
 ; CHECK-NEXT:    vmv8r.v v8, v16
 ; CHECK-NEXT:    ret
@@ -337,7 +697,7 @@ define <vscale x 32 x half> @vuitofp_nxv32i8_nxv32f16(<vscale x 32 x i8> %va) {
 define <vscale x 1 x half> @vsitofp_nxv1i16_nxv1f16(<vscale x 1 x i16> %va) {
 ; CHECK-LABEL: vsitofp_nxv1i16_nxv1f16:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e16,mf4,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e16, mf4, ta, mu
 ; CHECK-NEXT:    vfcvt.f.x.v v8, v8
 ; CHECK-NEXT:    ret
   %evec = sitofp <vscale x 1 x i16> %va to <vscale x 1 x half>
@@ -347,7 +707,7 @@ define <vscale x 1 x half> @vsitofp_nxv1i16_nxv1f16(<vscale x 1 x i16> %va) {
 define <vscale x 1 x half> @vuitofp_nxv1i16_nxv1f16(<vscale x 1 x i16> %va) {
 ; CHECK-LABEL: vuitofp_nxv1i16_nxv1f16:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e16,mf4,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e16, mf4, ta, mu
 ; CHECK-NEXT:    vfcvt.f.xu.v v8, v8
 ; CHECK-NEXT:    ret
   %evec = uitofp <vscale x 1 x i16> %va to <vscale x 1 x half>
@@ -357,7 +717,7 @@ define <vscale x 1 x half> @vuitofp_nxv1i16_nxv1f16(<vscale x 1 x i16> %va) {
 define <vscale x 1 x float> @vsitofp_nxv1i16_nxv1f32(<vscale x 1 x i16> %va) {
 ; CHECK-LABEL: vsitofp_nxv1i16_nxv1f32:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e16,mf4,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e16, mf4, ta, mu
 ; CHECK-NEXT:    vfwcvt.f.x.v v25, v8
 ; CHECK-NEXT:    vmv1r.v v8, v25
 ; CHECK-NEXT:    ret
@@ -368,7 +728,7 @@ define <vscale x 1 x float> @vsitofp_nxv1i16_nxv1f32(<vscale x 1 x i16> %va) {
 define <vscale x 1 x float> @vuitofp_nxv1i16_nxv1f32(<vscale x 1 x i16> %va) {
 ; CHECK-LABEL: vuitofp_nxv1i16_nxv1f32:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e16,mf4,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e16, mf4, ta, mu
 ; CHECK-NEXT:    vfwcvt.f.xu.v v25, v8
 ; CHECK-NEXT:    vmv1r.v v8, v25
 ; CHECK-NEXT:    ret
@@ -379,7 +739,7 @@ define <vscale x 1 x float> @vuitofp_nxv1i16_nxv1f32(<vscale x 1 x i16> %va) {
 define <vscale x 1 x double> @vsitofp_nxv1i16_nxv1f64(<vscale x 1 x i16> %va) {
 ; CHECK-LABEL: vsitofp_nxv1i16_nxv1f64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e64,m1,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e64, m1, ta, mu
 ; CHECK-NEXT:    vsext.vf4 v25, v8
 ; CHECK-NEXT:    vfcvt.f.x.v v8, v25
 ; CHECK-NEXT:    ret
@@ -390,7 +750,7 @@ define <vscale x 1 x double> @vsitofp_nxv1i16_nxv1f64(<vscale x 1 x i16> %va) {
 define <vscale x 1 x double> @vuitofp_nxv1i16_nxv1f64(<vscale x 1 x i16> %va) {
 ; CHECK-LABEL: vuitofp_nxv1i16_nxv1f64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e64,m1,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e64, m1, ta, mu
 ; CHECK-NEXT:    vzext.vf4 v25, v8
 ; CHECK-NEXT:    vfcvt.f.xu.v v8, v25
 ; CHECK-NEXT:    ret
@@ -401,7 +761,7 @@ define <vscale x 1 x double> @vuitofp_nxv1i16_nxv1f64(<vscale x 1 x i16> %va) {
 define <vscale x 2 x half> @vsitofp_nxv2i16_nxv2f16(<vscale x 2 x i16> %va) {
 ; CHECK-LABEL: vsitofp_nxv2i16_nxv2f16:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e16,mf2,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e16, mf2, ta, mu
 ; CHECK-NEXT:    vfcvt.f.x.v v8, v8
 ; CHECK-NEXT:    ret
   %evec = sitofp <vscale x 2 x i16> %va to <vscale x 2 x half>
@@ -411,7 +771,7 @@ define <vscale x 2 x half> @vsitofp_nxv2i16_nxv2f16(<vscale x 2 x i16> %va) {
 define <vscale x 2 x half> @vuitofp_nxv2i16_nxv2f16(<vscale x 2 x i16> %va) {
 ; CHECK-LABEL: vuitofp_nxv2i16_nxv2f16:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e16,mf2,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e16, mf2, ta, mu
 ; CHECK-NEXT:    vfcvt.f.xu.v v8, v8
 ; CHECK-NEXT:    ret
   %evec = uitofp <vscale x 2 x i16> %va to <vscale x 2 x half>
@@ -421,7 +781,7 @@ define <vscale x 2 x half> @vuitofp_nxv2i16_nxv2f16(<vscale x 2 x i16> %va) {
 define <vscale x 2 x float> @vsitofp_nxv2i16_nxv2f32(<vscale x 2 x i16> %va) {
 ; CHECK-LABEL: vsitofp_nxv2i16_nxv2f32:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e16,mf2,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e16, mf2, ta, mu
 ; CHECK-NEXT:    vfwcvt.f.x.v v25, v8
 ; CHECK-NEXT:    vmv1r.v v8, v25
 ; CHECK-NEXT:    ret
@@ -432,7 +792,7 @@ define <vscale x 2 x float> @vsitofp_nxv2i16_nxv2f32(<vscale x 2 x i16> %va) {
 define <vscale x 2 x float> @vuitofp_nxv2i16_nxv2f32(<vscale x 2 x i16> %va) {
 ; CHECK-LABEL: vuitofp_nxv2i16_nxv2f32:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e16,mf2,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e16, mf2, ta, mu
 ; CHECK-NEXT:    vfwcvt.f.xu.v v25, v8
 ; CHECK-NEXT:    vmv1r.v v8, v25
 ; CHECK-NEXT:    ret
@@ -443,7 +803,7 @@ define <vscale x 2 x float> @vuitofp_nxv2i16_nxv2f32(<vscale x 2 x i16> %va) {
 define <vscale x 2 x double> @vsitofp_nxv2i16_nxv2f64(<vscale x 2 x i16> %va) {
 ; CHECK-LABEL: vsitofp_nxv2i16_nxv2f64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e64,m2,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e64, m2, ta, mu
 ; CHECK-NEXT:    vsext.vf4 v26, v8
 ; CHECK-NEXT:    vfcvt.f.x.v v8, v26
 ; CHECK-NEXT:    ret
@@ -454,7 +814,7 @@ define <vscale x 2 x double> @vsitofp_nxv2i16_nxv2f64(<vscale x 2 x i16> %va) {
 define <vscale x 2 x double> @vuitofp_nxv2i16_nxv2f64(<vscale x 2 x i16> %va) {
 ; CHECK-LABEL: vuitofp_nxv2i16_nxv2f64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e64,m2,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e64, m2, ta, mu
 ; CHECK-NEXT:    vzext.vf4 v26, v8
 ; CHECK-NEXT:    vfcvt.f.xu.v v8, v26
 ; CHECK-NEXT:    ret
@@ -465,7 +825,7 @@ define <vscale x 2 x double> @vuitofp_nxv2i16_nxv2f64(<vscale x 2 x i16> %va) {
 define <vscale x 4 x half> @vsitofp_nxv4i16_nxv4f16(<vscale x 4 x i16> %va) {
 ; CHECK-LABEL: vsitofp_nxv4i16_nxv4f16:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e16,m1,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e16, m1, ta, mu
 ; CHECK-NEXT:    vfcvt.f.x.v v8, v8
 ; CHECK-NEXT:    ret
   %evec = sitofp <vscale x 4 x i16> %va to <vscale x 4 x half>
@@ -475,7 +835,7 @@ define <vscale x 4 x half> @vsitofp_nxv4i16_nxv4f16(<vscale x 4 x i16> %va) {
 define <vscale x 4 x half> @vuitofp_nxv4i16_nxv4f16(<vscale x 4 x i16> %va) {
 ; CHECK-LABEL: vuitofp_nxv4i16_nxv4f16:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e16,m1,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e16, m1, ta, mu
 ; CHECK-NEXT:    vfcvt.f.xu.v v8, v8
 ; CHECK-NEXT:    ret
   %evec = uitofp <vscale x 4 x i16> %va to <vscale x 4 x half>
@@ -485,7 +845,7 @@ define <vscale x 4 x half> @vuitofp_nxv4i16_nxv4f16(<vscale x 4 x i16> %va) {
 define <vscale x 4 x float> @vsitofp_nxv4i16_nxv4f32(<vscale x 4 x i16> %va) {
 ; CHECK-LABEL: vsitofp_nxv4i16_nxv4f32:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e16,m1,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e16, m1, ta, mu
 ; CHECK-NEXT:    vfwcvt.f.x.v v26, v8
 ; CHECK-NEXT:    vmv2r.v v8, v26
 ; CHECK-NEXT:    ret
@@ -496,7 +856,7 @@ define <vscale x 4 x float> @vsitofp_nxv4i16_nxv4f32(<vscale x 4 x i16> %va) {
 define <vscale x 4 x float> @vuitofp_nxv4i16_nxv4f32(<vscale x 4 x i16> %va) {
 ; CHECK-LABEL: vuitofp_nxv4i16_nxv4f32:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e16,m1,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e16, m1, ta, mu
 ; CHECK-NEXT:    vfwcvt.f.xu.v v26, v8
 ; CHECK-NEXT:    vmv2r.v v8, v26
 ; CHECK-NEXT:    ret
@@ -507,7 +867,7 @@ define <vscale x 4 x float> @vuitofp_nxv4i16_nxv4f32(<vscale x 4 x i16> %va) {
 define <vscale x 4 x double> @vsitofp_nxv4i16_nxv4f64(<vscale x 4 x i16> %va) {
 ; CHECK-LABEL: vsitofp_nxv4i16_nxv4f64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e64,m4,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e64, m4, ta, mu
 ; CHECK-NEXT:    vsext.vf4 v28, v8
 ; CHECK-NEXT:    vfcvt.f.x.v v8, v28
 ; CHECK-NEXT:    ret
@@ -518,7 +878,7 @@ define <vscale x 4 x double> @vsitofp_nxv4i16_nxv4f64(<vscale x 4 x i16> %va) {
 define <vscale x 4 x double> @vuitofp_nxv4i16_nxv4f64(<vscale x 4 x i16> %va) {
 ; CHECK-LABEL: vuitofp_nxv4i16_nxv4f64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e64,m4,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e64, m4, ta, mu
 ; CHECK-NEXT:    vzext.vf4 v28, v8
 ; CHECK-NEXT:    vfcvt.f.xu.v v8, v28
 ; CHECK-NEXT:    ret
@@ -529,7 +889,7 @@ define <vscale x 4 x double> @vuitofp_nxv4i16_nxv4f64(<vscale x 4 x i16> %va) {
 define <vscale x 8 x half> @vsitofp_nxv8i16_nxv8f16(<vscale x 8 x i16> %va) {
 ; CHECK-LABEL: vsitofp_nxv8i16_nxv8f16:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e16,m2,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e16, m2, ta, mu
 ; CHECK-NEXT:    vfcvt.f.x.v v8, v8
 ; CHECK-NEXT:    ret
   %evec = sitofp <vscale x 8 x i16> %va to <vscale x 8 x half>
@@ -539,7 +899,7 @@ define <vscale x 8 x half> @vsitofp_nxv8i16_nxv8f16(<vscale x 8 x i16> %va) {
 define <vscale x 8 x half> @vuitofp_nxv8i16_nxv8f16(<vscale x 8 x i16> %va) {
 ; CHECK-LABEL: vuitofp_nxv8i16_nxv8f16:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e16,m2,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e16, m2, ta, mu
 ; CHECK-NEXT:    vfcvt.f.xu.v v8, v8
 ; CHECK-NEXT:    ret
   %evec = uitofp <vscale x 8 x i16> %va to <vscale x 8 x half>
@@ -549,7 +909,7 @@ define <vscale x 8 x half> @vuitofp_nxv8i16_nxv8f16(<vscale x 8 x i16> %va) {
 define <vscale x 8 x float> @vsitofp_nxv8i16_nxv8f32(<vscale x 8 x i16> %va) {
 ; CHECK-LABEL: vsitofp_nxv8i16_nxv8f32:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e16,m2,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e16, m2, ta, mu
 ; CHECK-NEXT:    vfwcvt.f.x.v v28, v8
 ; CHECK-NEXT:    vmv4r.v v8, v28
 ; CHECK-NEXT:    ret
@@ -560,7 +920,7 @@ define <vscale x 8 x float> @vsitofp_nxv8i16_nxv8f32(<vscale x 8 x i16> %va) {
 define <vscale x 8 x float> @vuitofp_nxv8i16_nxv8f32(<vscale x 8 x i16> %va) {
 ; CHECK-LABEL: vuitofp_nxv8i16_nxv8f32:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e16,m2,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e16, m2, ta, mu
 ; CHECK-NEXT:    vfwcvt.f.xu.v v28, v8
 ; CHECK-NEXT:    vmv4r.v v8, v28
 ; CHECK-NEXT:    ret
@@ -571,7 +931,7 @@ define <vscale x 8 x float> @vuitofp_nxv8i16_nxv8f32(<vscale x 8 x i16> %va) {
 define <vscale x 8 x double> @vsitofp_nxv8i16_nxv8f64(<vscale x 8 x i16> %va) {
 ; CHECK-LABEL: vsitofp_nxv8i16_nxv8f64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e64,m8,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e64, m8, ta, mu
 ; CHECK-NEXT:    vsext.vf4 v16, v8
 ; CHECK-NEXT:    vfcvt.f.x.v v8, v16
 ; CHECK-NEXT:    ret
@@ -582,7 +942,7 @@ define <vscale x 8 x double> @vsitofp_nxv8i16_nxv8f64(<vscale x 8 x i16> %va) {
 define <vscale x 8 x double> @vuitofp_nxv8i16_nxv8f64(<vscale x 8 x i16> %va) {
 ; CHECK-LABEL: vuitofp_nxv8i16_nxv8f64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e64,m8,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e64, m8, ta, mu
 ; CHECK-NEXT:    vzext.vf4 v16, v8
 ; CHECK-NEXT:    vfcvt.f.xu.v v8, v16
 ; CHECK-NEXT:    ret
@@ -593,7 +953,7 @@ define <vscale x 8 x double> @vuitofp_nxv8i16_nxv8f64(<vscale x 8 x i16> %va) {
 define <vscale x 16 x half> @vsitofp_nxv16i16_nxv16f16(<vscale x 16 x i16> %va) {
 ; CHECK-LABEL: vsitofp_nxv16i16_nxv16f16:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e16,m4,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e16, m4, ta, mu
 ; CHECK-NEXT:    vfcvt.f.x.v v8, v8
 ; CHECK-NEXT:    ret
   %evec = sitofp <vscale x 16 x i16> %va to <vscale x 16 x half>
@@ -603,7 +963,7 @@ define <vscale x 16 x half> @vsitofp_nxv16i16_nxv16f16(<vscale x 16 x i16> %va) 
 define <vscale x 16 x half> @vuitofp_nxv16i16_nxv16f16(<vscale x 16 x i16> %va) {
 ; CHECK-LABEL: vuitofp_nxv16i16_nxv16f16:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e16,m4,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e16, m4, ta, mu
 ; CHECK-NEXT:    vfcvt.f.xu.v v8, v8
 ; CHECK-NEXT:    ret
   %evec = uitofp <vscale x 16 x i16> %va to <vscale x 16 x half>
@@ -613,7 +973,7 @@ define <vscale x 16 x half> @vuitofp_nxv16i16_nxv16f16(<vscale x 16 x i16> %va) 
 define <vscale x 16 x float> @vsitofp_nxv16i16_nxv16f32(<vscale x 16 x i16> %va) {
 ; CHECK-LABEL: vsitofp_nxv16i16_nxv16f32:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e16,m4,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e16, m4, ta, mu
 ; CHECK-NEXT:    vfwcvt.f.x.v v16, v8
 ; CHECK-NEXT:    vmv8r.v v8, v16
 ; CHECK-NEXT:    ret
@@ -624,7 +984,7 @@ define <vscale x 16 x float> @vsitofp_nxv16i16_nxv16f32(<vscale x 16 x i16> %va)
 define <vscale x 16 x float> @vuitofp_nxv16i16_nxv16f32(<vscale x 16 x i16> %va) {
 ; CHECK-LABEL: vuitofp_nxv16i16_nxv16f32:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e16,m4,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e16, m4, ta, mu
 ; CHECK-NEXT:    vfwcvt.f.xu.v v16, v8
 ; CHECK-NEXT:    vmv8r.v v8, v16
 ; CHECK-NEXT:    ret
@@ -635,7 +995,7 @@ define <vscale x 16 x float> @vuitofp_nxv16i16_nxv16f32(<vscale x 16 x i16> %va)
 define <vscale x 32 x half> @vsitofp_nxv32i16_nxv32f16(<vscale x 32 x i16> %va) {
 ; CHECK-LABEL: vsitofp_nxv32i16_nxv32f16:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e16,m8,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e16, m8, ta, mu
 ; CHECK-NEXT:    vfcvt.f.x.v v8, v8
 ; CHECK-NEXT:    ret
   %evec = sitofp <vscale x 32 x i16> %va to <vscale x 32 x half>
@@ -645,7 +1005,7 @@ define <vscale x 32 x half> @vsitofp_nxv32i16_nxv32f16(<vscale x 32 x i16> %va) 
 define <vscale x 32 x half> @vuitofp_nxv32i16_nxv32f16(<vscale x 32 x i16> %va) {
 ; CHECK-LABEL: vuitofp_nxv32i16_nxv32f16:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e16,m8,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e16, m8, ta, mu
 ; CHECK-NEXT:    vfcvt.f.xu.v v8, v8
 ; CHECK-NEXT:    ret
   %evec = uitofp <vscale x 32 x i16> %va to <vscale x 32 x half>
@@ -655,7 +1015,7 @@ define <vscale x 32 x half> @vuitofp_nxv32i16_nxv32f16(<vscale x 32 x i16> %va) 
 define <vscale x 1 x half> @vsitofp_nxv1i32_nxv1f16(<vscale x 1 x i32> %va) {
 ; CHECK-LABEL: vsitofp_nxv1i32_nxv1f16:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e16,mf4,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e16, mf4, ta, mu
 ; CHECK-NEXT:    vfncvt.f.x.w v25, v8
 ; CHECK-NEXT:    vmv1r.v v8, v25
 ; CHECK-NEXT:    ret
@@ -666,7 +1026,7 @@ define <vscale x 1 x half> @vsitofp_nxv1i32_nxv1f16(<vscale x 1 x i32> %va) {
 define <vscale x 1 x half> @vuitofp_nxv1i32_nxv1f16(<vscale x 1 x i32> %va) {
 ; CHECK-LABEL: vuitofp_nxv1i32_nxv1f16:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e16,mf4,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e16, mf4, ta, mu
 ; CHECK-NEXT:    vfncvt.f.xu.w v25, v8
 ; CHECK-NEXT:    vmv1r.v v8, v25
 ; CHECK-NEXT:    ret
@@ -677,7 +1037,7 @@ define <vscale x 1 x half> @vuitofp_nxv1i32_nxv1f16(<vscale x 1 x i32> %va) {
 define <vscale x 1 x float> @vsitofp_nxv1i32_nxv1f32(<vscale x 1 x i32> %va) {
 ; CHECK-LABEL: vsitofp_nxv1i32_nxv1f32:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e32,mf2,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e32, mf2, ta, mu
 ; CHECK-NEXT:    vfcvt.f.x.v v8, v8
 ; CHECK-NEXT:    ret
   %evec = sitofp <vscale x 1 x i32> %va to <vscale x 1 x float>
@@ -687,7 +1047,7 @@ define <vscale x 1 x float> @vsitofp_nxv1i32_nxv1f32(<vscale x 1 x i32> %va) {
 define <vscale x 1 x float> @vuitofp_nxv1i32_nxv1f32(<vscale x 1 x i32> %va) {
 ; CHECK-LABEL: vuitofp_nxv1i32_nxv1f32:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e32,mf2,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e32, mf2, ta, mu
 ; CHECK-NEXT:    vfcvt.f.xu.v v8, v8
 ; CHECK-NEXT:    ret
   %evec = uitofp <vscale x 1 x i32> %va to <vscale x 1 x float>
@@ -697,7 +1057,7 @@ define <vscale x 1 x float> @vuitofp_nxv1i32_nxv1f32(<vscale x 1 x i32> %va) {
 define <vscale x 1 x double> @vsitofp_nxv1i32_nxv1f64(<vscale x 1 x i32> %va) {
 ; CHECK-LABEL: vsitofp_nxv1i32_nxv1f64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e32,mf2,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e32, mf2, ta, mu
 ; CHECK-NEXT:    vfwcvt.f.x.v v25, v8
 ; CHECK-NEXT:    vmv1r.v v8, v25
 ; CHECK-NEXT:    ret
@@ -708,7 +1068,7 @@ define <vscale x 1 x double> @vsitofp_nxv1i32_nxv1f64(<vscale x 1 x i32> %va) {
 define <vscale x 1 x double> @vuitofp_nxv1i32_nxv1f64(<vscale x 1 x i32> %va) {
 ; CHECK-LABEL: vuitofp_nxv1i32_nxv1f64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e32,mf2,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e32, mf2, ta, mu
 ; CHECK-NEXT:    vfwcvt.f.xu.v v25, v8
 ; CHECK-NEXT:    vmv1r.v v8, v25
 ; CHECK-NEXT:    ret
@@ -719,7 +1079,7 @@ define <vscale x 1 x double> @vuitofp_nxv1i32_nxv1f64(<vscale x 1 x i32> %va) {
 define <vscale x 2 x half> @vsitofp_nxv2i32_nxv2f16(<vscale x 2 x i32> %va) {
 ; CHECK-LABEL: vsitofp_nxv2i32_nxv2f16:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e16,mf2,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e16, mf2, ta, mu
 ; CHECK-NEXT:    vfncvt.f.x.w v25, v8
 ; CHECK-NEXT:    vmv1r.v v8, v25
 ; CHECK-NEXT:    ret
@@ -730,7 +1090,7 @@ define <vscale x 2 x half> @vsitofp_nxv2i32_nxv2f16(<vscale x 2 x i32> %va) {
 define <vscale x 2 x half> @vuitofp_nxv2i32_nxv2f16(<vscale x 2 x i32> %va) {
 ; CHECK-LABEL: vuitofp_nxv2i32_nxv2f16:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e16,mf2,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e16, mf2, ta, mu
 ; CHECK-NEXT:    vfncvt.f.xu.w v25, v8
 ; CHECK-NEXT:    vmv1r.v v8, v25
 ; CHECK-NEXT:    ret
@@ -741,7 +1101,7 @@ define <vscale x 2 x half> @vuitofp_nxv2i32_nxv2f16(<vscale x 2 x i32> %va) {
 define <vscale x 2 x float> @vsitofp_nxv2i32_nxv2f32(<vscale x 2 x i32> %va) {
 ; CHECK-LABEL: vsitofp_nxv2i32_nxv2f32:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e32,m1,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e32, m1, ta, mu
 ; CHECK-NEXT:    vfcvt.f.x.v v8, v8
 ; CHECK-NEXT:    ret
   %evec = sitofp <vscale x 2 x i32> %va to <vscale x 2 x float>
@@ -751,7 +1111,7 @@ define <vscale x 2 x float> @vsitofp_nxv2i32_nxv2f32(<vscale x 2 x i32> %va) {
 define <vscale x 2 x float> @vuitofp_nxv2i32_nxv2f32(<vscale x 2 x i32> %va) {
 ; CHECK-LABEL: vuitofp_nxv2i32_nxv2f32:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e32,m1,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e32, m1, ta, mu
 ; CHECK-NEXT:    vfcvt.f.xu.v v8, v8
 ; CHECK-NEXT:    ret
   %evec = uitofp <vscale x 2 x i32> %va to <vscale x 2 x float>
@@ -761,7 +1121,7 @@ define <vscale x 2 x float> @vuitofp_nxv2i32_nxv2f32(<vscale x 2 x i32> %va) {
 define <vscale x 2 x double> @vsitofp_nxv2i32_nxv2f64(<vscale x 2 x i32> %va) {
 ; CHECK-LABEL: vsitofp_nxv2i32_nxv2f64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e32,m1,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e32, m1, ta, mu
 ; CHECK-NEXT:    vfwcvt.f.x.v v26, v8
 ; CHECK-NEXT:    vmv2r.v v8, v26
 ; CHECK-NEXT:    ret
@@ -772,7 +1132,7 @@ define <vscale x 2 x double> @vsitofp_nxv2i32_nxv2f64(<vscale x 2 x i32> %va) {
 define <vscale x 2 x double> @vuitofp_nxv2i32_nxv2f64(<vscale x 2 x i32> %va) {
 ; CHECK-LABEL: vuitofp_nxv2i32_nxv2f64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e32,m1,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e32, m1, ta, mu
 ; CHECK-NEXT:    vfwcvt.f.xu.v v26, v8
 ; CHECK-NEXT:    vmv2r.v v8, v26
 ; CHECK-NEXT:    ret
@@ -783,7 +1143,7 @@ define <vscale x 2 x double> @vuitofp_nxv2i32_nxv2f64(<vscale x 2 x i32> %va) {
 define <vscale x 4 x half> @vsitofp_nxv4i32_nxv4f16(<vscale x 4 x i32> %va) {
 ; CHECK-LABEL: vsitofp_nxv4i32_nxv4f16:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e16,m1,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e16, m1, ta, mu
 ; CHECK-NEXT:    vfncvt.f.x.w v25, v8
 ; CHECK-NEXT:    vmv1r.v v8, v25
 ; CHECK-NEXT:    ret
@@ -794,7 +1154,7 @@ define <vscale x 4 x half> @vsitofp_nxv4i32_nxv4f16(<vscale x 4 x i32> %va) {
 define <vscale x 4 x half> @vuitofp_nxv4i32_nxv4f16(<vscale x 4 x i32> %va) {
 ; CHECK-LABEL: vuitofp_nxv4i32_nxv4f16:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e16,m1,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e16, m1, ta, mu
 ; CHECK-NEXT:    vfncvt.f.xu.w v25, v8
 ; CHECK-NEXT:    vmv1r.v v8, v25
 ; CHECK-NEXT:    ret
@@ -805,7 +1165,7 @@ define <vscale x 4 x half> @vuitofp_nxv4i32_nxv4f16(<vscale x 4 x i32> %va) {
 define <vscale x 4 x float> @vsitofp_nxv4i32_nxv4f32(<vscale x 4 x i32> %va) {
 ; CHECK-LABEL: vsitofp_nxv4i32_nxv4f32:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e32,m2,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e32, m2, ta, mu
 ; CHECK-NEXT:    vfcvt.f.x.v v8, v8
 ; CHECK-NEXT:    ret
   %evec = sitofp <vscale x 4 x i32> %va to <vscale x 4 x float>
@@ -815,7 +1175,7 @@ define <vscale x 4 x float> @vsitofp_nxv4i32_nxv4f32(<vscale x 4 x i32> %va) {
 define <vscale x 4 x float> @vuitofp_nxv4i32_nxv4f32(<vscale x 4 x i32> %va) {
 ; CHECK-LABEL: vuitofp_nxv4i32_nxv4f32:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e32,m2,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e32, m2, ta, mu
 ; CHECK-NEXT:    vfcvt.f.xu.v v8, v8
 ; CHECK-NEXT:    ret
   %evec = uitofp <vscale x 4 x i32> %va to <vscale x 4 x float>
@@ -825,7 +1185,7 @@ define <vscale x 4 x float> @vuitofp_nxv4i32_nxv4f32(<vscale x 4 x i32> %va) {
 define <vscale x 4 x double> @vsitofp_nxv4i32_nxv4f64(<vscale x 4 x i32> %va) {
 ; CHECK-LABEL: vsitofp_nxv4i32_nxv4f64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e32,m2,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e32, m2, ta, mu
 ; CHECK-NEXT:    vfwcvt.f.x.v v28, v8
 ; CHECK-NEXT:    vmv4r.v v8, v28
 ; CHECK-NEXT:    ret
@@ -836,7 +1196,7 @@ define <vscale x 4 x double> @vsitofp_nxv4i32_nxv4f64(<vscale x 4 x i32> %va) {
 define <vscale x 4 x double> @vuitofp_nxv4i32_nxv4f64(<vscale x 4 x i32> %va) {
 ; CHECK-LABEL: vuitofp_nxv4i32_nxv4f64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e32,m2,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e32, m2, ta, mu
 ; CHECK-NEXT:    vfwcvt.f.xu.v v28, v8
 ; CHECK-NEXT:    vmv4r.v v8, v28
 ; CHECK-NEXT:    ret
@@ -847,7 +1207,7 @@ define <vscale x 4 x double> @vuitofp_nxv4i32_nxv4f64(<vscale x 4 x i32> %va) {
 define <vscale x 8 x half> @vsitofp_nxv8i32_nxv8f16(<vscale x 8 x i32> %va) {
 ; CHECK-LABEL: vsitofp_nxv8i32_nxv8f16:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e16,m2,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e16, m2, ta, mu
 ; CHECK-NEXT:    vfncvt.f.x.w v26, v8
 ; CHECK-NEXT:    vmv2r.v v8, v26
 ; CHECK-NEXT:    ret
@@ -858,7 +1218,7 @@ define <vscale x 8 x half> @vsitofp_nxv8i32_nxv8f16(<vscale x 8 x i32> %va) {
 define <vscale x 8 x half> @vuitofp_nxv8i32_nxv8f16(<vscale x 8 x i32> %va) {
 ; CHECK-LABEL: vuitofp_nxv8i32_nxv8f16:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e16,m2,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e16, m2, ta, mu
 ; CHECK-NEXT:    vfncvt.f.xu.w v26, v8
 ; CHECK-NEXT:    vmv2r.v v8, v26
 ; CHECK-NEXT:    ret
@@ -869,7 +1229,7 @@ define <vscale x 8 x half> @vuitofp_nxv8i32_nxv8f16(<vscale x 8 x i32> %va) {
 define <vscale x 8 x float> @vsitofp_nxv8i32_nxv8f32(<vscale x 8 x i32> %va) {
 ; CHECK-LABEL: vsitofp_nxv8i32_nxv8f32:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e32,m4,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e32, m4, ta, mu
 ; CHECK-NEXT:    vfcvt.f.x.v v8, v8
 ; CHECK-NEXT:    ret
   %evec = sitofp <vscale x 8 x i32> %va to <vscale x 8 x float>
@@ -879,7 +1239,7 @@ define <vscale x 8 x float> @vsitofp_nxv8i32_nxv8f32(<vscale x 8 x i32> %va) {
 define <vscale x 8 x float> @vuitofp_nxv8i32_nxv8f32(<vscale x 8 x i32> %va) {
 ; CHECK-LABEL: vuitofp_nxv8i32_nxv8f32:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e32,m4,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e32, m4, ta, mu
 ; CHECK-NEXT:    vfcvt.f.xu.v v8, v8
 ; CHECK-NEXT:    ret
   %evec = uitofp <vscale x 8 x i32> %va to <vscale x 8 x float>
@@ -889,7 +1249,7 @@ define <vscale x 8 x float> @vuitofp_nxv8i32_nxv8f32(<vscale x 8 x i32> %va) {
 define <vscale x 8 x double> @vsitofp_nxv8i32_nxv8f64(<vscale x 8 x i32> %va) {
 ; CHECK-LABEL: vsitofp_nxv8i32_nxv8f64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e32,m4,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e32, m4, ta, mu
 ; CHECK-NEXT:    vfwcvt.f.x.v v16, v8
 ; CHECK-NEXT:    vmv8r.v v8, v16
 ; CHECK-NEXT:    ret
@@ -900,7 +1260,7 @@ define <vscale x 8 x double> @vsitofp_nxv8i32_nxv8f64(<vscale x 8 x i32> %va) {
 define <vscale x 8 x double> @vuitofp_nxv8i32_nxv8f64(<vscale x 8 x i32> %va) {
 ; CHECK-LABEL: vuitofp_nxv8i32_nxv8f64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e32,m4,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e32, m4, ta, mu
 ; CHECK-NEXT:    vfwcvt.f.xu.v v16, v8
 ; CHECK-NEXT:    vmv8r.v v8, v16
 ; CHECK-NEXT:    ret
@@ -911,7 +1271,7 @@ define <vscale x 8 x double> @vuitofp_nxv8i32_nxv8f64(<vscale x 8 x i32> %va) {
 define <vscale x 16 x half> @vsitofp_nxv16i32_nxv16f16(<vscale x 16 x i32> %va) {
 ; CHECK-LABEL: vsitofp_nxv16i32_nxv16f16:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e16,m4,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e16, m4, ta, mu
 ; CHECK-NEXT:    vfncvt.f.x.w v28, v8
 ; CHECK-NEXT:    vmv4r.v v8, v28
 ; CHECK-NEXT:    ret
@@ -922,7 +1282,7 @@ define <vscale x 16 x half> @vsitofp_nxv16i32_nxv16f16(<vscale x 16 x i32> %va) 
 define <vscale x 16 x half> @vuitofp_nxv16i32_nxv16f16(<vscale x 16 x i32> %va) {
 ; CHECK-LABEL: vuitofp_nxv16i32_nxv16f16:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e16,m4,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e16, m4, ta, mu
 ; CHECK-NEXT:    vfncvt.f.xu.w v28, v8
 ; CHECK-NEXT:    vmv4r.v v8, v28
 ; CHECK-NEXT:    ret
@@ -933,7 +1293,7 @@ define <vscale x 16 x half> @vuitofp_nxv16i32_nxv16f16(<vscale x 16 x i32> %va) 
 define <vscale x 16 x float> @vsitofp_nxv16i32_nxv16f32(<vscale x 16 x i32> %va) {
 ; CHECK-LABEL: vsitofp_nxv16i32_nxv16f32:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e32,m8,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e32, m8, ta, mu
 ; CHECK-NEXT:    vfcvt.f.x.v v8, v8
 ; CHECK-NEXT:    ret
   %evec = sitofp <vscale x 16 x i32> %va to <vscale x 16 x float>
@@ -943,7 +1303,7 @@ define <vscale x 16 x float> @vsitofp_nxv16i32_nxv16f32(<vscale x 16 x i32> %va)
 define <vscale x 16 x float> @vuitofp_nxv16i32_nxv16f32(<vscale x 16 x i32> %va) {
 ; CHECK-LABEL: vuitofp_nxv16i32_nxv16f32:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e32,m8,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e32, m8, ta, mu
 ; CHECK-NEXT:    vfcvt.f.xu.v v8, v8
 ; CHECK-NEXT:    ret
   %evec = uitofp <vscale x 16 x i32> %va to <vscale x 16 x float>
@@ -953,9 +1313,9 @@ define <vscale x 16 x float> @vuitofp_nxv16i32_nxv16f32(<vscale x 16 x i32> %va)
 define <vscale x 1 x half> @vsitofp_nxv1i64_nxv1f16(<vscale x 1 x i64> %va) {
 ; CHECK-LABEL: vsitofp_nxv1i64_nxv1f16:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e32,mf2,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e32, mf2, ta, mu
 ; CHECK-NEXT:    vfncvt.f.x.w v25, v8
-; CHECK-NEXT:    vsetvli zero, zero, e16,mf4,ta,mu
+; CHECK-NEXT:    vsetvli zero, zero, e16, mf4, ta, mu
 ; CHECK-NEXT:    vfncvt.f.f.w v8, v25
 ; CHECK-NEXT:    ret
   %evec = sitofp <vscale x 1 x i64> %va to <vscale x 1 x half>
@@ -965,9 +1325,9 @@ define <vscale x 1 x half> @vsitofp_nxv1i64_nxv1f16(<vscale x 1 x i64> %va) {
 define <vscale x 1 x half> @vuitofp_nxv1i64_nxv1f16(<vscale x 1 x i64> %va) {
 ; CHECK-LABEL: vuitofp_nxv1i64_nxv1f16:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e32,mf2,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e32, mf2, ta, mu
 ; CHECK-NEXT:    vfncvt.f.xu.w v25, v8
-; CHECK-NEXT:    vsetvli zero, zero, e16,mf4,ta,mu
+; CHECK-NEXT:    vsetvli zero, zero, e16, mf4, ta, mu
 ; CHECK-NEXT:    vfncvt.f.f.w v8, v25
 ; CHECK-NEXT:    ret
   %evec = uitofp <vscale x 1 x i64> %va to <vscale x 1 x half>
@@ -977,7 +1337,7 @@ define <vscale x 1 x half> @vuitofp_nxv1i64_nxv1f16(<vscale x 1 x i64> %va) {
 define <vscale x 1 x float> @vsitofp_nxv1i64_nxv1f32(<vscale x 1 x i64> %va) {
 ; CHECK-LABEL: vsitofp_nxv1i64_nxv1f32:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e32,mf2,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e32, mf2, ta, mu
 ; CHECK-NEXT:    vfncvt.f.x.w v25, v8
 ; CHECK-NEXT:    vmv1r.v v8, v25
 ; CHECK-NEXT:    ret
@@ -988,7 +1348,7 @@ define <vscale x 1 x float> @vsitofp_nxv1i64_nxv1f32(<vscale x 1 x i64> %va) {
 define <vscale x 1 x float> @vuitofp_nxv1i64_nxv1f32(<vscale x 1 x i64> %va) {
 ; CHECK-LABEL: vuitofp_nxv1i64_nxv1f32:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e32,mf2,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e32, mf2, ta, mu
 ; CHECK-NEXT:    vfncvt.f.xu.w v25, v8
 ; CHECK-NEXT:    vmv1r.v v8, v25
 ; CHECK-NEXT:    ret
@@ -999,7 +1359,7 @@ define <vscale x 1 x float> @vuitofp_nxv1i64_nxv1f32(<vscale x 1 x i64> %va) {
 define <vscale x 1 x double> @vsitofp_nxv1i64_nxv1f64(<vscale x 1 x i64> %va) {
 ; CHECK-LABEL: vsitofp_nxv1i64_nxv1f64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e64,m1,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e64, m1, ta, mu
 ; CHECK-NEXT:    vfcvt.f.x.v v8, v8
 ; CHECK-NEXT:    ret
   %evec = sitofp <vscale x 1 x i64> %va to <vscale x 1 x double>
@@ -1009,7 +1369,7 @@ define <vscale x 1 x double> @vsitofp_nxv1i64_nxv1f64(<vscale x 1 x i64> %va) {
 define <vscale x 1 x double> @vuitofp_nxv1i64_nxv1f64(<vscale x 1 x i64> %va) {
 ; CHECK-LABEL: vuitofp_nxv1i64_nxv1f64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e64,m1,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e64, m1, ta, mu
 ; CHECK-NEXT:    vfcvt.f.xu.v v8, v8
 ; CHECK-NEXT:    ret
   %evec = uitofp <vscale x 1 x i64> %va to <vscale x 1 x double>
@@ -1019,9 +1379,9 @@ define <vscale x 1 x double> @vuitofp_nxv1i64_nxv1f64(<vscale x 1 x i64> %va) {
 define <vscale x 2 x half> @vsitofp_nxv2i64_nxv2f16(<vscale x 2 x i64> %va) {
 ; CHECK-LABEL: vsitofp_nxv2i64_nxv2f16:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e32,m1,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e32, m1, ta, mu
 ; CHECK-NEXT:    vfncvt.f.x.w v25, v8
-; CHECK-NEXT:    vsetvli zero, zero, e16,mf2,ta,mu
+; CHECK-NEXT:    vsetvli zero, zero, e16, mf2, ta, mu
 ; CHECK-NEXT:    vfncvt.f.f.w v8, v25
 ; CHECK-NEXT:    ret
   %evec = sitofp <vscale x 2 x i64> %va to <vscale x 2 x half>
@@ -1031,9 +1391,9 @@ define <vscale x 2 x half> @vsitofp_nxv2i64_nxv2f16(<vscale x 2 x i64> %va) {
 define <vscale x 2 x half> @vuitofp_nxv2i64_nxv2f16(<vscale x 2 x i64> %va) {
 ; CHECK-LABEL: vuitofp_nxv2i64_nxv2f16:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e32,m1,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e32, m1, ta, mu
 ; CHECK-NEXT:    vfncvt.f.xu.w v25, v8
-; CHECK-NEXT:    vsetvli zero, zero, e16,mf2,ta,mu
+; CHECK-NEXT:    vsetvli zero, zero, e16, mf2, ta, mu
 ; CHECK-NEXT:    vfncvt.f.f.w v8, v25
 ; CHECK-NEXT:    ret
   %evec = uitofp <vscale x 2 x i64> %va to <vscale x 2 x half>
@@ -1043,7 +1403,7 @@ define <vscale x 2 x half> @vuitofp_nxv2i64_nxv2f16(<vscale x 2 x i64> %va) {
 define <vscale x 2 x float> @vsitofp_nxv2i64_nxv2f32(<vscale x 2 x i64> %va) {
 ; CHECK-LABEL: vsitofp_nxv2i64_nxv2f32:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e32,m1,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e32, m1, ta, mu
 ; CHECK-NEXT:    vfncvt.f.x.w v25, v8
 ; CHECK-NEXT:    vmv1r.v v8, v25
 ; CHECK-NEXT:    ret
@@ -1054,7 +1414,7 @@ define <vscale x 2 x float> @vsitofp_nxv2i64_nxv2f32(<vscale x 2 x i64> %va) {
 define <vscale x 2 x float> @vuitofp_nxv2i64_nxv2f32(<vscale x 2 x i64> %va) {
 ; CHECK-LABEL: vuitofp_nxv2i64_nxv2f32:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e32,m1,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e32, m1, ta, mu
 ; CHECK-NEXT:    vfncvt.f.xu.w v25, v8
 ; CHECK-NEXT:    vmv1r.v v8, v25
 ; CHECK-NEXT:    ret
@@ -1065,7 +1425,7 @@ define <vscale x 2 x float> @vuitofp_nxv2i64_nxv2f32(<vscale x 2 x i64> %va) {
 define <vscale x 2 x double> @vsitofp_nxv2i64_nxv2f64(<vscale x 2 x i64> %va) {
 ; CHECK-LABEL: vsitofp_nxv2i64_nxv2f64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e64,m2,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e64, m2, ta, mu
 ; CHECK-NEXT:    vfcvt.f.x.v v8, v8
 ; CHECK-NEXT:    ret
   %evec = sitofp <vscale x 2 x i64> %va to <vscale x 2 x double>
@@ -1075,7 +1435,7 @@ define <vscale x 2 x double> @vsitofp_nxv2i64_nxv2f64(<vscale x 2 x i64> %va) {
 define <vscale x 2 x double> @vuitofp_nxv2i64_nxv2f64(<vscale x 2 x i64> %va) {
 ; CHECK-LABEL: vuitofp_nxv2i64_nxv2f64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e64,m2,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e64, m2, ta, mu
 ; CHECK-NEXT:    vfcvt.f.xu.v v8, v8
 ; CHECK-NEXT:    ret
   %evec = uitofp <vscale x 2 x i64> %va to <vscale x 2 x double>
@@ -1085,9 +1445,9 @@ define <vscale x 2 x double> @vuitofp_nxv2i64_nxv2f64(<vscale x 2 x i64> %va) {
 define <vscale x 4 x half> @vsitofp_nxv4i64_nxv4f16(<vscale x 4 x i64> %va) {
 ; CHECK-LABEL: vsitofp_nxv4i64_nxv4f16:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e32,m2,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e32, m2, ta, mu
 ; CHECK-NEXT:    vfncvt.f.x.w v26, v8
-; CHECK-NEXT:    vsetvli zero, zero, e16,m1,ta,mu
+; CHECK-NEXT:    vsetvli zero, zero, e16, m1, ta, mu
 ; CHECK-NEXT:    vfncvt.f.f.w v8, v26
 ; CHECK-NEXT:    ret
   %evec = sitofp <vscale x 4 x i64> %va to <vscale x 4 x half>
@@ -1097,9 +1457,9 @@ define <vscale x 4 x half> @vsitofp_nxv4i64_nxv4f16(<vscale x 4 x i64> %va) {
 define <vscale x 4 x half> @vuitofp_nxv4i64_nxv4f16(<vscale x 4 x i64> %va) {
 ; CHECK-LABEL: vuitofp_nxv4i64_nxv4f16:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e32,m2,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e32, m2, ta, mu
 ; CHECK-NEXT:    vfncvt.f.xu.w v26, v8
-; CHECK-NEXT:    vsetvli zero, zero, e16,m1,ta,mu
+; CHECK-NEXT:    vsetvli zero, zero, e16, m1, ta, mu
 ; CHECK-NEXT:    vfncvt.f.f.w v8, v26
 ; CHECK-NEXT:    ret
   %evec = uitofp <vscale x 4 x i64> %va to <vscale x 4 x half>
@@ -1109,7 +1469,7 @@ define <vscale x 4 x half> @vuitofp_nxv4i64_nxv4f16(<vscale x 4 x i64> %va) {
 define <vscale x 4 x float> @vsitofp_nxv4i64_nxv4f32(<vscale x 4 x i64> %va) {
 ; CHECK-LABEL: vsitofp_nxv4i64_nxv4f32:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e32,m2,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e32, m2, ta, mu
 ; CHECK-NEXT:    vfncvt.f.x.w v26, v8
 ; CHECK-NEXT:    vmv2r.v v8, v26
 ; CHECK-NEXT:    ret
@@ -1120,7 +1480,7 @@ define <vscale x 4 x float> @vsitofp_nxv4i64_nxv4f32(<vscale x 4 x i64> %va) {
 define <vscale x 4 x float> @vuitofp_nxv4i64_nxv4f32(<vscale x 4 x i64> %va) {
 ; CHECK-LABEL: vuitofp_nxv4i64_nxv4f32:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e32,m2,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e32, m2, ta, mu
 ; CHECK-NEXT:    vfncvt.f.xu.w v26, v8
 ; CHECK-NEXT:    vmv2r.v v8, v26
 ; CHECK-NEXT:    ret
@@ -1131,7 +1491,7 @@ define <vscale x 4 x float> @vuitofp_nxv4i64_nxv4f32(<vscale x 4 x i64> %va) {
 define <vscale x 4 x double> @vsitofp_nxv4i64_nxv4f64(<vscale x 4 x i64> %va) {
 ; CHECK-LABEL: vsitofp_nxv4i64_nxv4f64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e64,m4,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e64, m4, ta, mu
 ; CHECK-NEXT:    vfcvt.f.x.v v8, v8
 ; CHECK-NEXT:    ret
   %evec = sitofp <vscale x 4 x i64> %va to <vscale x 4 x double>
@@ -1141,7 +1501,7 @@ define <vscale x 4 x double> @vsitofp_nxv4i64_nxv4f64(<vscale x 4 x i64> %va) {
 define <vscale x 4 x double> @vuitofp_nxv4i64_nxv4f64(<vscale x 4 x i64> %va) {
 ; CHECK-LABEL: vuitofp_nxv4i64_nxv4f64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e64,m4,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e64, m4, ta, mu
 ; CHECK-NEXT:    vfcvt.f.xu.v v8, v8
 ; CHECK-NEXT:    ret
   %evec = uitofp <vscale x 4 x i64> %va to <vscale x 4 x double>
@@ -1151,9 +1511,9 @@ define <vscale x 4 x double> @vuitofp_nxv4i64_nxv4f64(<vscale x 4 x i64> %va) {
 define <vscale x 8 x half> @vsitofp_nxv8i64_nxv8f16(<vscale x 8 x i64> %va) {
 ; CHECK-LABEL: vsitofp_nxv8i64_nxv8f16:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e32,m4,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e32, m4, ta, mu
 ; CHECK-NEXT:    vfncvt.f.x.w v28, v8
-; CHECK-NEXT:    vsetvli zero, zero, e16,m2,ta,mu
+; CHECK-NEXT:    vsetvli zero, zero, e16, m2, ta, mu
 ; CHECK-NEXT:    vfncvt.f.f.w v8, v28
 ; CHECK-NEXT:    ret
   %evec = sitofp <vscale x 8 x i64> %va to <vscale x 8 x half>
@@ -1163,9 +1523,9 @@ define <vscale x 8 x half> @vsitofp_nxv8i64_nxv8f16(<vscale x 8 x i64> %va) {
 define <vscale x 8 x half> @vuitofp_nxv8i64_nxv8f16(<vscale x 8 x i64> %va) {
 ; CHECK-LABEL: vuitofp_nxv8i64_nxv8f16:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e32,m4,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e32, m4, ta, mu
 ; CHECK-NEXT:    vfncvt.f.xu.w v28, v8
-; CHECK-NEXT:    vsetvli zero, zero, e16,m2,ta,mu
+; CHECK-NEXT:    vsetvli zero, zero, e16, m2, ta, mu
 ; CHECK-NEXT:    vfncvt.f.f.w v8, v28
 ; CHECK-NEXT:    ret
   %evec = uitofp <vscale x 8 x i64> %va to <vscale x 8 x half>
@@ -1175,7 +1535,7 @@ define <vscale x 8 x half> @vuitofp_nxv8i64_nxv8f16(<vscale x 8 x i64> %va) {
 define <vscale x 8 x float> @vsitofp_nxv8i64_nxv8f32(<vscale x 8 x i64> %va) {
 ; CHECK-LABEL: vsitofp_nxv8i64_nxv8f32:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e32,m4,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e32, m4, ta, mu
 ; CHECK-NEXT:    vfncvt.f.x.w v28, v8
 ; CHECK-NEXT:    vmv4r.v v8, v28
 ; CHECK-NEXT:    ret
@@ -1186,7 +1546,7 @@ define <vscale x 8 x float> @vsitofp_nxv8i64_nxv8f32(<vscale x 8 x i64> %va) {
 define <vscale x 8 x float> @vuitofp_nxv8i64_nxv8f32(<vscale x 8 x i64> %va) {
 ; CHECK-LABEL: vuitofp_nxv8i64_nxv8f32:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e32,m4,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e32, m4, ta, mu
 ; CHECK-NEXT:    vfncvt.f.xu.w v28, v8
 ; CHECK-NEXT:    vmv4r.v v8, v28
 ; CHECK-NEXT:    ret
@@ -1197,7 +1557,7 @@ define <vscale x 8 x float> @vuitofp_nxv8i64_nxv8f32(<vscale x 8 x i64> %va) {
 define <vscale x 8 x double> @vsitofp_nxv8i64_nxv8f64(<vscale x 8 x i64> %va) {
 ; CHECK-LABEL: vsitofp_nxv8i64_nxv8f64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e64,m8,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e64, m8, ta, mu
 ; CHECK-NEXT:    vfcvt.f.x.v v8, v8
 ; CHECK-NEXT:    ret
   %evec = sitofp <vscale x 8 x i64> %va to <vscale x 8 x double>
@@ -1207,7 +1567,7 @@ define <vscale x 8 x double> @vsitofp_nxv8i64_nxv8f64(<vscale x 8 x i64> %va) {
 define <vscale x 8 x double> @vuitofp_nxv8i64_nxv8f64(<vscale x 8 x i64> %va) {
 ; CHECK-LABEL: vuitofp_nxv8i64_nxv8f64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetvli a0, zero, e64,m8,ta,mu
+; CHECK-NEXT:    vsetvli a0, zero, e64, m8, ta, mu
 ; CHECK-NEXT:    vfcvt.f.xu.v v8, v8
 ; CHECK-NEXT:    ret
   %evec = uitofp <vscale x 8 x i64> %va to <vscale x 8 x double>
