@@ -129,6 +129,7 @@ public:
   // Primary storage.
   virtual void getValues(std::vector<double> **) { fatal("valf64"); }
   virtual void getValues(std::vector<float> **) { fatal("valf32"); }
+  virtual void getValues(std::vector<int64_t> **) { fatal("vali64"); }
   virtual void getValues(std::vector<int32_t> **) { fatal("vali32"); }
   virtual void getValues(std::vector<int16_t> **) { fatal("vali16"); }
   virtual void getValues(std::vector<int8_t> **) { fatal("vali8"); }
@@ -437,6 +438,7 @@ TEMPLATE(MemRef1DU64, uint64_t);
 TEMPLATE(MemRef1DU32, uint32_t);
 TEMPLATE(MemRef1DU16, uint16_t);
 TEMPLATE(MemRef1DU8, uint8_t);
+TEMPLATE(MemRef1DI64, int64_t);
 TEMPLATE(MemRef1DI32, int32_t);
 TEMPLATE(MemRef1DI16, int16_t);
 TEMPLATE(MemRef1DI8, int8_t);
@@ -448,9 +450,10 @@ enum OverheadTypeEnum : uint64_t { kU64 = 1, kU32 = 2, kU16 = 3, kU8 = 4 };
 enum PrimaryTypeEnum : uint64_t {
   kF64 = 1,
   kF32 = 2,
-  kI32 = 3,
-  kI16 = 4,
-  kI8 = 5
+  kI64 = 3,
+  kI32 = 4,
+  kI16 = 5,
+  kI8 = 6
 };
 
 void *newSparseTensor(char *filename, uint8_t *abase, uint8_t *adata,
@@ -462,23 +465,47 @@ void *newSparseTensor(char *filename, uint8_t *abase, uint8_t *adata,
   uint8_t *sparsity = adata + aoff;
   uint64_t *perm = pdata + poff;
 
-  // The most common cases: 64-bit or 32-bit overhead, double/float values.
+  // Double matrices with all combinations of overhead storage.
   CASE(kU64, kU64, kF64, uint64_t, uint64_t, double);
-  CASE(kU64, kU64, kF32, uint64_t, uint64_t, float);
   CASE(kU64, kU32, kF64, uint64_t, uint32_t, double);
-  CASE(kU64, kU32, kF32, uint64_t, uint32_t, float);
+  CASE(kU64, kU16, kF64, uint64_t, uint16_t, double);
+  CASE(kU64, kU8, kF64, uint64_t, uint8_t, double);
   CASE(kU32, kU64, kF64, uint32_t, uint64_t, double);
-  CASE(kU32, kU64, kF32, uint32_t, uint64_t, float);
   CASE(kU32, kU32, kF64, uint32_t, uint32_t, double);
-  CASE(kU32, kU32, kF32, uint32_t, uint32_t, float);
-
-  // Some special cases: low overhead storage, double/float values.
+  CASE(kU32, kU16, kF64, uint32_t, uint16_t, double);
+  CASE(kU32, kU8, kF64, uint32_t, uint8_t, double);
+  CASE(kU16, kU64, kF64, uint16_t, uint64_t, double);
+  CASE(kU16, kU32, kF64, uint16_t, uint32_t, double);
   CASE(kU16, kU16, kF64, uint16_t, uint16_t, double);
+  CASE(kU16, kU8, kF64, uint16_t, uint8_t, double);
+  CASE(kU8, kU64, kF64, uint8_t, uint64_t, double);
+  CASE(kU8, kU32, kF64, uint8_t, uint32_t, double);
+  CASE(kU8, kU16, kF64, uint8_t, uint16_t, double);
   CASE(kU8, kU8, kF64, uint8_t, uint8_t, double);
+
+  // Float matrices with all combinations of overhead storage.
+  CASE(kU64, kU64, kF32, uint64_t, uint64_t, float);
+  CASE(kU64, kU32, kF32, uint64_t, uint32_t, float);
+  CASE(kU64, kU16, kF32, uint64_t, uint16_t, float);
+  CASE(kU64, kU8, kF32, uint64_t, uint8_t, float);
+  CASE(kU32, kU64, kF32, uint32_t, uint64_t, float);
+  CASE(kU32, kU32, kF32, uint32_t, uint32_t, float);
+  CASE(kU32, kU16, kF32, uint32_t, uint16_t, float);
+  CASE(kU32, kU8, kF32, uint32_t, uint8_t, float);
+  CASE(kU16, kU64, kF32, uint16_t, uint64_t, float);
+  CASE(kU16, kU32, kF32, uint16_t, uint32_t, float);
   CASE(kU16, kU16, kF32, uint16_t, uint16_t, float);
+  CASE(kU16, kU8, kF32, uint16_t, uint8_t, float);
+  CASE(kU8, kU64, kF32, uint8_t, uint64_t, float);
+  CASE(kU8, kU32, kF32, uint8_t, uint32_t, float);
+  CASE(kU8, kU16, kF32, uint8_t, uint16_t, float);
   CASE(kU8, kU8, kF32, uint8_t, uint8_t, float);
 
-  // Integral matrices with low overhead storage.
+  // Integral matrices with same overhead storage.
+  CASE(kU64, kU64, kI64, uint64_t, uint64_t, int64_t);
+  CASE(kU64, kU64, kI32, uint64_t, uint64_t, int32_t);
+  CASE(kU64, kU64, kI16, uint64_t, uint64_t, int16_t);
+  CASE(kU64, kU64, kI8, uint64_t, uint64_t, int8_t);
   CASE(kU32, kU32, kI32, uint32_t, uint32_t, int32_t);
   CASE(kU32, kU32, kI16, uint32_t, uint32_t, int16_t);
   CASE(kU32, kU32, kI8, uint32_t, uint32_t, int8_t);
@@ -512,6 +539,7 @@ IMPL2(MemRef1DU16, sparseIndices16, uint16_t, getIndices)
 IMPL2(MemRef1DU8, sparseIndices8, uint8_t, getIndices)
 IMPL1(MemRef1DF64, sparseValuesF64, double, getValues)
 IMPL1(MemRef1DF32, sparseValuesF32, float, getValues)
+IMPL1(MemRef1DI64, sparseValuesI64, int64_t, getValues)
 IMPL1(MemRef1DI32, sparseValuesI32, int32_t, getValues)
 IMPL1(MemRef1DI16, sparseValuesI16, int16_t, getValues)
 IMPL1(MemRef1DI8, sparseValuesI8, int8_t, getValues)

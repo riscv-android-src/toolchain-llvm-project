@@ -22,12 +22,14 @@
 #include "clang/AST/ExprCXX.h"
 #include "clang/AST/PrettyDeclStackTrace.h"
 #include "clang/AST/StmtCXX.h"
+#include "clang/Basic/DarwinSDKInfo.h"
 #include "clang/Basic/DiagnosticOptions.h"
 #include "clang/Basic/PartialDiagnostic.h"
 #include "clang/Basic/SourceManager.h"
 #include "clang/Basic/Stack.h"
 #include "clang/Basic/TargetInfo.h"
 #include "clang/Lex/HeaderSearch.h"
+#include "clang/Lex/HeaderSearchOptions.h"
 #include "clang/Lex/Preprocessor.h"
 #include "clang/Sema/CXXFieldCollector.h"
 #include "clang/Sema/DelayedDiagnostic.h"
@@ -54,6 +56,26 @@ SourceLocation Sema::getLocForEndOfToken(SourceLocation Loc, unsigned Offset) {
 }
 
 ModuleLoader &Sema::getModuleLoader() const { return PP.getModuleLoader(); }
+
+DarwinSDKInfo *
+Sema::getDarwinSDKInfoForAvailabilityChecking(SourceLocation Loc,
+                                              StringRef Platform) {
+  if (CachedDarwinSDKInfo)
+    return CachedDarwinSDKInfo->get();
+  auto SDKInfo = parseDarwinSDKInfo(
+      PP.getFileManager().getVirtualFileSystem(),
+      PP.getHeaderSearchInfo().getHeaderSearchOpts().Sysroot);
+  if (SDKInfo && *SDKInfo) {
+    CachedDarwinSDKInfo = std::make_unique<DarwinSDKInfo>(std::move(**SDKInfo));
+    return CachedDarwinSDKInfo->get();
+  }
+  if (!SDKInfo)
+    llvm::consumeError(SDKInfo.takeError());
+  Diag(Loc, diag::warn_missing_sdksettings_for_availability_checking)
+      << Platform;
+  CachedDarwinSDKInfo = std::unique_ptr<DarwinSDKInfo>();
+  return nullptr;
+}
 
 IdentifierInfo *
 Sema::InventAbbreviatedTemplateParameterTypeName(IdentifierInfo *ParamName,
@@ -183,6 +205,7 @@ Sema::Sema(Preprocessor &pp, ASTContext &ctxt, ASTConsumer &consumer,
       DisableTypoCorrection(false), TyposCorrected(0), AnalysisWarnings(*this),
       ThreadSafetyDeclCache(nullptr), VarDataSharingAttributesStack(nullptr),
       CurScope(nullptr), Ident_super(nullptr), Ident___float128(nullptr) {
+  assert(pp.TUKind == TUKind);
   TUScope = nullptr;
   isConstantEvaluatedOverride = false;
 
@@ -576,13 +599,14 @@ ExprResult Sema::ImpCastExprToType(Expr *E, QualType Ty,
                                    const CXXCastPath *BasePath,
                                    CheckedConversionKind CCK) {
 #ifndef NDEBUG
-  if (VK == VK_RValue && !E->isRValue()) {
+  if (VK == VK_PRValue && !E->isPRValue()) {
     switch (Kind) {
     default:
-      llvm_unreachable(("can't implicitly cast lvalue to rvalue with this cast "
-                        "kind: " +
-                        std::string(CastExpr::getCastKindName(Kind)))
-                           .c_str());
+      llvm_unreachable(
+          ("can't implicitly cast glvalue to prvalue with this cast "
+           "kind: " +
+           std::string(CastExpr::getCastKindName(Kind)))
+              .c_str());
     case CK_Dependent:
     case CK_LValueToRValue:
     case CK_ArrayToPointerDecay:
@@ -592,8 +616,8 @@ ExprResult Sema::ImpCastExprToType(Expr *E, QualType Ty,
       break;
     }
   }
-  assert((VK == VK_RValue || Kind == CK_Dependent || !E->isRValue()) &&
-         "can't cast rvalue to lvalue");
+  assert((VK == VK_PRValue || Kind == CK_Dependent || !E->isPRValue()) &&
+         "can't cast prvalue to glvalue");
 #endif
 
   diagnoseNullableToNonnullConversion(Ty, E->getType(), E->getBeginLoc());
@@ -608,7 +632,7 @@ ExprResult Sema::ImpCastExprToType(Expr *E, QualType Ty,
   // C++1z [conv.array]: The temporary materialization conversion is applied.
   // We also use this to fuel C++ DR1213, which applies to C++11 onwards.
   if (Kind == CK_ArrayToPointerDecay && getLangOpts().CPlusPlus &&
-      E->getValueKind() == VK_RValue) {
+      E->getValueKind() == VK_PRValue) {
     // The temporary is an lvalue in C++98 and an xvalue otherwise.
     ExprResult Materialized = CreateMaterializeTemporaryExpr(
         E->getType(), E, !getLangOpts().CPlusPlus11);
@@ -811,8 +835,21 @@ static void checkUndefinedButUsed(Sema &S) {
       // FIXME: We can promote this to an error. The function or variable can't
       // be defined anywhere else, so the program must necessarily violate the
       // one definition rule.
-      S.Diag(VD->getLocation(), diag::warn_undefined_internal)
-        << isa<VarDecl>(VD) << VD;
+      bool IsImplicitBase = false;
+      if (const auto *BaseD = dyn_cast<FunctionDecl>(VD)) {
+        auto *DVAttr = BaseD->getAttr<OMPDeclareVariantAttr>();
+        if (DVAttr && !DVAttr->getTraitInfo().isExtensionActive(
+                          llvm::omp::TraitProperty::
+                              implementation_extension_disable_implicit_base)) {
+          const auto *Func = cast<FunctionDecl>(
+              cast<DeclRefExpr>(DVAttr->getVariantFuncRef())->getDecl());
+          IsImplicitBase = BaseD->isImplicit() &&
+                           Func->getIdentifier()->isMangledOpenMPVariantName();
+        }
+      }
+      if (!S.getLangOpts().OpenMP || !IsImplicitBase)
+        S.Diag(VD->getLocation(), diag::warn_undefined_internal)
+            << isa<VarDecl>(VD) << VD;
     } else if (auto *FD = dyn_cast<FunctionDecl>(VD)) {
       (void)FD;
       assert(FD->getMostRecentDecl()->isInlined() &&
@@ -1776,7 +1813,7 @@ Sema::SemaDiagnosticBuilder Sema::Diag(SourceLocation Loc, unsigned DiagID,
   bool IsError = Diags.getDiagnosticIDs()->isDefaultMappingAsError(DiagID);
   bool ShouldDefer = getLangOpts().CUDA && LangOpts.GPUDeferDiag &&
                      DiagnosticIDs::isDeferrable(DiagID) &&
-                     (DeferHint || !IsError);
+                     (DeferHint || DeferDiags || !IsError);
   auto SetIsLastErrorImmediate = [&](bool Flag) {
     if (IsError)
       IsLastErrorImmediate = Flag;
@@ -1941,6 +1978,9 @@ void Sema::RecordParsingTemplateParameterDepth(unsigned Depth) {
 
 // Check that the type of the VarDecl has an accessible copy constructor and
 // resolve its destructor's exception specification.
+// This also performs initialization of block variables when they are moved
+// to the heap. It uses the same rules as applicable for implicit moves
+// according to the C++ standard in effect ([class.copy.elision]p3).
 static void checkEscapingByref(VarDecl *VD, Sema &S) {
   QualType T = VD->getType();
   EnterExpressionEvaluationContext scope(
@@ -1948,9 +1988,18 @@ static void checkEscapingByref(VarDecl *VD, Sema &S) {
   SourceLocation Loc = VD->getLocation();
   Expr *VarRef =
       new (S.Context) DeclRefExpr(S.Context, VD, false, T, VK_LValue, Loc);
-  ExprResult Result = S.PerformMoveOrCopyInitialization(
-      InitializedEntity::InitializeBlock(Loc, T, false), VD, VD->getType(),
-      VarRef, /*AllowNRVO=*/true);
+  ExprResult Result;
+  auto IE = InitializedEntity::InitializeBlock(Loc, T, false);
+  if (S.getLangOpts().CPlusPlus2b) {
+    auto *E = ImplicitCastExpr::Create(S.Context, T, CK_NoOp, VarRef, nullptr,
+                                       VK_XValue, FPOptionsOverride());
+    Result = S.PerformCopyInitialization(IE, SourceLocation(), E);
+  } else {
+    Result = S.PerformMoveOrCopyInitialization(
+        IE, Sema::NamedReturnInfo{VD, Sema::NamedReturnInfo::MoveEligible},
+        VarRef);
+  }
+
   if (!Result.isInvalid()) {
     Result = S.MaybeCreateExprWithCleanups(Result);
     Expr *Init = Result.getAs<Expr>();

@@ -14,6 +14,12 @@ include(CheckSymbolExists)
 include(CMakeDependentOption)
 include(LLVMProcessSources)
 
+if(CMAKE_LINKER MATCHES ".*lld" OR (LLVM_USE_LINKER STREQUAL "lld" OR LLVM_ENABLE_LLD))
+  set(LINKER_IS_LLD TRUE)
+else()
+  set(LINKER_IS_LLD FALSE)
+endif()
+
 if(CMAKE_LINKER MATCHES "lld-link" OR (MSVC AND (LLVM_USE_LINKER STREQUAL "lld" OR LLVM_ENABLE_LLD)))
   set(LINKER_IS_LLD_LINK TRUE)
 else()
@@ -305,6 +311,19 @@ if( LLVM_ENABLE_PIC )
     # On Windows all code is PIC. MinGW warns if -fPIC is used.
   else()
     add_flag_or_print_warning("-fPIC" FPIC)
+    # Enable interprocedural optimizations for non-inline functions which would
+    # otherwise be disabled due to GCC -fPIC's default.
+    # Note: GCC<10.3 has a bug on SystemZ.
+    #
+    # Note: Clang allows IPO for -fPIC so this optimization is less effective.
+    # Older Clang may support -fno-semantic-interposition but it used local
+    # aliases to optimize global variables, which is incompatible with copy
+    # relocations due to -fno-pic.
+    if ((CMAKE_COMPILER_IS_GNUCXX AND
+         NOT (LLVM_NATIVE_ARCH STREQUAL "SystemZ" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 10.3))
+       OR (CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND CMAKE_CXX_COMPILER_VERSION GREATER_EQUAL 13))
+      add_flag_if_supported("-fno-semantic-interposition" FNO_SEMANTIC_INTERPOSITION)
+    endif()
   endif()
   # GCC for MIPS can miscompile LLVM due to PR37701.
   if(CMAKE_COMPILER_IS_GNUCXX AND LLVM_NATIVE_ARCH STREQUAL "Mips" AND

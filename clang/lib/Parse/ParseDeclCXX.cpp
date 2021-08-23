@@ -667,10 +667,48 @@ bool Parser::ParseUsingDeclarator(DeclaratorContext Context,
 ///     alias-declaration: C++11 [dcl.dcl]p1
 ///       'using' identifier attribute-specifier-seq[opt] = type-id ;
 ///
-Parser::DeclGroupPtrTy Parser::ParseUsingDeclaration(
+///     using-enum-declaration: [C++20, dcl.enum]
+///       'using' elaborated-enum-specifier ;
+///
+///     elaborated-enum-specifier:
+///       'enum' nested-name-specifier[opt] identifier
+Parser::DeclGroupPtrTy
+Parser::ParseUsingDeclaration(
     DeclaratorContext Context, const ParsedTemplateInfo &TemplateInfo,
     SourceLocation UsingLoc, SourceLocation &DeclEnd,
     ParsedAttributesWithRange &PrefixAttrs, AccessSpecifier AS) {
+  SourceLocation UELoc;
+  if (TryConsumeToken(tok::kw_enum, UELoc)) {
+    // C++20 using-enum
+    Diag(UELoc, getLangOpts().CPlusPlus20
+                    ? diag::warn_cxx17_compat_using_enum_declaration
+                    : diag::ext_using_enum_declaration);
+
+    DiagnoseCXX11AttributeExtension(PrefixAttrs);
+
+    DeclSpec DS(AttrFactory);
+    ParseEnumSpecifier(UELoc, DS, TemplateInfo, AS,
+                       // DSC_trailing has the semantics we desire
+                       DeclSpecContext::DSC_trailing);
+
+    if (TemplateInfo.Kind) {
+      SourceRange R = TemplateInfo.getSourceRange();
+      Diag(UsingLoc, diag::err_templated_using_directive_declaration)
+          << 1 /* declaration */ << R << FixItHint::CreateRemoval(R);
+
+      return nullptr;
+    }
+
+    Decl *UED = Actions.ActOnUsingEnumDeclaration(getCurScope(), AS, UsingLoc,
+                                                  UELoc, DS);
+    DeclEnd = Tok.getLocation();
+    if (ExpectAndConsume(tok::semi, diag::err_expected_after,
+                         "using-enum declaration"))
+      SkipUntil(tok::semi);
+
+    return Actions.ConvertDeclToDeclGroup(UED);
+  }
+
   // Check for misplaced attributes before the identifier in an
   // alias-declaration.
   ParsedAttributesWithRange MisplacedAttrs(AttrFactory);
@@ -768,8 +806,9 @@ Parser::DeclGroupPtrTy Parser::ParseUsingDeclaration(
   // Eat ';'.
   DeclEnd = Tok.getLocation();
   if (ExpectAndConsume(tok::semi, diag::err_expected_after,
-                       !Attrs.empty() ? "attributes list"
-                                      : "using declaration"))
+                       !Attrs.empty()    ? "attributes list"
+                       : UELoc.isValid() ? "using-enum declaration"
+                                         : "using declaration"))
     SkipUntil(tok::semi);
 
   return Actions.BuildDeclaratorGroup(DeclsInGroup);
@@ -1707,7 +1746,7 @@ void Parser::ParseClassSpecifier(tok::TokenKind TagTokKind,
     TUK = Sema::TUK_Reference;
   else if (Tok.is(tok::l_brace) ||
            (getLangOpts().CPlusPlus && Tok.is(tok::colon)) ||
-           (isCXX11FinalKeyword() &&
+           (isClassCompatibleKeyword() &&
             (NextToken().is(tok::l_brace) || NextToken().is(tok::colon)))) {
     if (DS.isFriendSpecified()) {
       // C++ [class.friend]p2:
@@ -1723,14 +1762,18 @@ void Parser::ParseClassSpecifier(tok::TokenKind TagTokKind,
       // Okay, this is a class definition.
       TUK = Sema::TUK_Definition;
     }
-  } else if (isCXX11FinalKeyword() && (NextToken().is(tok::l_square) ||
-                                       NextToken().is(tok::kw_alignas))) {
+  } else if (isClassCompatibleKeyword() &&
+             (NextToken().is(tok::l_square) ||
+              NextToken().is(tok::kw_alignas) ||
+              isCXX11VirtSpecifier(NextToken()) != VirtSpecifiers::VS_None)) {
     // We can't tell if this is a definition or reference
     // until we skipped the 'final' and C++11 attribute specifiers.
     TentativeParsingAction PA(*this);
 
-    // Skip the 'final' keyword.
-    ConsumeToken();
+    // Skip the 'final', abstract'... keywords.
+    while (isClassCompatibleKeyword()) {
+      ConsumeToken();
+    }
 
     // Skip C++11 attribute specifiers.
     while (true) {
@@ -1979,7 +2022,7 @@ void Parser::ParseClassSpecifier(tok::TokenKind TagTokKind,
   if (TUK == Sema::TUK_Definition) {
     assert(Tok.is(tok::l_brace) ||
            (getLangOpts().CPlusPlus && Tok.is(tok::colon)) ||
-           isCXX11FinalKeyword());
+           isClassCompatibleKeyword());
     if (SkipBody.ShouldSkip)
       SkipCXXMemberSpecification(StartLoc, AttrFixitLoc, TagType,
                                  TagOrTempResult.get());
@@ -2246,8 +2289,10 @@ VirtSpecifiers::Specifier Parser::isCXX11VirtSpecifier(const Token &Tok) const {
     Ident_final = &PP.getIdentifierTable().get("final");
     if (getLangOpts().GNUKeywords)
       Ident_GNU_final = &PP.getIdentifierTable().get("__final");
-    if (getLangOpts().MicrosoftExt)
+    if (getLangOpts().MicrosoftExt) {
       Ident_sealed = &PP.getIdentifierTable().get("sealed");
+      Ident_abstract = &PP.getIdentifierTable().get("abstract");
+    }
     Ident_override = &PP.getIdentifierTable().get("override");
   }
 
@@ -2256,6 +2301,9 @@ VirtSpecifiers::Specifier Parser::isCXX11VirtSpecifier(const Token &Tok) const {
 
   if (II == Ident_sealed)
     return VirtSpecifiers::VS_Sealed;
+
+  if (II == Ident_abstract)
+    return VirtSpecifiers::VS_Abstract;
 
   if (II == Ident_final)
     return VirtSpecifiers::VS_Final;
@@ -2302,6 +2350,8 @@ void Parser::ParseOptionalCXX11VirtSpecifierSeq(VirtSpecifiers &VS,
         << VirtSpecifiers::getSpecifierName(Specifier);
     } else if (Specifier == VirtSpecifiers::VS_Sealed) {
       Diag(Tok.getLocation(), diag::ext_ms_sealed_keyword);
+    } else if (Specifier == VirtSpecifiers::VS_Abstract) {
+      Diag(Tok.getLocation(), diag::ext_ms_abstract_keyword);
     } else if (Specifier == VirtSpecifiers::VS_GNU_Final) {
       Diag(Tok.getLocation(), diag::ext_warn_gnu_final);
     } else {
@@ -2322,6 +2372,16 @@ bool Parser::isCXX11FinalKeyword() const {
   return Specifier == VirtSpecifiers::VS_Final ||
          Specifier == VirtSpecifiers::VS_GNU_Final ||
          Specifier == VirtSpecifiers::VS_Sealed;
+}
+
+/// isClassCompatibleKeyword - Determine whether the next token is a C++11
+/// 'final' or Microsoft 'sealed' or 'abstract' contextual keywords.
+bool Parser::isClassCompatibleKeyword() const {
+  VirtSpecifiers::Specifier Specifier = isCXX11VirtSpecifier();
+  return Specifier == VirtSpecifiers::VS_Final ||
+         Specifier == VirtSpecifiers::VS_GNU_Final ||
+         Specifier == VirtSpecifiers::VS_Sealed ||
+         Specifier == VirtSpecifiers::VS_Abstract;
 }
 
 /// Parse a C++ member-declarator up to, but not including, the optional
@@ -2607,6 +2667,13 @@ Parser::ParseCXXClassMemberDeclaration(AccessSpecifier AS,
   ParsedAttributesViewWithRange FnAttrs;
   // Optional C++11 attribute-specifier
   MaybeParseCXX11Attributes(attrs);
+
+  // The next token may be an OpenMP pragma annotation token. That would
+  // normally be handled from ParseCXXClassMemberDeclarationWithPragmas, but in
+  // this case, it came from an *attribute* rather than a pragma. Handle it now.
+  if (Tok.is(tok::annot_attr_openmp))
+    return ParseOpenMPDeclarativeDirectiveWithExtDecl(AS, attrs);
+
   // We need to keep these attributes for future diagnostic
   // before they are taken over by declaration specifier.
   FnAttrs.addAll(attrs.begin(), attrs.end());
@@ -2888,8 +2955,13 @@ Parser::ParseCXXClassMemberDeclaration(AccessSpecifier AS,
       HasStaticInitializer = true;
     }
 
+    if (PureSpecLoc.isValid() && VS.getAbstractLoc().isValid()) {
+      Diag(PureSpecLoc, diag::err_duplicate_virt_specifier) << "abstract";
+    }
     if (ThisDecl && PureSpecLoc.isValid())
       Actions.ActOnPureSpecifier(ThisDecl, PureSpecLoc);
+    else if (ThisDecl && VS.getAbstractLoc().isValid())
+      Actions.ActOnPureSpecifier(ThisDecl, VS.getAbstractLoc());
 
     // Handle the initializer.
     if (HasInClassInit != ICIS_NoInit) {
@@ -3196,6 +3268,7 @@ Parser::DeclGroupPtrTy Parser::ParseCXXClassMemberDeclarationWithPragmas(
     return nullptr;
   }
 
+  case tok::annot_attr_openmp:
   case tok::annot_pragma_openmp:
     return ParseOpenMPDeclarativeDirectiveWithExtDecl(
         AS, AccessAttrs, /*Delayed=*/true, TagType, TagDecl);
@@ -3274,30 +3347,53 @@ void Parser::ParseCXXMemberSpecification(SourceLocation RecordLoc,
     Actions.ActOnTagStartDefinition(getCurScope(), TagDecl);
 
   SourceLocation FinalLoc;
+  SourceLocation AbstractLoc;
   bool IsFinalSpelledSealed = false;
+  bool IsAbstract = false;
 
   // Parse the optional 'final' keyword.
   if (getLangOpts().CPlusPlus && Tok.is(tok::identifier)) {
-    VirtSpecifiers::Specifier Specifier = isCXX11VirtSpecifier(Tok);
-    assert((Specifier == VirtSpecifiers::VS_Final ||
-            Specifier == VirtSpecifiers::VS_GNU_Final ||
-            Specifier == VirtSpecifiers::VS_Sealed) &&
+    while (true) {
+      VirtSpecifiers::Specifier Specifier = isCXX11VirtSpecifier(Tok);
+      if (Specifier == VirtSpecifiers::VS_None)
+        break;
+      if (isCXX11FinalKeyword()) {
+        if (FinalLoc.isValid()) {
+          auto Skipped = ConsumeToken();
+          Diag(Skipped, diag::err_duplicate_class_virt_specifier)
+              << VirtSpecifiers::getSpecifierName(Specifier);
+        } else {
+          FinalLoc = ConsumeToken();
+          if (Specifier == VirtSpecifiers::VS_Sealed)
+            IsFinalSpelledSealed = true;
+        }
+      } else {
+        if (AbstractLoc.isValid()) {
+          auto Skipped = ConsumeToken();
+          Diag(Skipped, diag::err_duplicate_class_virt_specifier)
+              << VirtSpecifiers::getSpecifierName(Specifier);
+        } else {
+          AbstractLoc = ConsumeToken();
+          IsAbstract = true;
+        }
+      }
+      if (TagType == DeclSpec::TST_interface)
+        Diag(FinalLoc, diag::err_override_control_interface)
+            << VirtSpecifiers::getSpecifierName(Specifier);
+      else if (Specifier == VirtSpecifiers::VS_Final)
+        Diag(FinalLoc, getLangOpts().CPlusPlus11
+                           ? diag::warn_cxx98_compat_override_control_keyword
+                           : diag::ext_override_control_keyword)
+            << VirtSpecifiers::getSpecifierName(Specifier);
+      else if (Specifier == VirtSpecifiers::VS_Sealed)
+        Diag(FinalLoc, diag::ext_ms_sealed_keyword);
+      else if (Specifier == VirtSpecifiers::VS_Abstract)
+        Diag(AbstractLoc, diag::ext_ms_abstract_keyword);
+      else if (Specifier == VirtSpecifiers::VS_GNU_Final)
+        Diag(FinalLoc, diag::ext_warn_gnu_final);
+    }
+    assert((FinalLoc.isValid() || AbstractLoc.isValid()) &&
            "not a class definition");
-    FinalLoc = ConsumeToken();
-    IsFinalSpelledSealed = Specifier == VirtSpecifiers::VS_Sealed;
-
-    if (TagType == DeclSpec::TST_interface)
-      Diag(FinalLoc, diag::err_override_control_interface)
-        << VirtSpecifiers::getSpecifierName(Specifier);
-    else if (Specifier == VirtSpecifiers::VS_Final)
-      Diag(FinalLoc, getLangOpts().CPlusPlus11
-                         ? diag::warn_cxx98_compat_override_control_keyword
-                         : diag::ext_override_control_keyword)
-        << VirtSpecifiers::getSpecifierName(Specifier);
-    else if (Specifier == VirtSpecifiers::VS_Sealed)
-      Diag(FinalLoc, diag::ext_ms_sealed_keyword);
-    else if (Specifier == VirtSpecifiers::VS_GNU_Final)
-      Diag(FinalLoc, diag::ext_warn_gnu_final);
 
     // Parse any C++11 attributes after 'final' keyword.
     // These attributes are not allowed to appear here,
@@ -3370,7 +3466,7 @@ void Parser::ParseCXXMemberSpecification(SourceLocation RecordLoc,
 
   if (TagDecl)
     Actions.ActOnStartCXXMemberDeclarations(getCurScope(), TagDecl, FinalLoc,
-                                            IsFinalSpelledSealed,
+                                            IsFinalSpelledSealed, IsAbstract,
                                             T.getOpenLocation());
 
   // C++ 11p3: Members of a class defined with the keyword class are private
@@ -4047,6 +4143,70 @@ IdentifierInfo *Parser::TryParseCXX11AttributeIdentifier(SourceLocation &Loc) {
   }
 }
 
+void Parser::ParseOpenMPAttributeArgs(IdentifierInfo *AttrName,
+                                      CachedTokens &OpenMPTokens) {
+  // Both 'sequence' and 'directive' attributes require arguments, so parse the
+  // open paren for the argument list.
+  BalancedDelimiterTracker T(*this, tok::l_paren);
+  if (T.consumeOpen()) {
+    Diag(Tok, diag::err_expected) << tok::l_paren;
+    return;
+  }
+
+  if (AttrName->isStr("directive")) {
+    // If the attribute is named `directive`, we can consume its argument list
+    // and push the tokens from it into the cached token stream for a new OpenMP
+    // pragma directive.
+    Token OMPBeginTok;
+    OMPBeginTok.startToken();
+    OMPBeginTok.setKind(tok::annot_attr_openmp);
+    OMPBeginTok.setLocation(Tok.getLocation());
+    OpenMPTokens.push_back(OMPBeginTok);
+
+    ConsumeAndStoreUntil(tok::r_paren, OpenMPTokens, /*StopAtSemi=*/false,
+                         /*ConsumeFinalToken*/ false);
+    Token OMPEndTok;
+    OMPEndTok.startToken();
+    OMPEndTok.setKind(tok::annot_pragma_openmp_end);
+    OMPEndTok.setLocation(Tok.getLocation());
+    OpenMPTokens.push_back(OMPEndTok);
+  } else {
+    assert(AttrName->isStr("sequence") &&
+           "Expected either 'directive' or 'sequence'");
+    // If the attribute is named 'sequence', its argument is a list of one or
+    // more OpenMP attributes (either 'omp::directive' or 'omp::sequence',
+    // where the 'omp::' is optional).
+    do {
+      // We expect to see one of the following:
+      //  * An identifier (omp) for the attribute namespace followed by ::
+      //  * An identifier (directive) or an identifier (sequence).
+      SourceLocation IdentLoc;
+      IdentifierInfo *Ident = TryParseCXX11AttributeIdentifier(IdentLoc);
+
+      // If there is an identifier and it is 'omp', a double colon is required
+      // followed by the actual identifier we're after.
+      if (Ident && Ident->isStr("omp") && !ExpectAndConsume(tok::coloncolon))
+        Ident = TryParseCXX11AttributeIdentifier(IdentLoc);
+
+      // If we failed to find an identifier (scoped or otherwise), or we found
+      // an unexpected identifier, diagnose.
+      if (!Ident || (!Ident->isStr("directive") && !Ident->isStr("sequence"))) {
+        Diag(Tok.getLocation(), diag::err_expected_sequence_or_directive);
+        SkipUntil(tok::r_paren, StopBeforeMatch);
+        continue;
+      }
+      // We read an identifier. If the identifier is one of the ones we
+      // expected, we can recurse to parse the args.
+      ParseOpenMPAttributeArgs(Ident, OpenMPTokens);
+
+      // There may be a comma to signal that we expect another directive in the
+      // sequence.
+    } while (TryConsumeToken(tok::comma));
+  }
+  // Parse the closing paren for the argument list.
+  T.consumeClose();
+}
+
 static bool IsBuiltInOrStandardCXX11Attribute(IdentifierInfo *AttrName,
                                               IdentifierInfo *ScopeName) {
   switch (
@@ -4087,7 +4247,8 @@ bool Parser::ParseCXX11AttributeArgs(IdentifierInfo *AttrName,
                                      ParsedAttributes &Attrs,
                                      SourceLocation *EndLoc,
                                      IdentifierInfo *ScopeName,
-                                     SourceLocation ScopeLoc) {
+                                     SourceLocation ScopeLoc,
+                                     CachedTokens &OpenMPTokens) {
   assert(Tok.is(tok::l_paren) && "Not a C++11 attribute argument list");
   SourceLocation LParenLoc = Tok.getLocation();
   const LangOptions &LO = getLangOpts();
@@ -4109,6 +4270,18 @@ bool Parser::ParseCXX11AttributeArgs(IdentifierInfo *AttrName,
     // behaviors.
     ParseGNUAttributeArgs(AttrName, AttrNameLoc, Attrs, EndLoc, ScopeName,
                           ScopeLoc, Syntax, nullptr);
+    return true;
+  }
+
+  if (ScopeName && ScopeName->isStr("omp")) {
+    Diag(AttrNameLoc, getLangOpts().OpenMP >= 51
+                          ? diag::warn_omp51_compat_attributes
+                                    : diag::ext_omp_attributes);
+
+    ParseOpenMPAttributeArgs(AttrName, OpenMPTokens);
+
+    // We claim that an attribute was parsed and added so that one is not
+    // created for us by the caller.
     return true;
   }
 
@@ -4171,11 +4344,12 @@ bool Parser::ParseCXX11AttributeArgs(IdentifierInfo *AttrName,
 ///
 /// [C++11] attribute-namespace:
 ///         identifier
-void Parser::ParseCXX11AttributeSpecifier(ParsedAttributes &attrs,
-                                          SourceLocation *endLoc) {
+void Parser::ParseCXX11AttributeSpecifierInternal(ParsedAttributes &Attrs,
+                                                  CachedTokens &OpenMPTokens,
+                                                  SourceLocation *EndLoc) {
   if (Tok.is(tok::kw_alignas)) {
     Diag(Tok.getLocation(), diag::warn_cxx98_compat_alignas);
-    ParseAlignmentSpecifier(attrs, endLoc);
+    ParseAlignmentSpecifier(Attrs, EndLoc);
     return;
   }
 
@@ -4257,11 +4431,11 @@ void Parser::ParseCXX11AttributeSpecifier(ParsedAttributes &attrs,
 
     // Parse attribute arguments
     if (Tok.is(tok::l_paren))
-      AttrParsed = ParseCXX11AttributeArgs(AttrName, AttrLoc, attrs, endLoc,
-                                           ScopeName, ScopeLoc);
+      AttrParsed = ParseCXX11AttributeArgs(AttrName, AttrLoc, Attrs, EndLoc,
+                                           ScopeName, ScopeLoc, OpenMPTokens);
 
     if (!AttrParsed) {
-      attrs.addNew(
+      Attrs.addNew(
           AttrName,
           SourceRange(ScopeLoc.isValid() ? ScopeLoc : AttrLoc, AttrLoc),
           ScopeName, ScopeLoc, nullptr, 0,
@@ -4286,8 +4460,8 @@ void Parser::ParseCXX11AttributeSpecifier(ParsedAttributes &attrs,
     SkipUntil(tok::r_square);
   else if (Tok.is(tok::r_square))
     checkCompoundToken(CloseLoc, tok::r_square, CompoundToken::AttrEnd);
-  if (endLoc)
-    *endLoc = Tok.getLocation();
+  if (EndLoc)
+    *EndLoc = Tok.getLocation();
   if (ExpectAndConsume(tok::r_square))
     SkipUntil(tok::r_square);
 }

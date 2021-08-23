@@ -531,8 +531,10 @@ public:
   ///
   /// \param CancelFlag Flag indicating if the cancellation is performed.
   /// \param CanceledDirective The kind of directive that is cancled.
+  /// \param ExitCB Extra code to be generated in the exit block.
   void emitCancelationCheckImpl(Value *CancelFlag,
-                                omp::Directive CanceledDirective);
+                                omp::Directive CanceledDirective,
+                                FinalizeCallbackTy ExitCB = {});
 
   /// Generate a barrier runtime call.
   ///
@@ -776,6 +778,29 @@ public:
                                       llvm::Value *Pointer,
                                       llvm::ConstantInt *Size,
                                       const llvm::Twine &Name = Twine(""));
+
+  /// The `omp target` interface
+  ///
+  /// For more information about the usage of this interface,
+  /// \see openmp/libomptarget/deviceRTLs/common/include/target.h
+  ///
+  ///{
+
+  /// Create a runtime call for kmpc_target_init
+  ///
+  /// \param Loc The insert and source location description.
+  /// \param IsSPMD Flag to indicate if the kernel is an SPMD kernel or not.
+  /// \param RequiresFullRuntime Indicate if a full device runtime is necessary.
+  InsertPointTy createTargetInit(const LocationDescription &Loc, bool IsSPMD, bool RequiresFullRuntime);
+
+  /// Create a runtime call for kmpc_target_deinit
+  ///
+  /// \param Loc The insert and source location description.
+  /// \param IsSPMD Flag to indicate if the kernel is an SPMD kernel or not.
+  /// \param RequiresFullRuntime Indicate if a full device runtime is necessary.
+  void createTargetDeinit(const LocationDescription &Loc, bool IsSPMD, bool RequiresFullRuntime);
+
+  ///}
 
   /// Declarations for LLVM-IR types (simple, array, function and structure) are
   /// generated below. Their names are defined and used in OpenMPKinds.def. Here
