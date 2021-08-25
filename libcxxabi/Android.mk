@@ -73,7 +73,6 @@ LOCAL_C_INCLUDES := $(libcxxabi_includes)
 LOCAL_CPPFLAGS := $(libcxxabi_cppflags)
 LOCAL_CPP_FEATURES := rtti exceptions
 LOCAL_EXPORT_C_INCLUDES := $(LOCAL_PATH)/include
-LOCAL_ARM_NEON := false
 
 # Unlike the platform build, ndk-build will actually perform dependency checking
 # on static libraries and topologically sort them to determine link order.
