@@ -81,33 +81,11 @@ struct release
     void operator()(locale::facet* p) {p->__release_shared();}
 };
 
-template <class T, class A0>
-inline
-T&
-make(A0 a0)
+template <class T, class ...Args>
+T& make(Args ...args)
 {
     static typename aligned_storage<sizeof(T)>::type buf;
-    auto *obj = ::new (&buf) T(a0);
-    return *obj;
-}
-
-template <class T, class A0, class A1>
-inline
-T&
-make(A0 a0, A1 a1)
-{
-    static typename aligned_storage<sizeof(T)>::type buf;
-    ::new (&buf) T(a0, a1);
-    return *reinterpret_cast<T*>(&buf);
-}
-
-template <class T, class A0, class A1, class A2>
-inline
-T&
-make(A0 a0, A1 a1, A2 a2)
-{
-    static typename aligned_storage<sizeof(T)>::type buf;
-    auto *obj = ::new (&buf) T(a0, a1, a2);
+    auto *obj = ::new (&buf) T(args...);
     return *obj;
 }
 
@@ -283,13 +261,6 @@ _LIBCPP_SUPPRESS_DEPRECATED_POP
 #endif // _LIBCPP_NO_EXCEPTIONS
 }
 
-// NOTE avoid the `base class should be explicitly initialized in the
-// copy constructor` warning emitted by GCC
-#if defined(__clang__) || _GNUC_VER >= 406
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wextra"
-#endif
-
 locale::__imp::__imp(const __imp& other)
     : facets_(max<size_t>(N, other.facets_.size())),
       name_(other.name_)
@@ -299,10 +270,6 @@ locale::__imp::__imp(const __imp& other)
         if (facets_[i])
             facets_[i]->__add_shared();
 }
-
-#if defined(__clang__) || _GNUC_VER >= 406
-#pragma GCC diagnostic pop
-#endif
 
 locale::__imp::__imp(const __imp& other, const string& name, locale::category c)
     : facets_(N),

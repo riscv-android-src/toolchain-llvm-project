@@ -124,6 +124,7 @@ static void defineXLCompatMacros(MacroBuilder &Builder) {
   Builder.defineMacro("__stdcx", "__builtin_ppc_stdcx");
   Builder.defineMacro("__stwcx", "__builtin_ppc_stwcx");
   Builder.defineMacro("__sthcx", "__builtin_ppc_sthcx");
+  Builder.defineMacro("__stbcx", "__builtin_ppc_stbcx");
   Builder.defineMacro("__tdw", "__builtin_ppc_tdw");
   Builder.defineMacro("__tw", "__builtin_ppc_tw");
   Builder.defineMacro("__trap", "__builtin_ppc_trap");
@@ -235,6 +236,8 @@ static void defineXLCompatMacros(MacroBuilder &Builder) {
   Builder.defineMacro("__frsqrtes", "__builtin_ppc_frsqrtes");
   Builder.defineMacro("__fsqrt", "__builtin_ppc_fsqrt");
   Builder.defineMacro("__fsqrts", "__builtin_ppc_fsqrts");
+  Builder.defineMacro("__addex", "__builtin_ppc_addex");
+  Builder.defineMacro("__cmplxl", "__builtin_complex");
 }
 
 /// PPCTargetInfo::getTargetDefines - Return a set of the PowerPC-specific
@@ -255,6 +258,15 @@ void PPCTargetInfo::getTargetDefines(const LangOptions &Opts,
     Builder.defineMacro("__powerpc64__");
     Builder.defineMacro("__ppc64__");
     Builder.defineMacro("__PPC64__");
+  } else if (getTriple().isOSAIX()) {
+    // The XL compilers on AIX define _ARCH_PPC64 for both 32 and 64-bit modes.
+    Builder.defineMacro("_ARCH_PPC64");
+  }
+  if (getTriple().isOSAIX()) {
+    Builder.defineMacro("__THW_PPC__");
+    // Define __PPC and __powerpc for AIX XL C/C++ compatibility
+    Builder.defineMacro("__PPC");
+    Builder.defineMacro("__powerpc");
   }
 
   // Target properties.
@@ -293,6 +305,11 @@ void PPCTargetInfo::getTargetDefines(const LangOptions &Opts,
       Builder.defineMacro("__LONG_DOUBLE_IEEE128__");
     else
       Builder.defineMacro("__LONG_DOUBLE_IBM128__");
+  }
+
+  if (getTriple().isOSAIX() && Opts.LongDoubleSize == 64) {
+    assert(LongDoubleWidth == 64);
+    Builder.defineMacro("__LONGDOUBLE64");
   }
 
   // Define this for elfv2 (64-bit only) or 64-bit darwin.
@@ -361,8 +378,6 @@ void PPCTargetInfo::getTargetDefines(const LangOptions &Opts,
     Builder.defineMacro("__MMA__");
   if (HasROPProtect)
     Builder.defineMacro("__ROP_PROTECT__");
-  if (HasPrivileged)
-    Builder.defineMacro("__PRIVILEGED__");
   if (HasP10Vector)
     Builder.defineMacro("__POWER10_VECTOR__");
   if (HasPCRelativeMemops)

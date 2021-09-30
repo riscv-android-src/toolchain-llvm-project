@@ -43,6 +43,7 @@ using namespace llvm::wasm;
 namespace lld {
 namespace wasm {
 static constexpr int stackAlignment = 16;
+static constexpr int heapAlignment = 16;
 
 namespace {
 
@@ -310,9 +311,12 @@ void Writer::layoutMemory() {
     placeStack();
 
   if (WasmSym::heapBase) {
-    // Set `__heap_base` to directly follow the end of the stack or global data.
-    // The fact that this comes last means that a malloc/brk implementation
-    // can grow the heap at runtime.
+    // Set `__heap_base` to follow the end of the stack or global data. The
+    // fact that this comes last means that a malloc/brk implementation can
+    // grow the heap at runtime.
+    // We'll align the heap base here because memory allocators might expect
+    // __heap_base to be aligned already.
+    memoryPtr = alignTo(memoryPtr, heapAlignment);
     log("mem: heap base   = " + Twine(memoryPtr));
     WasmSym::heapBase->setVA(memoryPtr);
   }
@@ -514,7 +518,7 @@ void Writer::populateTargetFeatures() {
 
   // Validate that used features are allowed in output
   if (!inferFeatures) {
-    for (auto &feature : used.keys()) {
+    for (const auto &feature : used.keys()) {
       if (!allowed.count(std::string(feature)))
         error(Twine("Target feature '") + feature + "' used by " +
               used[feature] + " is not allowed.");
@@ -525,7 +529,7 @@ void Writer::populateTargetFeatures() {
   for (ObjFile *file : symtab->objectFiles) {
     StringRef fileName(file->getName());
     SmallSet<std::string, 8> objectFeatures;
-    for (auto &feature : file->getWasmObj()->getTargetFeatures()) {
+    for (const auto &feature : file->getWasmObj()->getTargetFeatures()) {
       if (feature.Prefix == WASM_FEATURE_PREFIX_DISALLOWED)
         continue;
       objectFeatures.insert(feature.Name);
@@ -534,7 +538,7 @@ void Writer::populateTargetFeatures() {
               fileName + " is disallowed by " + disallowed[feature.Name] +
               ". Use --no-check-features to suppress.");
     }
-    for (auto &feature : required.keys()) {
+    for (const auto &feature : required.keys()) {
       if (!objectFeatures.count(std::string(feature)))
         error(Twine("Missing target feature '") + feature + "' in " + fileName +
               ", required by " + required[feature] +
@@ -544,19 +548,32 @@ void Writer::populateTargetFeatures() {
 }
 
 static bool shouldImport(Symbol *sym) {
-  if (!sym->isUndefined())
-    return false;
-  if (sym->isWeak() && !config->relocatable && !config->isPic)
+  // We don't generate imports for data symbols. They however can be imported
+  // as GOT entries.
+  if (isa<DataSymbol>(sym))
     return false;
   if (!sym->isLive())
     return false;
   if (!sym->isUsedInRegularObj)
     return false;
 
-  // We don't generate imports for data symbols. They however can be imported
-  // as GOT entries.
-  if (isa<DataSymbol>(sym))
+  // When a symbol is weakly defined in a shared library we need to allow
+  // it to be overridden by another module so need to both import
+  // and export the symbol.
+  if (config->shared && sym->isDefined() && sym->isWeak())
+    return true;
+  if (!sym->isUndefined())
     return false;
+  if (sym->isWeak() && !config->relocatable && !config->isPic)
+    return false;
+
+  // In PIC mode we only need to import functions when they are called directly.
+  // Indirect usage all goes via GOT imports.
+  if (config->isPic) {
+    if (auto *f = dyn_cast<UndefinedFunction>(sym))
+      if (!f->isCalledDirectly)
+        return false;
+  }
 
   if (config->isPic || config->relocatable || config->importUndefined)
     return true;
@@ -607,7 +624,7 @@ void Writer::calculateExports() {
       if (Optional<StringRef> exportName = f->function->getExportName()) {
         name = *exportName;
       }
-      export_ = {name, WASM_EXTERNAL_FUNCTION, f->getFunctionIndex()};
+      export_ = {name, WASM_EXTERNAL_FUNCTION, f->getExportedFunctionIndex()};
     } else if (auto *g = dyn_cast<DefinedGlobal>(sym)) {
       if (g->getGlobalType()->Mutable && !g->getFile() && !g->forceExport) {
         // Avoid exporting mutable globals are linker synthesized (e.g.

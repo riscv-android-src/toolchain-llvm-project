@@ -235,7 +235,7 @@ public:
 
   bool DeallocateMemory(lldb::addr_t addr);
 
-  Status Detach(bool keep_stopped);
+  Status Detach(bool keep_stopped, lldb::pid_t pid = LLDB_INVALID_PROCESS_ID);
 
   Status GetMemoryRegionInfo(lldb::addr_t addr, MemoryRegionInfo &range_info);
 
@@ -467,6 +467,9 @@ public:
 
   lldb::DataBufferSP ReadMemoryTags(lldb::addr_t addr, size_t len,
                                     int32_t type);
+
+  Status WriteMemoryTags(lldb::addr_t addr, size_t len, int32_t type,
+                         const std::vector<uint8_t> &tags);
 
   /// Use qOffsets to query the offset used when relocating the target
   /// executable. If successful, the returned structure will contain at least

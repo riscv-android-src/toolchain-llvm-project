@@ -685,10 +685,13 @@ PluginManager::GetObjectFileCreateMemoryCallbackForPluginName(
 
 Status PluginManager::SaveCore(const lldb::ProcessSP &process_sp,
                                const FileSpec &outfile,
-                               lldb::SaveCoreStyle &core_style) {
+                               lldb::SaveCoreStyle &core_style,
+                               const ConstString plugin_name) {
   Status error;
   auto &instances = GetObjectFileInstances().GetInstances();
   for (auto &instance : instances) {
+    if (plugin_name && instance.name != plugin_name)
+      continue;
     if (instance.save_core &&
         instance.save_core(process_sp, outfile, core_style, error))
       return error;
@@ -1074,6 +1077,59 @@ llvm::StringRef PluginManager::GetTraceSchema(size_t index) {
           GetTracePluginInstances().GetInstanceAtIndex(index))
     return instance->schema;
   return llvm::StringRef();
+}
+
+#pragma mark TraceExporter
+
+struct TraceExporterInstance
+    : public PluginInstance<TraceExporterCreateInstance> {
+  TraceExporterInstance(
+      ConstString name, std::string description,
+      TraceExporterCreateInstance create_instance,
+      ThreadTraceExportCommandCreator create_thread_trace_export_command)
+      : PluginInstance<TraceExporterCreateInstance>(
+            name, std::move(description), create_instance),
+        create_thread_trace_export_command(create_thread_trace_export_command) {
+  }
+
+  ThreadTraceExportCommandCreator create_thread_trace_export_command;
+};
+
+typedef PluginInstances<TraceExporterInstance> TraceExporterInstances;
+
+static TraceExporterInstances &GetTraceExporterInstances() {
+  static TraceExporterInstances g_instances;
+  return g_instances;
+}
+
+bool PluginManager::RegisterPlugin(
+    ConstString name, const char *description,
+    TraceExporterCreateInstance create_callback,
+    ThreadTraceExportCommandCreator create_thread_trace_export_command) {
+  return GetTraceExporterInstances().RegisterPlugin(
+      name, description, create_callback, create_thread_trace_export_command);
+}
+
+TraceExporterCreateInstance
+PluginManager::GetTraceExporterCreateCallback(ConstString plugin_name) {
+  return GetTraceExporterInstances().GetCallbackForName(plugin_name);
+}
+
+bool PluginManager::UnregisterPlugin(
+    TraceExporterCreateInstance create_callback) {
+  return GetTraceExporterInstances().UnregisterPlugin(create_callback);
+}
+
+ThreadTraceExportCommandCreator
+PluginManager::GetThreadTraceExportCommandCreatorAtIndex(uint32_t index) {
+  if (TraceExporterInstance *instance =
+          GetTraceExporterInstances().GetInstanceAtIndex(index))
+    return instance->create_thread_trace_export_command;
+  return nullptr;
+}
+
+const char *PluginManager::GetTraceExporterPluginNameAtIndex(uint32_t index) {
+  return GetTraceExporterInstances().GetNameAtIndex(index);
 }
 
 #pragma mark UnwindAssembly

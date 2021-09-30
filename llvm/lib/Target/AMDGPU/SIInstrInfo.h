@@ -122,7 +122,8 @@ private:
 
   void addSCCDefUsersToVALUWorklist(MachineOperand &Op,
                                     MachineInstr &SCCDefInst,
-                                    SetVectorType &Worklist) const;
+                                    SetVectorType &Worklist,
+                                    Register NewCond = Register()) const;
   void addSCCDefsToVALUWorklist(MachineOperand &Op,
                                 SetVectorType &Worklist) const;
 
@@ -161,8 +162,7 @@ public:
     // MO_REL32_HI -> symbol@rel32@hi -> R_AMDGPU_REL32_HI.
     MO_REL32_HI = 5,
 
-    MO_LONG_BRANCH_FORWARD = 6,
-    MO_LONG_BRANCH_BACKWARD = 7,
+    MO_FAR_BRANCH_OFFSET = 6,
 
     MO_ABS32_LO = 8,
     MO_ABS32_HI = 9,
@@ -316,6 +316,14 @@ public:
                           Register DstReg, ArrayRef<MachineOperand> Cond,
                           Register TrueReg, Register FalseReg) const;
 
+  bool analyzeCompare(const MachineInstr &MI, Register &SrcReg,
+                      Register &SrcReg2, int64_t &CmpMask,
+                      int64_t &CmpValue) const override;
+
+  bool optimizeCompareInstr(MachineInstr &CmpInstr, Register SrcReg,
+                            Register SrcReg2, int64_t CmpMask, int64_t CmpValue,
+                            const MachineRegisterInfo *MRI) const override;
+
   unsigned getAddressSpaceForPseudoSourceKind(
              unsigned Kind) const override;
 
@@ -323,7 +331,7 @@ public:
   areMemAccessesTriviallyDisjoint(const MachineInstr &MIa,
                                   const MachineInstr &MIb) const override;
 
-  bool isFoldableCopy(const MachineInstr &MI) const;
+  static bool isFoldableCopy(const MachineInstr &MI);
 
   bool FoldImmediate(MachineInstr &UseMI, MachineInstr &DefMI, Register Reg,
                      MachineRegisterInfo *MRI) const final;

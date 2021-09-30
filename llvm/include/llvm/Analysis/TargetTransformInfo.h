@@ -21,7 +21,6 @@
 #ifndef LLVM_ANALYSIS_TARGETTRANSFORMINFO_H
 #define LLVM_ANALYSIS_TARGETTRANSFORMINFO_H
 
-#include "llvm/Analysis/IVDescriptors.h"
 #include "llvm/IR/InstrTypes.h"
 #include "llvm/IR/Operator.h"
 #include "llvm/IR/PassManager.h"
@@ -47,12 +46,14 @@ class ExtractElementInst;
 class Function;
 class GlobalValue;
 class InstCombiner;
+class OptimizationRemarkEmitter;
 class IntrinsicInst;
 class LoadInst;
 class LoopAccessInfo;
 class Loop;
 class LoopInfo;
 class ProfileSummaryInfo;
+class RecurrenceDescriptor;
 class SCEV;
 class ScalarEvolution;
 class StoreInst;
@@ -97,7 +98,7 @@ struct HardwareLoopInfo {
   Loop *L = nullptr;
   BasicBlock *ExitBlock = nullptr;
   BranchInst *ExitBranch = nullptr;
-  const SCEV *TripCount = nullptr;
+  const SCEV *ExitCount = nullptr;
   IntegerType *CountType = nullptr;
   Value *LoopDecrement = nullptr; // Decrement the loop counter by this
                                   // value in every iteration.
@@ -506,7 +507,8 @@ public:
   /// transformation. The caller will initialize UP with the current
   /// target-independent defaults.
   void getUnrollingPreferences(Loop *L, ScalarEvolution &,
-                               UnrollingPreferences &UP) const;
+                               UnrollingPreferences &UP,
+                               OptimizationRemarkEmitter *ORE) const;
 
   /// Query the target whether it would be profitable to convert the given loop
   /// into a hardware loop.
@@ -659,6 +661,9 @@ public:
   bool isLegalMaskedCompressStore(Type *DataType) const;
   /// Return true if the target supports masked expand load.
   bool isLegalMaskedExpandLoad(Type *DataType) const;
+
+  /// Return true if we should be enabling ordered reductions for the target.
+  bool enableOrderedReductions() const;
 
   /// Return true if the target has a unified operation to calculate division
   /// and remainder. If so, the additional implicit multiplication and
@@ -1146,12 +1151,38 @@ public:
       TTI::TargetCostKind CostKind = TTI::TCK_RecipThroughput,
       bool UseMaskForCond = false, bool UseMaskForGaps = false) const;
 
+  /// A helper function to determine the type of reduction algorithm used
+  /// for a given \p Opcode and set of FastMathFlags \p FMF.
+  static bool requiresOrderedReduction(Optional<FastMathFlags> FMF) {
+    return FMF != None && !(*FMF).allowReassoc();
+  }
+
   /// Calculate the cost of vector reduction intrinsics.
   ///
   /// This is the cost of reducing the vector value of type \p Ty to a scalar
-  /// value using the operation denoted by \p Opcode.
+  /// value using the operation denoted by \p Opcode. The FastMathFlags
+  /// parameter \p FMF indicates what type of reduction we are performing:
+  ///   1. Tree-wise. This is the typical 'fast' reduction performed that
+  ///   involves successively splitting a vector into half and doing the
+  ///   operation on the pair of halves until you have a scalar value. For
+  ///   example:
+  ///     (v0, v1, v2, v3)
+  ///     ((v0+v2), (v1+v3), undef, undef)
+  ///     ((v0+v2+v1+v3), undef, undef, undef)
+  ///   This is the default behaviour for integer operations, whereas for
+  ///   floating point we only do this if \p FMF indicates that
+  ///   reassociation is allowed.
+  ///   2. Ordered. For a vector with N elements this involves performing N
+  ///   operations in lane order, starting with an initial scalar value, i.e.
+  ///     result = InitVal + v0
+  ///     result = result + v1
+  ///     result = result + v2
+  ///     result = result + v3
+  ///   This is only the case for FP operations and when reassociation is not
+  ///   allowed.
+  ///
   InstructionCost getArithmeticReductionCost(
-      unsigned Opcode, VectorType *Ty,
+      unsigned Opcode, VectorType *Ty, Optional<FastMathFlags> FMF,
       TTI::TargetCostKind CostKind = TTI::TCK_RecipThroughput) const;
 
   InstructionCost getMinMaxReductionCost(
@@ -1432,7 +1463,8 @@ public:
                                                   Value *NewV) const = 0;
   virtual bool isLoweredToCall(const Function *F) = 0;
   virtual void getUnrollingPreferences(Loop *L, ScalarEvolution &,
-                                       UnrollingPreferences &UP) = 0;
+                                       UnrollingPreferences &UP,
+                                       OptimizationRemarkEmitter *ORE) = 0;
   virtual void getPeelingPreferences(Loop *L, ScalarEvolution &SE,
                                      PeelingPreferences &PP) = 0;
   virtual bool isHardwareLoopProfitable(Loop *L, ScalarEvolution &SE,
@@ -1479,6 +1511,7 @@ public:
   virtual bool isLegalMaskedGather(Type *DataType, Align Alignment) = 0;
   virtual bool isLegalMaskedCompressStore(Type *DataType) = 0;
   virtual bool isLegalMaskedExpandLoad(Type *DataType) = 0;
+  virtual bool enableOrderedReductions() = 0;
   virtual bool hasDivRemOp(Type *DataType, bool IsSigned) = 0;
   virtual bool hasVolatileVariant(Instruction *I, unsigned AddrSpace) = 0;
   virtual bool prefersVectorizedAddressing() = 0;
@@ -1618,6 +1651,7 @@ public:
       bool UseMaskForCond = false, bool UseMaskForGaps = false) = 0;
   virtual InstructionCost
   getArithmeticReductionCost(unsigned Opcode, VectorType *Ty,
+                             Optional<FastMathFlags> FMF,
                              TTI::TargetCostKind CostKind) = 0;
   virtual InstructionCost
   getMinMaxReductionCost(VectorType *Ty, VectorType *CondTy, bool IsUnsigned,
@@ -1761,8 +1795,9 @@ public:
     return Impl.isLoweredToCall(F);
   }
   void getUnrollingPreferences(Loop *L, ScalarEvolution &SE,
-                               UnrollingPreferences &UP) override {
-    return Impl.getUnrollingPreferences(L, SE, UP);
+                               UnrollingPreferences &UP,
+                               OptimizationRemarkEmitter *ORE) override {
+    return Impl.getUnrollingPreferences(L, SE, UP, ORE);
   }
   void getPeelingPreferences(Loop *L, ScalarEvolution &SE,
                              PeelingPreferences &PP) override {
@@ -1858,6 +1893,9 @@ public:
   }
   bool isLegalMaskedExpandLoad(Type *DataType) override {
     return Impl.isLegalMaskedExpandLoad(DataType);
+  }
+  bool enableOrderedReductions() override {
+    return Impl.enableOrderedReductions();
   }
   bool hasDivRemOp(Type *DataType, bool IsSigned) override {
     return Impl.hasDivRemOp(DataType, IsSigned);
@@ -2119,8 +2157,9 @@ public:
   }
   InstructionCost
   getArithmeticReductionCost(unsigned Opcode, VectorType *Ty,
+                             Optional<FastMathFlags> FMF,
                              TTI::TargetCostKind CostKind) override {
-    return Impl.getArithmeticReductionCost(Opcode, Ty, CostKind);
+    return Impl.getArithmeticReductionCost(Opcode, Ty, FMF, CostKind);
   }
   InstructionCost
   getMinMaxReductionCost(VectorType *Ty, VectorType *CondTy, bool IsUnsigned,

@@ -109,15 +109,43 @@ void ImportSection::addGOTEntry(Symbol *sym) {
 
 void ImportSection::addImport(Symbol *sym) {
   assert(!isSealed);
-  importedSymbols.emplace_back(sym);
-  if (auto *f = dyn_cast<FunctionSymbol>(sym))
-    f->setFunctionIndex(numImportedFunctions++);
-  else if (auto *g = dyn_cast<GlobalSymbol>(sym))
-    g->setGlobalIndex(numImportedGlobals++);
-  else if (auto *t = dyn_cast<TagSymbol>(sym))
+  StringRef module = sym->importModule.getValueOr(defaultModule);
+  StringRef name = sym->importName.getValueOr(sym->getName());
+  if (auto *f = dyn_cast<FunctionSymbol>(sym)) {
+    ImportKey<WasmSignature> key(*(f->getSignature()), module, name);
+    auto entry = importedFunctions.try_emplace(key, numImportedFunctions);
+    if (entry.second) {
+      importedSymbols.emplace_back(sym);
+      f->setFunctionIndex(numImportedFunctions++);
+    } else {
+      f->setFunctionIndex(entry.first->second);
+    }
+  } else if (auto *g = dyn_cast<GlobalSymbol>(sym)) {
+    ImportKey<WasmGlobalType> key(*(g->getGlobalType()), module, name);
+    auto entry = importedGlobals.try_emplace(key, numImportedGlobals);
+    if (entry.second) {
+      importedSymbols.emplace_back(sym);
+      g->setGlobalIndex(numImportedGlobals++);
+    } else {
+      g->setGlobalIndex(entry.first->second);
+    }
+  } else if (auto *t = dyn_cast<TagSymbol>(sym)) {
+    // NB: There's currently only one possible kind of tag, and no
+    // `UndefinedTag`, so we don't bother de-duplicating tag imports.
+    importedSymbols.emplace_back(sym);
     t->setTagIndex(numImportedTags++);
-  else
-    cast<TableSymbol>(sym)->setTableNumber(numImportedTables++);
+  } else {
+    assert(TableSymbol::classof(sym));
+    auto *table = cast<TableSymbol>(sym);
+    ImportKey<WasmTableType> key(*(table->getTableType()), module, name);
+    auto entry = importedTables.try_emplace(key, numImportedTables);
+    if (entry.second) {
+      importedSymbols.emplace_back(sym);
+      table->setTableNumber(numImportedTables++);
+    } else {
+      table->setTableNumber(entry.first->second);
+    }
+  }
 }
 
 void ImportSection::writeBody() {
@@ -488,7 +516,11 @@ void LinkingSection::writeBody() {
       writeUleb128(sub.os, flags, "sym flags");
 
       if (auto *f = dyn_cast<FunctionSymbol>(sym)) {
-        writeUleb128(sub.os, f->getFunctionIndex(), "index");
+        if (auto *d = dyn_cast<DefinedFunction>(sym)) {
+          writeUleb128(sub.os, d->getExportedFunctionIndex(), "index");
+        } else {
+          writeUleb128(sub.os, f->getFunctionIndex(), "index");
+        }
         if (sym->isDefined() || (flags & WASM_SYMBOL_EXPLICIT_NAME) != 0)
           writeStr(sub.os, sym->getName(), "sym name");
       } else if (auto *g = dyn_cast<GlobalSymbol>(sym)) {

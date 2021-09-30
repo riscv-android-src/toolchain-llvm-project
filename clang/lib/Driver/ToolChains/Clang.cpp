@@ -20,7 +20,6 @@
 #include "Arch/X86.h"
 #include "CommonArgs.h"
 #include "Hexagon.h"
-#include "InputInfo.h"
 #include "MSP430.h"
 #include "PS4CPU.h"
 #include "clang/Basic/CharInfo.h"
@@ -30,6 +29,7 @@
 #include "clang/Basic/Version.h"
 #include "clang/Driver/Distro.h"
 #include "clang/Driver/DriverDiagnostic.h"
+#include "clang/Driver/InputInfo.h"
 #include "clang/Driver/Options.h"
 #include "clang/Driver/SanitizerArgs.h"
 #include "clang/Driver/XRayArgs.h"
@@ -52,8 +52,9 @@ using namespace clang;
 using namespace llvm::opt;
 
 static void CheckPreprocessingOptions(const Driver &D, const ArgList &Args) {
-  if (Arg *A =
-          Args.getLastArg(clang::driver::options::OPT_C, options::OPT_CC)) {
+  if (Arg *A = Args.getLastArg(clang::driver::options::OPT_C, options::OPT_CC,
+                               options::OPT_fminimize_whitespace,
+                               options::OPT_fno_minimize_whitespace)) {
     if (!Args.hasArg(options::OPT_E) && !Args.hasArg(options::OPT__SLASH_P) &&
         !Args.hasArg(options::OPT__SLASH_EP) && !D.CCCIsCPP()) {
       D.Diag(clang::diag::err_drv_argument_only_allowed_with)
@@ -503,7 +504,7 @@ static codegenoptions::DebugInfoKind DebugLevelToInfoKind(const Arg &A) {
     return codegenoptions::DebugLineTablesOnly;
   if (A.getOption().matches(options::OPT_gline_directives_only))
     return codegenoptions::DebugDirectivesOnly;
-  return codegenoptions::LimitedDebugInfo;
+  return codegenoptions::DebugInfoConstructor;
 }
 
 static bool mustUseNonLeafFramePointerForTarget(const llvm::Triple &Triple) {
@@ -1255,7 +1256,8 @@ void Clang::AddPreprocessingOptions(Compilation &C, const JobAction &JA,
   // If we are offloading to a target via OpenMP we need to include the
   // openmp_wrappers folder which contains alternative system headers.
   if (JA.isDeviceOffloading(Action::OFK_OpenMP) &&
-      getToolChain().getTriple().isNVPTX()){
+      (getToolChain().getTriple().isNVPTX() ||
+       getToolChain().getTriple().isAMDGCN())) {
     if (!Args.hasArg(options::OPT_nobuiltininc)) {
       // Add openmp_wrappers/* to our system include path.  This lets us wrap
       // standard library headers.
@@ -1586,8 +1588,8 @@ void AddAAPCSVolatileBitfieldArgs(const ArgList &Args, ArgStringList &CmdArgs) {
 }
 
 namespace {
-void RenderARMABI(const llvm::Triple &Triple, const ArgList &Args,
-                  ArgStringList &CmdArgs) {
+void RenderARMABI(const Driver &D, const llvm::Triple &Triple,
+                  const ArgList &Args, ArgStringList &CmdArgs) {
   // Select the ABI to use.
   // FIXME: Support -meabi.
   // FIXME: Parts of this are duplicated in the backend, unify this somehow.
@@ -1595,7 +1597,7 @@ void RenderARMABI(const llvm::Triple &Triple, const ArgList &Args,
   if (Arg *A = Args.getLastArg(options::OPT_mabi_EQ)) {
     ABIName = A->getValue();
   } else {
-    std::string CPU = getCPUName(Args, Triple, /*FromAs*/ false);
+    std::string CPU = getCPUName(D, Args, Triple, /*FromAs*/ false);
     ABIName = llvm::ARM::computeDefaultTargetABI(Triple, CPU).data();
   }
 
@@ -1606,7 +1608,7 @@ void RenderARMABI(const llvm::Triple &Triple, const ArgList &Args,
 
 void Clang::AddARMTargetArgs(const llvm::Triple &Triple, const ArgList &Args,
                              ArgStringList &CmdArgs, bool KernelOrKext) const {
-  RenderARMABI(Triple, Args, CmdArgs);
+  RenderARMABI(getToolChain().getDriver(), Triple, Args, CmdArgs);
 
   // Determine floating point ABI from the options & target defaults.
   arm::FloatABI ABI = arm::getARMFloatABI(getToolChain(), Args);
@@ -2544,7 +2546,7 @@ static void CollectArgsForIntegratedAssembler(Compilation &C,
           CmdArgs.push_back(Value.data());
         } else {
           RenderDebugEnablingArgs(Args, CmdArgs,
-                                  codegenoptions::LimitedDebugInfo,
+                                  codegenoptions::DebugInfoConstructor,
                                   DwarfVersion, llvm::DebuggerKind::Default);
         }
       } else if (Value.startswith("-mcpu") || Value.startswith("-mfpu") ||
@@ -3179,7 +3181,7 @@ static void RenderSCPOptions(const ToolChain &TC, const ArgList &Args,
                              ArgStringList &CmdArgs) {
   const llvm::Triple &EffectiveTriple = TC.getEffectiveTriple();
 
-  if (!EffectiveTriple.isOSLinux())
+  if (!EffectiveTriple.isOSFreeBSD() && !EffectiveTriple.isOSLinux())
     return;
 
   if (!EffectiveTriple.isX86() && !EffectiveTriple.isSystemZ() &&
@@ -3873,12 +3875,6 @@ static void renderDebugOptions(const ToolChain &TC, const Driver &D,
                                ArgStringList &CmdArgs,
                                codegenoptions::DebugInfoKind &DebugInfoKind,
                                DwarfFissionKind &DwarfFission) {
-  // These two forms of profiling info can't be used together.
-  if (const Arg *A1 = Args.getLastArg(options::OPT_fpseudo_probe_for_profiling))
-    if (const Arg *A2 = Args.getLastArg(options::OPT_fdebug_info_for_profiling))
-      D.Diag(diag::err_drv_argument_not_allowed_with)
-          << A1->getAsString(Args) << A2->getAsString(Args);
-
   if (Args.hasFlag(options::OPT_fdebug_info_for_profiling,
                    options::OPT_fno_debug_info_for_profiling, false) &&
       checkDebugInfoOption(
@@ -3913,7 +3909,7 @@ static void renderDebugOptions(const ToolChain &TC, const Driver &D,
     }
   }
   if (const Arg *A = Args.getLastArg(options::OPT_g_Group)) {
-    DebugInfoKind = codegenoptions::LimitedDebugInfo;
+    DebugInfoKind = codegenoptions::DebugInfoConstructor;
 
     // If the last option explicitly specified a debug-info level, use it.
     if (checkDebugInfoOption(A, Args, D, TC) &&
@@ -4035,7 +4031,7 @@ static void renderDebugOptions(const ToolChain &TC, const Driver &D,
     if (checkDebugInfoOption(A, Args, D, TC)) {
       if (DebugInfoKind != codegenoptions::DebugLineTablesOnly &&
           DebugInfoKind != codegenoptions::DebugDirectivesOnly) {
-        DebugInfoKind = codegenoptions::LimitedDebugInfo;
+        DebugInfoKind = codegenoptions::DebugInfoConstructor;
         CmdArgs.push_back("-dwarf-ext-refs");
         CmdArgs.push_back("-fmodule-format=obj");
       }
@@ -4056,7 +4052,8 @@ static void renderDebugOptions(const ToolChain &TC, const Driver &D,
   if (const Arg *A = Args.getLastArg(options::OPT_fstandalone_debug))
     (void)checkDebugInfoOption(A, Args, D, TC);
 
-  if (DebugInfoKind == codegenoptions::LimitedDebugInfo) {
+  if (DebugInfoKind == codegenoptions::LimitedDebugInfo ||
+      DebugInfoKind == codegenoptions::DebugInfoConstructor) {
     if (Args.hasFlag(options::OPT_fno_eliminate_unused_debug_types,
                      options::OPT_feliminate_unused_debug_types, false))
       DebugInfoKind = codegenoptions::UnusedTypeInfo;
@@ -4598,7 +4595,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     case llvm::Triple::arm:
     case llvm::Triple::armeb:
     case llvm::Triple::thumbeb:
-      RenderARMABI(Triple, Args, CmdArgs);
+      RenderARMABI(D, Triple, Args, CmdArgs);
       break;
     case llvm::Triple::aarch64:
     case llvm::Triple::aarch64_32:
@@ -4720,6 +4717,22 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back(Args.MakeArgString(std::to_string(FunctionAlignment)));
   }
 
+  // We support -falign-loops=N where N is a power of 2. GCC supports more
+  // forms.
+  if (const Arg *A = Args.getLastArg(options::OPT_falign_loops_EQ)) {
+    unsigned Value = 0;
+    if (StringRef(A->getValue()).getAsInteger(10, Value) || Value > 65536)
+      TC.getDriver().Diag(diag::err_drv_invalid_int_value)
+          << A->getAsString(Args) << A->getValue();
+    else if (Value & (Value - 1))
+      TC.getDriver().Diag(diag::err_drv_alignment_not_power_of_two)
+          << A->getAsString(Args) << A->getValue();
+    // Treat =0 as unspecified (use the target preference).
+    if (Value)
+      CmdArgs.push_back(Args.MakeArgString("-falign-loops=" +
+                                           Twine(std::min(Value, 65536u))));
+  }
+
   llvm::Reloc::Model RelocationModel;
   unsigned PICLevel;
   bool IsPIE;
@@ -4839,6 +4852,14 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
       CmdArgs.push_back("-mabi=vec-extabi");
     else
       CmdArgs.push_back("-mabi=vec-default");
+  }
+
+  if (Arg *A = Args.getLastArg(options::OPT_mlong_double_128)) {
+    // Emit the unsupported option error until the Clang's library integration
+    // support for 128-bit long double is available for AIX.
+    if (Triple.isOSAIX())
+      D.Diag(diag::err_drv_unsupported_opt_for_target)
+          << A->getSpelling() << RawTriple.str();
   }
 
   if (Arg *A = Args.getLastArg(options::OPT_Wframe_larger_than_EQ)) {
@@ -5111,7 +5132,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     const ArgList &HostArgs =
         C.getArgsForToolChain(nullptr, StringRef(), Action::OFK_None);
     std::string HostCPU =
-        getCPUName(HostArgs, *TC.getAuxTriple(), /*FromAs*/ false);
+        getCPUName(D, HostArgs, *TC.getAuxTriple(), /*FromAs*/ false);
     if (!HostCPU.empty()) {
       CmdArgs.push_back("-aux-target-cpu");
       CmdArgs.push_back(Args.MakeArgString(HostCPU));
@@ -5128,11 +5149,15 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   if (Arg *A = Args.getLastArg(options::OPT_mcmodel_EQ)) {
     StringRef CM = A->getValue();
     if (CM == "small" || CM == "kernel" || CM == "medium" || CM == "large" ||
-        CM == "tiny")
-      A->render(Args, CmdArgs);
-    else
+        CM == "tiny") {
+      if (Triple.isOSAIX() && CM == "medium")
+        CmdArgs.push_back("-mcmodel=large");
+      else
+        A->render(Args, CmdArgs);
+    } else {
       D.Diag(diag::err_drv_invalid_argument_to_option)
           << CM << A->getOption().getName();
+    }
   }
 
   if (Arg *A = Args.getLastArg(options::OPT_mtls_size_EQ)) {
@@ -5149,7 +5174,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   }
 
   // Add the target cpu
-  std::string CPU = getCPUName(Args, Triple, /*FromAs*/ false);
+  std::string CPU = getCPUName(D, Args, Triple, /*FromAs*/ false);
   if (!CPU.empty()) {
     CmdArgs.push_back("-target-cpu");
     CmdArgs.push_back(Args.MakeArgString(CPU));
@@ -5680,7 +5705,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   Args.AddLastArg(CmdArgs, options::OPT_fvisibility_inlines_hidden_static_local_var,
                            options::OPT_fno_visibility_inlines_hidden_static_local_var);
   Args.AddLastArg(CmdArgs, options::OPT_fvisibility_global_new_delete_hidden);
-
+  Args.AddLastArg(CmdArgs, options::OPT_fnew_infallible);
   Args.AddLastArg(CmdArgs, options::OPT_ftlsmodel_EQ);
 
   if (Args.hasFlag(options::OPT_fno_operator_names,
@@ -5723,6 +5748,9 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
                       options::OPT_fno_openmp_simd);
       Args.AddAllArgs(CmdArgs, options::OPT_fopenmp_enable_irbuilder);
       Args.AddAllArgs(CmdArgs, options::OPT_fopenmp_version_EQ);
+      if (!Args.hasFlag(options::OPT_fopenmp_extensions,
+                        options::OPT_fno_openmp_extensions, /*Default=*/true))
+        CmdArgs.push_back("-fno-openmp-extensions");
       Args.AddAllArgs(CmdArgs, options::OPT_fopenmp_cuda_number_of_sm_EQ);
       Args.AddAllArgs(CmdArgs, options::OPT_fopenmp_cuda_blocks_per_sm_EQ);
       Args.AddAllArgs(CmdArgs,
@@ -5758,6 +5786,9 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     Args.AddLastArg(CmdArgs, options::OPT_fopenmp_simd,
                     options::OPT_fno_openmp_simd);
     Args.AddAllArgs(CmdArgs, options::OPT_fopenmp_version_EQ);
+    if (!Args.hasFlag(options::OPT_fopenmp_extensions,
+                      options::OPT_fno_openmp_extensions, /*Default=*/true))
+      CmdArgs.push_back("-fno-openmp-extensions");
   }
 
   const SanitizerArgs &Sanitize = TC.getSanitizerArgs();
@@ -6055,6 +6086,16 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
                    options::OPT_fno_use_line_directives, false))
     CmdArgs.push_back("-fuse-line-directives");
 
+  // -fno-minimize-whitespace is default.
+  if (Args.hasFlag(options::OPT_fminimize_whitespace,
+                   options::OPT_fno_minimize_whitespace, false)) {
+    types::ID InputType = Inputs[0].getType();
+    if (!isDerivedFromC(InputType))
+      D.Diag(diag::err_drv_minws_unsupported_input_type)
+          << types::getTypeName(InputType);
+    CmdArgs.push_back("-fminimize-whitespace");
+  }
+
   // -fms-extensions=0 is default.
   if (Args.hasFlag(options::OPT_fms_extensions, options::OPT_fno_ms_extensions,
                    IsWindowsMSVC))
@@ -6152,7 +6193,8 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   // than 19.
   if (!Args.hasFlag(options::OPT_fthreadsafe_statics,
                     options::OPT_fno_threadsafe_statics,
-                    !IsWindowsMSVC || IsMSVC2015Compatible))
+                    !types::isOpenCL(InputType) &&
+                        (!IsWindowsMSVC || IsMSVC2015Compatible)))
     CmdArgs.push_back("-fno-threadsafe-statics");
 
   // -fno-delayed-template-parsing is default, except when targeting MSVC.
@@ -7169,7 +7211,7 @@ void Clang::AddClangCLArgs(const ArgList &Args, types::ID InputType,
                                           options::OPT_gline_tables_only)) {
     *EmitCodeView = true;
     if (DebugInfoArg->getOption().matches(options::OPT__SLASH_Z7))
-      *DebugInfoKind = codegenoptions::LimitedDebugInfo;
+      *DebugInfoKind = codegenoptions::DebugInfoConstructor;
     else
       *DebugInfoKind = codegenoptions::DebugLineTablesOnly;
   } else {
@@ -7408,7 +7450,7 @@ void ClangAs::ConstructJob(Compilation &C, const JobAction &JA,
   CmdArgs.push_back(Clang::getBaseInputName(Args, Input));
 
   // Add the target cpu
-  std::string CPU = getCPUName(Args, Triple, /*FromAs*/ true);
+  std::string CPU = getCPUName(D, Args, Triple, /*FromAs*/ true);
   if (!CPU.empty()) {
     CmdArgs.push_back("-target-cpu");
     CmdArgs.push_back(Args.MakeArgString(CPU));
@@ -7453,7 +7495,7 @@ void ClangAs::ConstructJob(Compilation &C, const JobAction &JA,
     // the guard for source type, however there is a test which asserts
     // that some assembler invocation receives no -debug-info-kind,
     // and it's not clear whether that test is just overly restrictive.
-    DebugInfoKind = (WantDebug ? codegenoptions::LimitedDebugInfo
+    DebugInfoKind = (WantDebug ? codegenoptions::DebugInfoConstructor
                                : codegenoptions::NoDebugInfo);
     // Add the -fdebug-compilation-dir flag if needed.
     addDebugCompDirArg(Args, CmdArgs, C.getDriver().getVFS());
@@ -7678,8 +7720,11 @@ void OffloadBundler::ConstructJob(Compilation &C, const JobAction &JA,
         assert(CurTC == nullptr && "Expected one dependence!");
         CurTC = TC;
       });
+      UB += C.addTempFile(
+          C.getArgs().MakeArgString(CurTC->getInputFilename(Inputs[I])));
+    } else {
+      UB += CurTC->getInputFilename(Inputs[I]);
     }
-    UB += CurTC->getInputFilename(Inputs[I]);
   }
   CmdArgs.push_back(TCArgs.MakeArgString(UB));
 

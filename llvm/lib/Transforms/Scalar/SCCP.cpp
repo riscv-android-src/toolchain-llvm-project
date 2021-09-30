@@ -490,15 +490,14 @@ bool llvm::runIPSCCP(
         AttrBuilder AttributesToRemove;
         AttributesToRemove.addAttribute(Attribute::ArgMemOnly);
         AttributesToRemove.addAttribute(Attribute::InaccessibleMemOrArgMemOnly);
-        F.removeAttributes(AttributeList::FunctionIndex, AttributesToRemove);
+        F.removeFnAttrs(AttributesToRemove);
 
         for (User *U : F.users()) {
           auto *CB = dyn_cast<CallBase>(U);
           if (!CB || CB->getCalledFunction() != &F)
             continue;
 
-          CB->removeAttributes(AttributeList::FunctionIndex,
-                               AttributesToRemove);
+          CB->removeFnAttrs(AttributesToRemove);
         }
       }
     }
@@ -526,13 +525,11 @@ bool llvm::runIPSCCP(
     // nodes in executable blocks we found values for. The function's entry
     // block is not part of BlocksToErase, so we have to handle it separately.
     for (BasicBlock *BB : BlocksToErase) {
-      NumInstRemoved +=
-          changeToUnreachable(BB->getFirstNonPHI(), /*UseLLVMTrap=*/false,
-                              /*PreserveLCSSA=*/false, &DTU);
+      NumInstRemoved += changeToUnreachable(BB->getFirstNonPHI(),
+                                            /*PreserveLCSSA=*/false, &DTU);
     }
     if (!Solver.isBlockExecutable(&F.front()))
       NumInstRemoved += changeToUnreachable(F.front().getFirstNonPHI(),
-                                            /*UseLLVMTrap=*/false,
                                             /*PreserveLCSSA=*/false, &DTU);
 
     for (BasicBlock &BB : F)

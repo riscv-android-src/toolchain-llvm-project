@@ -2390,6 +2390,13 @@ StrengthenNoWrapFlags(ScalarEvolution *SE, SCEVTypes Type,
     }
   }
 
+  // <0,+,nonnegative><nw> is also nuw
+  // TODO: Add corresponding nsw case
+  if (Type == scAddRecExpr && ScalarEvolution::hasFlags(Flags, SCEV::FlagNW) &&
+      !ScalarEvolution::hasFlags(Flags, SCEV::FlagNUW) && Ops.size() == 2 &&
+      Ops[0]->isZero() && IsKnownNonNegative(Ops[1]))
+    Flags = ScalarEvolution::setFlags(Flags, SCEV::FlagNUW);
+
   return Flags;
 }
 
@@ -2562,8 +2569,7 @@ const SCEV *ScalarEvolution::getAddExpr(SmallVectorImpl<const SCEV *> &Ops,
       APInt ConstAdd = C1 + C2;
       auto AddFlags = AddExpr->getNoWrapFlags();
       // Adding a smaller constant is NUW if the original AddExpr was NUW.
-      if (ScalarEvolution::maskFlags(AddFlags, SCEV::FlagNUW) ==
-              SCEV::FlagNUW &&
+      if (ScalarEvolution::hasFlags(AddFlags, SCEV::FlagNUW) &&
           ConstAdd.ule(C1)) {
         PreservedFlags =
             ScalarEvolution::setFlags(PreservedFlags, SCEV::FlagNUW);
@@ -2571,8 +2577,7 @@ const SCEV *ScalarEvolution::getAddExpr(SmallVectorImpl<const SCEV *> &Ops,
 
       // Adding a constant with the same sign and small magnitude is NSW, if the
       // original AddExpr was NSW.
-      if (ScalarEvolution::maskFlags(AddFlags, SCEV::FlagNSW) ==
-              SCEV::FlagNSW &&
+      if (ScalarEvolution::hasFlags(AddFlags, SCEV::FlagNSW) &&
           C1.isSignBitSet() == ConstAdd.isSignBitSet() &&
           ConstAdd.abs().ule(C1.abs())) {
         PreservedFlags =
@@ -3647,7 +3652,10 @@ ScalarEvolution::getGEPExpr(GEPOperator *GEP,
   // non-negative, we can use nuw.
   SCEV::NoWrapFlags BaseWrap = GEP->isInBounds() && isKnownNonNegative(Offset)
                                    ? SCEV::FlagNUW : SCEV::FlagAnyWrap;
-  return getAddExpr(BaseExpr, Offset, BaseWrap);
+  auto *GEPExpr = getAddExpr(BaseExpr, Offset, BaseWrap);
+  assert(BaseExpr->getType() == GEPExpr->getType() &&
+         "GEP should not change type mid-flight.");
+  return GEPExpr;
 }
 
 std::tuple<SCEV *, FoldingSetNodeID, void *>
@@ -4146,17 +4154,16 @@ const SCEV *ScalarEvolution::getNotSCEV(const SCEV *V) {
   return getMinusSCEV(getMinusOne(Ty), V);
 }
 
-/// Compute an expression equivalent to S - getPointerBase(S).
-static const SCEV *removePointerBase(ScalarEvolution *SE, const SCEV *P) {
+const SCEV *ScalarEvolution::removePointerBase(const SCEV *P) {
   assert(P->getType()->isPointerTy());
 
   if (auto *AddRec = dyn_cast<SCEVAddRecExpr>(P)) {
     // The base of an AddRec is the first operand.
     SmallVector<const SCEV *> Ops{AddRec->operands()};
-    Ops[0] = removePointerBase(SE, Ops[0]);
+    Ops[0] = removePointerBase(Ops[0]);
     // Don't try to transfer nowrap flags for now. We could in some cases
     // (for example, if pointer operand of the AddRec is a SCEVUnknown).
-    return SE->getAddRecExpr(Ops, AddRec->getLoop(), SCEV::FlagAnyWrap);
+    return getAddRecExpr(Ops, AddRec->getLoop(), SCEV::FlagAnyWrap);
   }
   if (auto *Add = dyn_cast<SCEVAddExpr>(P)) {
     // The base of an Add is the pointer operand.
@@ -4164,21 +4171,17 @@ static const SCEV *removePointerBase(ScalarEvolution *SE, const SCEV *P) {
     const SCEV **PtrOp = nullptr;
     for (const SCEV *&AddOp : Ops) {
       if (AddOp->getType()->isPointerTy()) {
-        // If we find an Add with multiple pointer operands, treat it as a
-        // pointer base to be consistent with getPointerBase.  Eventually
-        // we should be able to assert this is impossible.
-        if (PtrOp)
-          return SE->getZero(P->getType());
+        assert(!PtrOp && "Cannot have multiple pointer ops");
         PtrOp = &AddOp;
       }
     }
-    *PtrOp = removePointerBase(SE, *PtrOp);
+    *PtrOp = removePointerBase(*PtrOp);
     // Don't try to transfer nowrap flags for now. We could in some cases
     // (for example, if the pointer operand of the Add is a SCEVUnknown).
-    return SE->getAddExpr(Ops);
+    return getAddExpr(Ops);
   }
   // Any other expression must be a pointer base.
-  return SE->getZero(P->getType());
+  return getZero(P->getType());
 }
 
 const SCEV *ScalarEvolution::getMinusSCEV(const SCEV *LHS, const SCEV *RHS,
@@ -4195,8 +4198,8 @@ const SCEV *ScalarEvolution::getMinusSCEV(const SCEV *LHS, const SCEV *RHS,
     if (!LHS->getType()->isPointerTy() ||
         getPointerBase(LHS) != getPointerBase(RHS))
       return getCouldNotCompute();
-    LHS = removePointerBase(this, LHS);
-    RHS = removePointerBase(this, RHS);
+    LHS = removePointerBase(LHS);
+    RHS = removePointerBase(RHS);
   }
 
   // We represent LHS - RHS as LHS + (-1)*RHS. This transformation
@@ -4204,7 +4207,7 @@ const SCEV *ScalarEvolution::getMinusSCEV(const SCEV *LHS, const SCEV *RHS,
   auto AddFlags = SCEV::FlagAnyWrap;
   const bool RHSIsNotMinSigned =
       !getSignedRangeMin(RHS).isMinSignedValue();
-  if (maskFlags(Flags, SCEV::FlagNSW) == SCEV::FlagNSW) {
+  if (hasFlags(Flags, SCEV::FlagNSW)) {
     // Let M be the minimum representable signed value. Then (-1)*RHS
     // signed-wraps if and only if RHS is M. That can happen even for
     // a NSW subtraction because e.g. (-1)*M signed-wraps even though
@@ -4359,14 +4362,11 @@ const SCEV *ScalarEvolution::getPointerBase(const SCEV *V) {
       const SCEV *PtrOp = nullptr;
       for (const SCEV *AddOp : Add->operands()) {
         if (AddOp->getType()->isPointerTy()) {
-          // Cannot find the base of an expression with multiple pointer ops.
-          if (PtrOp)
-            return V;
+          assert(!PtrOp && "Cannot have multiple pointer ops");
           PtrOp = AddOp;
         }
       }
-      if (!PtrOp) // All operands were non-pointer.
-        return V;
+      assert(PtrOp && "Must have pointer op");
       V = PtrOp;
     } else // Not something we can look further into.
       return V;
@@ -6677,7 +6677,7 @@ ScalarEvolution::getLoopProperties(const Loop *L) {
       if (auto *SI = dyn_cast<StoreInst>(I))
         return !SI->isSimple();
 
-      return I->mayHaveSideEffects();
+      return I->mayThrow() || I->mayWriteToMemory();
     };
 
     LoopProperties LP = {/* HasNoAbnormalExits */ true,
@@ -7635,6 +7635,12 @@ ScalarEvolution::ExitLimit::ExitLimit(
     const SCEV *E, const SCEV *M, bool MaxOrZero,
     ArrayRef<const SmallPtrSetImpl<const SCEVPredicate *> *> PredSetList)
     : ExactNotTaken(E), MaxNotTaken(M), MaxOrZero(MaxOrZero) {
+  // If we prove the max count is zero, so is the symbolic bound.  This happens
+  // in practice due to differences in a) how context sensitive we've chosen
+  // to be and b) how we reason about bounds impied by UB.
+  if (MaxNotTaken->isZero())
+    ExactNotTaken = MaxNotTaken;
+
   assert((isa<SCEVCouldNotCompute>(ExactNotTaken) ||
           !isa<SCEVCouldNotCompute>(MaxNotTaken)) &&
          "Exact is not allowed to be less precise than Max");
@@ -11536,18 +11542,17 @@ const SCEV *ScalarEvolution::computeMaxBECountForLT(const SCEV *Start,
 
   // Calculate the maximum backedge count based on the range of values
   // permitted by Start, End, and Stride.
-  const SCEV *MaxBECount;
   APInt MinStart =
       IsSigned ? getSignedRangeMin(Start) : getUnsignedRangeMin(Start);
 
-  APInt StrideForMaxBECount =
+  APInt MinStride =
       IsSigned ? getSignedRangeMin(Stride) : getUnsignedRangeMin(Stride);
 
   // We assume either the stride is positive, or the backedge-taken count
   // is zero. So force StrideForMaxBECount to be at least one.
   APInt One(BitWidth, 1);
-  StrideForMaxBECount = IsSigned ? APIntOps::smax(One, StrideForMaxBECount)
-                                 : APIntOps::umax(One, StrideForMaxBECount);
+  APInt StrideForMaxBECount = IsSigned ? APIntOps::smax(One, MinStride)
+                                       : APIntOps::umax(One, MinStride);
 
   APInt MaxValue = IsSigned ? APInt::getSignedMaxValue(BitWidth)
                             : APInt::getMaxValue(BitWidth);
@@ -11564,10 +11569,8 @@ const SCEV *ScalarEvolution::computeMaxBECountForLT(const SCEV *Start,
   MaxEnd = IsSigned ? APIntOps::smax(MaxEnd, MinStart)
                     : APIntOps::umax(MaxEnd, MinStart);
 
-  MaxBECount = getUDivCeilSCEV(getConstant(MaxEnd - MinStart) /* Delta */,
-                               getConstant(StrideForMaxBECount) /* Step */);
-
-  return MaxBECount;
+  return getUDivCeilSCEV(getConstant(MaxEnd - MinStart) /* Delta */,
+                         getConstant(StrideForMaxBECount) /* Step */);
 }
 
 ScalarEvolution::ExitLimit
@@ -11630,13 +11633,15 @@ ScalarEvolution::howManyLessThans(const SCEV *LHS, const SCEV *RHS,
     // a) IV is either nuw or nsw depending upon signedness (indicated by the
     //    NoWrap flag).
     // b) loop is single exit with no side effects.
+    // c) loop has no abnormal exits
     //
     //
     // Precondition a) implies that if the stride is negative, this is a single
     // trip loop. The backedge taken count formula reduces to zero in this case.
     //
-    // Precondition b) implies that the unknown stride cannot be zero otherwise
-    // we have UB.
+    // Precondition b) and c) combine to imply that if rhs is invariant in L,
+    // then a zero stride means the backedge can't be taken without executing
+    // undefined behavior.
     //
     // The positive stride case is the same as isKnownPositive(Stride) returning
     // true (original behavior of the function).
@@ -11654,37 +11659,39 @@ ScalarEvolution::howManyLessThans(const SCEV *LHS, const SCEV *RHS,
     //   A[i] = i;
     //
     if (PredicatedIV || !NoWrap || isKnownNonPositive(Stride) ||
-        !loopIsFiniteByAssumption(L))
+        !loopIsFiniteByAssumption(L) || !loopHasNoAbnormalExits(L))
       return getCouldNotCompute();
 
-    // We allow a potentially zero stride, but we need to divide by stride
-    // below.  Since the loop can't be infinite and this check must control
-    // the sole exit, we can infer the exit must be taken on the first
-    // iteration (e.g. backedge count = 0) if the stride is zero.  Given that,
-    // we know the numerator in the divides below must be zero, so we can
-    // pick an arbitrary non-zero value for the denominator (e.g. stride)
-    // and produce the right result.
-    // FIXME: Handle the case where Stride is poison?
-    auto wouldZeroStrideBeUB = [&]() {
-      // If RHS isn't loop invariant, bail out for now. This isn't necessary
-      // for the proof, but isLoopEntryGuardedByCond only works on
-      // loop-invariant values.
+    if (!isKnownNonZero(Stride)) {
+      // If we have a step of zero, and RHS isn't invariant in L, we don't know
+      // if it might eventually be greater than start and if so, on which
+      // iteration.  We can't even produce a useful upper bound.
       if (!isLoopInvariant(RHS, L))
-        return false;
+        return getCouldNotCompute();
 
-      // Proof by contradiction.  Suppose the stride were zero.  If we can
-      // prove that the backedge *is* taken on the first iteration, then since
-      // we know this condition controls the sole exit, we must have an
-      // infinite loop.  We can't have a (well defined) infinite loop per
-      // check just above.
-      // Note: The (Start - Stride) term is used to get the start' term from
-      // (start' + stride,+,stride). Remember that we only care about the
-      // result of this expression when stride == 0 at runtime.
-      auto *StartIfZero = getMinusSCEV(IV->getStart(), Stride);
-      return isLoopEntryGuardedByCond(L, Cond, StartIfZero, RHS);
-    };
-    if (!isKnownNonZero(Stride) && !wouldZeroStrideBeUB()) {
-      Stride = getUMaxExpr(Stride, getOne(Stride->getType()));
+      // We allow a potentially zero stride, but we need to divide by stride
+      // below.  Since the loop can't be infinite and this check must control
+      // the sole exit, we can infer the exit must be taken on the first
+      // iteration (e.g. backedge count = 0) if the stride is zero.  Given that,
+      // we know the numerator in the divides below must be zero, so we can
+      // pick an arbitrary non-zero value for the denominator (e.g. stride)
+      // and produce the right result.
+      // FIXME: Handle the case where Stride is poison?
+      auto wouldZeroStrideBeUB = [&]() {
+        // Proof by contradiction.  Suppose the stride were zero.  If we can
+        // prove that the backedge *is* taken on the first iteration, then since
+        // we know this condition controls the sole exit, we must have an
+        // infinite loop.  We can't have a (well defined) infinite loop per
+        // check just above.
+        // Note: The (Start - Stride) term is used to get the start' term from
+        // (start' + stride,+,stride). Remember that we only care about the
+        // result of this expression when stride == 0 at runtime.
+        auto *StartIfZero = getMinusSCEV(IV->getStart(), Stride);
+        return isLoopEntryGuardedByCond(L, Cond, StartIfZero, RHS);
+      };
+      if (!wouldZeroStrideBeUB()) {
+        Stride = getUMaxExpr(Stride, getOne(Stride->getType()));
+      }
     }
   } else if (!Stride->isOne() && !NoWrap) {
     auto isUBOnWrap = [&]() {
@@ -11728,6 +11735,15 @@ ScalarEvolution::howManyLessThans(const SCEV *LHS, const SCEV *RHS,
     if (canIVOverflowOnLT(RHS, Stride, IsSigned) && !isUBOnWrap())
       return getCouldNotCompute();
   }
+
+  // On all paths just preceeding, we established the following invariant:
+  //   IV can be assumed not to overflow up to and including the exiting
+  //   iteration.  We proved this in one of two ways:
+  //   1) We can show overflow doesn't occur before the exiting iteration
+  //      1a) canIVOverflowOnLT, and b) step of one
+  //   2) We can show that if overflow occurs, the loop must execute UB
+  //      before any possible exit.
+  // Note that we have not yet proved RHS invariant (in general).
 
   const SCEV *Start = IV->getStart();
 

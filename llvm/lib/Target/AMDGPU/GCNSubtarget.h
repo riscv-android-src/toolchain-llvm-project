@@ -21,13 +21,6 @@
 #include "SIInstrInfo.h"
 #include "llvm/CodeGen/SelectionDAGTargetInfo.h"
 
-namespace llvm {
-
-class MCInst;
-class MCInstrInfo;
-
-} // namespace llvm
-
 #define GET_SUBTARGETINFO_HEADER
 #include "AMDGPUGenSubtargetInfo.inc"
 
@@ -136,6 +129,7 @@ protected:
   bool HasGFX10A16;
   bool HasG16;
   bool HasNSAEncoding;
+  unsigned NSAMaxSize;
   bool GFX10_AEncoding;
   bool GFX10_BEncoding;
   bool HasDLInsts;
@@ -817,9 +811,7 @@ public:
     return HasScalarAtomics;
   }
 
-  bool hasLDSFPAtomics() const {
-    return GFX8Insts;
-  }
+  bool hasLDSFPAtomicAdd() const { return GFX8Insts; }
 
   /// \returns true if the subtarget has the v_permlanex16_b32 instruction.
   bool hasPermLaneX16() const { return getGeneration() >= GFX10; }
@@ -877,6 +869,8 @@ public:
   bool hasImageGather4D16Bug() const { return HasImageGather4D16Bug; }
 
   bool hasNSAEncoding() const { return HasNSAEncoding; }
+
+  unsigned getNSAMaxSize() const { return NSAMaxSize; }
 
   bool hasGFX10_AEncoding() const {
     return GFX10_AEncoding;

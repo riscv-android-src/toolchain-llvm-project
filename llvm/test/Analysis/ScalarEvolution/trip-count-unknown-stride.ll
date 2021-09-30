@@ -1,4 +1,3 @@
-; RUN: opt < %s -analyze -enable-new-pm=0 -scalar-evolution | FileCheck %s
 ; RUN: opt < %s -disable-output "-passes=print<scalar-evolution>" 2>&1 | FileCheck %s
 
 ; ScalarEvolution should be able to compute trip count of the loop by proving
@@ -207,7 +206,7 @@ for.end:                                          ; preds = %for.body, %entry
 
 ; CHECK-LABEL: Determining loop execution counts for: @zero_stride_varying_rhs
 ; CHECK: Loop %for.body: Unpredictable backedge-taken count.
-; CHECK: Loop %for.body: max backedge-taken count is -1
+; CHECK: Loop %for.body: Unpredictable max backedge-taken count
 
 define void @zero_stride_varying_rhs(i32* nocapture %A, i32* %n_p, i32 %zero) {
 entry:

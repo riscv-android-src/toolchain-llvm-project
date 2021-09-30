@@ -3,6 +3,8 @@
 ; RUN: llvm-as < %s | llvm-dis --force-opaque-pointers | FileCheck %s
 ; RUN: opt --force-opaque-pointers < %s -S | FileCheck %s
 
+%ty = type i32*
+
 ; CHECK: @g = external global i16
 @g = external global i16
 
@@ -49,6 +51,14 @@ define void @f3(i32 addrspace(1)* addrspace(2)* %p) {
   unreachable
 }
 
+define void @f4(%ty* %p) {
+; CHECK-LABEL: define {{[^@]+}}@f4
+; CHECK-SAME: (ptr [[P:%.*]]) {
+; CHECK-NEXT:    unreachable
+;
+  unreachable
+}
+
 define void @remangle_intrinsic() {
 ; CHECK-LABEL: define {{[^@]+}}@remangle_intrinsic() {
 ; CHECK-NEXT:    [[A:%.*]] = alloca ptr, align 8
@@ -62,6 +72,13 @@ define void @remangle_intrinsic() {
   call void @llvm.stackprotector(i8* null, i8** %a)
   call <2 x i64> @llvm.masked.expandload.v2i64(i64* null, <2 x i1> zeroinitializer, <2 x i64> zeroinitializer)
   ret void
+}
+
+define i32* @constexpr_gep() {
+; CHECK-LABEL: define {{[^@]+}}@constexpr_gep() {
+; CHECK-NEXT:    ret ptr getelementptr (i32, ptr getelementptr (i8, ptr null, i64 4), i64 1)
+;
+  ret i32* getelementptr(i32, i32* bitcast (i8* getelementptr (i8, i8* null, i64 4) to i32*), i64 1)
 }
 
 declare i8* @llvm.stacksave()

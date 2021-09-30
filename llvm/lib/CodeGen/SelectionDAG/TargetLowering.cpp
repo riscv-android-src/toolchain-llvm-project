@@ -819,13 +819,21 @@ SDValue TargetLowering::SimplifyMultipleUseDemandedBits(
     break;
   }
   case ISD::INSERT_SUBVECTOR: {
-    // If we don't demand the inserted subvector, return the base vector.
     SDValue Vec = Op.getOperand(0);
     SDValue Sub = Op.getOperand(1);
     uint64_t Idx = Op.getConstantOperandVal(2);
     unsigned NumSubElts = Sub.getValueType().getVectorNumElements();
-    if (DemandedElts.extractBits(NumSubElts, Idx) == 0)
+    APInt DemandedSubElts = DemandedElts.extractBits(NumSubElts, Idx);
+    // If we don't demand the inserted subvector, return the base vector.
+    if (DemandedSubElts == 0)
       return Vec;
+    // If this simply widens the lowest subvector, see if we can do it earlier.
+    if (Idx == 0 && Vec.isUndef()) {
+      if (SDValue NewSub = SimplifyMultipleUseDemandedBits(
+              Sub, DemandedBits, DemandedSubElts, DAG, Depth + 1))
+        return DAG.getNode(Op.getOpcode(), SDLoc(Op), Op.getValueType(),
+                           Op.getOperand(0), NewSub, Op.getOperand(2));
+    }
     break;
   }
   case ISD::VECTOR_SHUFFLE: {
@@ -3056,6 +3064,19 @@ const Constant *TargetLowering::getTargetConstantFromLoad(LoadSDNode*) const {
   return nullptr;
 }
 
+bool TargetLowering::isGuaranteedNotToBeUndefOrPoisonForTargetNode(
+    SDValue Op, const APInt &DemandedElts, const SelectionDAG &DAG,
+    bool PoisonOnly, unsigned Depth) const {
+  assert(
+      (Op.getOpcode() >= ISD::BUILTIN_OP_END ||
+       Op.getOpcode() == ISD::INTRINSIC_WO_CHAIN ||
+       Op.getOpcode() == ISD::INTRINSIC_W_CHAIN ||
+       Op.getOpcode() == ISD::INTRINSIC_VOID) &&
+      "Should use isGuaranteedNotToBeUndefOrPoison if you don't know whether Op"
+      " is a target node!");
+  return false;
+}
+
 bool TargetLowering::isKnownNeverNaNForTargetNode(SDValue Op,
                                                   const SelectionDAG &DAG,
                                                   bool SNaN,
@@ -4323,7 +4344,7 @@ SDValue TargetLowering::SimplifySetCC(EVT VT, SDValue N0, SDValue N1,
 
     // When division is cheap or optimizing for minimum size,
     // fall through to DIVREM creation by skipping this fold.
-    if (!isIntDivCheap(VT, Attr) && !Attr.hasFnAttribute(Attribute::MinSize)) {
+    if (!isIntDivCheap(VT, Attr) && !Attr.hasFnAttr(Attribute::MinSize)) {
       if (N0.getOpcode() == ISD::UREM) {
         if (SDValue Folded = buildUREMEqFold(VT, N0, N1, Cond, DCI, dl))
           return Folded;
@@ -4674,7 +4695,8 @@ TargetLowering::ParseConstraints(const DataLayout &DL,
             getSimpleValueType(DL, STy->getElementType(ResNo));
       } else {
         assert(ResNo == 0 && "Asm only has one result!");
-        OpInfo.ConstraintVT = getSimpleValueType(DL, Call.getType());
+        OpInfo.ConstraintVT =
+            getAsmOperandValueType(DL, Call.getType()).getSimpleVT();
       }
       ++ResNo;
       break;
@@ -5592,7 +5614,7 @@ TargetLowering::prepareUREMEqFold(EVT SETCCVT, SDValue REMNode,
     return SDValue();
 
   SDValue PVal, KVal, QVal;
-  if (VT.isVector()) {
+  if (D.getOpcode() == ISD::BUILD_VECTOR) {
     if (HadTautologicalLanes) {
       // Try to turn PAmts into a splat, since we don't care about the values
       // that are currently '0'. If we can't, just keep '0'`s.
@@ -5606,6 +5628,13 @@ TargetLowering::prepareUREMEqFold(EVT SETCCVT, SDValue REMNode,
     PVal = DAG.getBuildVector(VT, DL, PAmts);
     KVal = DAG.getBuildVector(ShVT, DL, KAmts);
     QVal = DAG.getBuildVector(VT, DL, QAmts);
+  } else if (D.getOpcode() == ISD::SPLAT_VECTOR) {
+    assert(PAmts.size() == 1 && KAmts.size() == 1 && QAmts.size() == 1 &&
+           "Expected matchBinaryPredicate to return one element for "
+           "SPLAT_VECTORs");
+    PVal = DAG.getSplatVector(VT, DL, PAmts[0]);
+    KVal = DAG.getSplatVector(ShVT, DL, KAmts[0]);
+    QVal = DAG.getSplatVector(VT, DL, QAmts[0]);
   } else {
     PVal = PAmts[0];
     KVal = KAmts[0];
@@ -5630,10 +5659,8 @@ TargetLowering::prepareUREMEqFold(EVT SETCCVT, SDValue REMNode,
     // We need ROTR to do this.
     if (!DCI.isBeforeLegalizeOps() && !isOperationLegalOrCustom(ISD::ROTR, VT))
       return SDValue();
-    SDNodeFlags Flags;
-    Flags.setExact(true);
     // UREM: (rotr (mul N, P), K)
-    Op0 = DAG.getNode(ISD::ROTR, DL, VT, Op0, KVal, Flags);
+    Op0 = DAG.getNode(ISD::ROTR, DL, VT, Op0, KVal);
     Created.push_back(Op0.getNode());
   }
 
@@ -5897,10 +5924,8 @@ TargetLowering::prepareSREMEqFold(EVT SETCCVT, SDValue REMNode,
     // We need ROTR to do this.
     if (!DCI.isBeforeLegalizeOps() && !isOperationLegalOrCustom(ISD::ROTR, VT))
       return SDValue();
-    SDNodeFlags Flags;
-    Flags.setExact(true);
     // SREM: (rotr (add (mul N, P), A), K)
-    Op0 = DAG.getNode(ISD::ROTR, DL, VT, Op0, KVal, Flags);
+    Op0 = DAG.getNode(ISD::ROTR, DL, VT, Op0, KVal);
     Created.push_back(Op0.getNode());
   }
 
@@ -7249,34 +7274,31 @@ SDValue TargetLowering::expandBITREVERSE(SDNode *N, SelectionDAG &DAG) const {
   // TODO: We can easily support i4/i2 legal types if any target ever does.
   if (Sz >= 8 && isPowerOf2_32(Sz)) {
     // Create the masks - repeating the pattern every byte.
-    APInt MaskHi4 = APInt::getSplat(Sz, APInt(8, 0xF0));
-    APInt MaskHi2 = APInt::getSplat(Sz, APInt(8, 0xCC));
-    APInt MaskHi1 = APInt::getSplat(Sz, APInt(8, 0xAA));
-    APInt MaskLo4 = APInt::getSplat(Sz, APInt(8, 0x0F));
-    APInt MaskLo2 = APInt::getSplat(Sz, APInt(8, 0x33));
-    APInt MaskLo1 = APInt::getSplat(Sz, APInt(8, 0x55));
+    APInt Mask4 = APInt::getSplat(Sz, APInt(8, 0x0F));
+    APInt Mask2 = APInt::getSplat(Sz, APInt(8, 0x33));
+    APInt Mask1 = APInt::getSplat(Sz, APInt(8, 0x55));
 
     // BSWAP if the type is wider than a single byte.
     Tmp = (Sz > 8 ? DAG.getNode(ISD::BSWAP, dl, VT, Op) : Op);
 
-    // swap i4: ((V & 0xF0) >> 4) | ((V & 0x0F) << 4)
-    Tmp2 = DAG.getNode(ISD::AND, dl, VT, Tmp, DAG.getConstant(MaskHi4, dl, VT));
-    Tmp3 = DAG.getNode(ISD::AND, dl, VT, Tmp, DAG.getConstant(MaskLo4, dl, VT));
-    Tmp2 = DAG.getNode(ISD::SRL, dl, VT, Tmp2, DAG.getConstant(4, dl, SHVT));
+    // swap i4: ((V >> 4) & 0x0F) | ((V & 0x0F) << 4)
+    Tmp2 = DAG.getNode(ISD::SRL, dl, VT, Tmp, DAG.getConstant(4, dl, SHVT));
+    Tmp2 = DAG.getNode(ISD::AND, dl, VT, Tmp2, DAG.getConstant(Mask4, dl, VT));
+    Tmp3 = DAG.getNode(ISD::AND, dl, VT, Tmp, DAG.getConstant(Mask4, dl, VT));
     Tmp3 = DAG.getNode(ISD::SHL, dl, VT, Tmp3, DAG.getConstant(4, dl, SHVT));
     Tmp = DAG.getNode(ISD::OR, dl, VT, Tmp2, Tmp3);
 
-    // swap i2: ((V & 0xCC) >> 2) | ((V & 0x33) << 2)
-    Tmp2 = DAG.getNode(ISD::AND, dl, VT, Tmp, DAG.getConstant(MaskHi2, dl, VT));
-    Tmp3 = DAG.getNode(ISD::AND, dl, VT, Tmp, DAG.getConstant(MaskLo2, dl, VT));
-    Tmp2 = DAG.getNode(ISD::SRL, dl, VT, Tmp2, DAG.getConstant(2, dl, SHVT));
+    // swap i2: ((V >> 2) & 0x33) | ((V & 0x33) << 2)
+    Tmp2 = DAG.getNode(ISD::SRL, dl, VT, Tmp, DAG.getConstant(2, dl, SHVT));
+    Tmp2 = DAG.getNode(ISD::AND, dl, VT, Tmp2, DAG.getConstant(Mask2, dl, VT));
+    Tmp3 = DAG.getNode(ISD::AND, dl, VT, Tmp, DAG.getConstant(Mask2, dl, VT));
     Tmp3 = DAG.getNode(ISD::SHL, dl, VT, Tmp3, DAG.getConstant(2, dl, SHVT));
     Tmp = DAG.getNode(ISD::OR, dl, VT, Tmp2, Tmp3);
 
-    // swap i1: ((V & 0xAA) >> 1) | ((V & 0x55) << 1)
-    Tmp2 = DAG.getNode(ISD::AND, dl, VT, Tmp, DAG.getConstant(MaskHi1, dl, VT));
-    Tmp3 = DAG.getNode(ISD::AND, dl, VT, Tmp, DAG.getConstant(MaskLo1, dl, VT));
-    Tmp2 = DAG.getNode(ISD::SRL, dl, VT, Tmp2, DAG.getConstant(1, dl, SHVT));
+    // swap i1: ((V >> 1) & 0x55) | ((V & 0x55) << 1)
+    Tmp2 = DAG.getNode(ISD::SRL, dl, VT, Tmp, DAG.getConstant(1, dl, SHVT));
+    Tmp2 = DAG.getNode(ISD::AND, dl, VT, Tmp2, DAG.getConstant(Mask1, dl, VT));
+    Tmp3 = DAG.getNode(ISD::AND, dl, VT, Tmp, DAG.getConstant(Mask1, dl, VT));
     Tmp3 = DAG.getNode(ISD::SHL, dl, VT, Tmp3, DAG.getConstant(1, dl, SHVT));
     Tmp = DAG.getNode(ISD::OR, dl, VT, Tmp2, Tmp3);
     return Tmp;
@@ -8056,14 +8078,12 @@ SDValue TargetLowering::expandAddSubSat(SDNode *Node, SelectionDAG &DAG) const {
     return DAG.getSelect(dl, VT, Overflow, Zero, SumDiff);
   }
 
-  // SatMax -> Overflow && SumDiff < 0
-  // SatMin -> Overflow && SumDiff >= 0
+  // Overflow ? (SumDiff >> BW) ^ MinVal : SumDiff
   APInt MinVal = APInt::getSignedMinValue(BitWidth);
-  APInt MaxVal = APInt::getSignedMaxValue(BitWidth);
   SDValue SatMin = DAG.getConstant(MinVal, dl, VT);
-  SDValue SatMax = DAG.getConstant(MaxVal, dl, VT);
-  SDValue SumNeg = DAG.getSetCC(dl, BoolVT, SumDiff, Zero, ISD::SETLT);
-  Result = DAG.getSelect(dl, VT, SumNeg, SatMax, SatMin);
+  SDValue Shift = DAG.getNode(ISD::SRA, dl, VT, SumDiff,
+                              DAG.getConstant(BitWidth - 1, dl, VT));
+  Result = DAG.getNode(ISD::XOR, dl, VT, Shift, SatMin);
   return DAG.getSelect(dl, VT, Overflow, Result, SumDiff);
 }
 
@@ -8138,8 +8158,11 @@ TargetLowering::expandFixedPointMul(SDNode *Node, SelectionDAG &DAG) const {
       APInt MaxVal = APInt::getSignedMaxValue(VTSize);
       SDValue SatMin = DAG.getConstant(MinVal, dl, VT);
       SDValue SatMax = DAG.getConstant(MaxVal, dl, VT);
-      SDValue ProdNeg = DAG.getSetCC(dl, BoolVT, Product, Zero, ISD::SETLT);
-      Result = DAG.getSelect(dl, VT, ProdNeg, SatMax, SatMin);
+      // Xor the inputs, if resulting sign bit is 0 the product will be
+      // positive, else negative.
+      SDValue Xor = DAG.getNode(ISD::XOR, dl, VT, LHS, RHS);
+      SDValue ProdNeg = DAG.getSetCC(dl, BoolVT, Xor, Zero, ISD::SETLT);
+      Result = DAG.getSelect(dl, VT, ProdNeg, SatMin, SatMax);
       return DAG.getSelect(dl, VT, Overflow, Result, Product);
     } else if (!Signed && isOperationLegalOrCustom(ISD::UMULO, VT)) {
       SDValue Result =
@@ -8374,7 +8397,7 @@ void TargetLowering::expandSADDSUBO(
 
   // If SADDSAT/SSUBSAT is legal, compare results to detect overflow.
   unsigned OpcSat = IsAdd ? ISD::SADDSAT : ISD::SSUBSAT;
-  if (isOperationLegalOrCustom(OpcSat, LHS.getValueType())) {
+  if (isOperationLegal(OpcSat, LHS.getValueType())) {
     SDValue Sat = DAG.getNode(OpcSat, dl, LHS.getValueType(), LHS, RHS);
     SDValue SetCC = DAG.getSetCC(dl, OType, Result, Sat, ISD::SETNE);
     Overflow = DAG.getBoolExtOrTrunc(SetCC, dl, ResultType, ResultType);

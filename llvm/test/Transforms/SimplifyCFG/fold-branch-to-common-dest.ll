@@ -118,8 +118,9 @@ final_right:
   ret void
 }
 
-; FIXME: When we fold the dispatch block into pred, the call is moved to pred
-; and the attribute nonnull is no longer valid on paramater. We should drop it.
+; When we fold the dispatch block into pred, the call is moved to pred
+; and the attribute nonnull propagates poison paramater. However, since the
+; function is speculatable, it can never cause UB. So, we need not technically drop it.
 define void @one_pred_with_spec_call(i8 %v0, i8 %v1, i32* %p) {
 ; CHECK-LABEL: @one_pred_with_spec_call(
 ; CHECK-NEXT:  pred:
@@ -140,6 +141,38 @@ pred:
 
 dispatch:
   %x = call i32 @speculate_call(i32* nonnull %p)
+  %c1 = icmp eq i8 %v1, 0
+  br i1 %c1, label %final_left, label %final_right
+
+final_left:
+  ret void
+
+final_right:
+  call void @sideeffect0()
+  ret void
+}
+
+; Drop dereferenceable on the parameter
+define void @one_pred_with_spec_call_deref(i8 %v0, i8 %v1, i32* %p) {
+; CHECK-LABEL: @one_pred_with_spec_call_deref(
+; CHECK-NEXT:  pred:
+; CHECK-NEXT:    [[C0:%.*]] = icmp ne i32* [[P:%.*]], null
+; CHECK-NEXT:    [[X:%.*]] = call i32 @speculate_call(i32* [[P]])
+; CHECK-NEXT:    [[C1:%.*]] = icmp eq i8 [[V1:%.*]], 0
+; CHECK-NEXT:    [[OR_COND:%.*]] = select i1 [[C0]], i1 [[C1]], i1 false
+; CHECK-NEXT:    br i1 [[OR_COND]], label [[COMMON_RET:%.*]], label [[FINAL_RIGHT:%.*]]
+; CHECK:       common.ret:
+; CHECK-NEXT:    ret void
+; CHECK:       final_right:
+; CHECK-NEXT:    call void @sideeffect0()
+; CHECK-NEXT:    br label [[COMMON_RET]]
+;
+pred:
+  %c0 = icmp ne i32* %p, null
+  br i1 %c0, label %dispatch, label %final_right
+
+dispatch:
+  %x = call i32 @speculate_call(i32* dereferenceable(12) %p)
   %c1 = icmp eq i8 %v1, 0
   br i1 %c1, label %final_left, label %final_right
 

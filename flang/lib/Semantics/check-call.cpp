@@ -46,6 +46,9 @@ static void CheckImplicitInterfaceArg(
     }
   }
   if (const auto *expr{arg.UnwrapExpr()}) {
+    if (IsBOZLiteral(*expr)) {
+      messages.Say("BOZ argument requires an explicit interface"_err_en_US);
+    }
     if (auto named{evaluate::ExtractNamedEntity(*expr)}) {
       const Symbol &symbol{named->GetLastSymbol()};
       if (symbol.Corank() > 0) {
@@ -550,9 +553,8 @@ static void CheckProcedureArg(evaluate::ActualArgument &arg,
                 messages.Say(
                     "Actual procedure argument has an implicit interface "
                     "which is not known to be compatible with %s which has an "
-                    "explicit interface"_err_en_US,
+                    "explicit interface"_en_US,
                     dummyName);
-                return;
               }
             }
           } else { // 15.5.2.9(2,3)
@@ -629,8 +631,7 @@ static void CheckExplicitInterfaceArg(evaluate::ActualArgument &arg,
                 CheckExplicitDataArg(object, dummyName, *expr, *type,
                     isElemental, context, scope, intrinsic);
               } else if (object.type.type().IsTypelessIntrinsicArgument() &&
-                  std::holds_alternative<evaluate::BOZLiteralConstant>(
-                      expr->u)) {
+                  IsBOZLiteral(*expr)) {
                 // ok
               } else if (object.type.type().IsTypelessIntrinsicArgument() &&
                   evaluate::IsNullPointer(*expr)) {
