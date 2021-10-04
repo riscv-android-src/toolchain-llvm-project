@@ -410,6 +410,9 @@ def nzFPImmAsi64 : PatLeaf<(fpimm), [{
 // Get the Hi bits of a 64 bit immediate.
 def getFPAs64BitIntHi : SDNodeXForm<fpimm, [{
   APFloat APFloatOfN = N->getValueAPF();
+  bool Unused;
+  APFloatOfN.convert(APFloat::IEEEdouble(), APFloat::rmNearestTiesToEven,
+                     &Unused);
   uint32_t Hi = (uint32_t)((APFloatOfN.bitcastToAPInt().getZExtValue() &
                             0xFFFFFFFF00000000LL) >> 32);
   return CurDAG->getTargetConstant(Hi, SDLoc(N), MVT::i32);
@@ -418,6 +421,9 @@ def getFPAs64BitIntHi : SDNodeXForm<fpimm, [{
 // Get the Lo bits of a 64 bit immediate.
 def getFPAs64BitIntLo : SDNodeXForm<fpimm, [{
   APFloat APFloatOfN = N->getValueAPF();
+  bool Unused;
+  APFloatOfN.convert(APFloat::IEEEdouble(), APFloat::rmNearestTiesToEven,
+                     &Unused);
   uint32_t Lo = (uint32_t)(APFloatOfN.bitcastToAPInt().getZExtValue() &
                            0xFFFFFFFF);
   return CurDAG->getTargetConstant(Lo, SDLoc(N), MVT::i32);
@@ -1643,7 +1649,7 @@ def RESTORE_CRBIT : PPCEmitTimePseudo<(outs crbitrc:$cond), (ins memri:$F),
                            "#RESTORE_CRBIT", []>;
 }
 
-let isTerminator = 1, isBarrier = 1, PPC970_Unit = 7 in {
+let isTerminator = 1, isBarrier = 1, PPC970_Unit = 7, hasSideEffects = 0 in {
   let isPredicable = 1, isReturn = 1, Uses = [LR, RM] in
     def BLR : XLForm_2_ext<19, 16, 20, 0, 0, (outs), (ins), "blr", IIC_BrB,
                            [(retflag)]>, Requires<[In32BitMode]>;
@@ -1684,7 +1690,8 @@ let Defs = [LR] in
   def MoveGOTtoLR : PPCEmitTimePseudo<(outs), (ins), "#MoveGOTtoLR", []>,
                     PPC970_Unit_BRU;
 
-let isBranch = 1, isTerminator = 1, hasCtrlDep = 1, PPC970_Unit = 7 in {
+let isBranch = 1, isTerminator = 1, hasCtrlDep = 1, PPC970_Unit = 7,
+    hasSideEffects = 0 in {
   let isBarrier = 1 in {
     let isPredicable = 1 in
       def B : IForm<18, 0, 0, (outs), (ins directbrtarget:$dst),
@@ -1776,7 +1783,8 @@ let isBranch = 1, isTerminator = 1, hasCtrlDep = 1, PPC970_Unit = 7 in {
 }
 
 // The unconditional BCL used by the SjLj setjmp code.
-let isCall = 1, hasCtrlDep = 1, isCodeGenOnly = 1, PPC970_Unit = 7 in {
+let isCall = 1, hasCtrlDep = 1, isCodeGenOnly = 1, PPC970_Unit = 7,
+    hasSideEffects = 0 in {
   let Defs = [LR], Uses = [RM] in {
     def BCLalways  : BForm_2<16, 20, 31, 0, 1, (outs), (ins condbrtarget:$dst),
                             "bcl 20, 31, $dst">;
@@ -1911,7 +1919,7 @@ let isCall = 1, PPC970_Unit = 7, isCodeGenOnly = 1,
 }
 
 
-let isCodeGenOnly = 1 in {
+let isCodeGenOnly = 1, hasSideEffects = 0 in {
 
 let isTerminator = 1, isBarrier = 1, PPC970_Unit = 7, isBranch = 1,
     isIndirectBranch = 1, isCall = 1, isReturn = 1, Uses = [CTR, RM]  in
@@ -3089,7 +3097,7 @@ let Uses = [RM], mayRaiseFPException = 1 in {
 
 // When FM is 30/31, we are setting the 62/63 bit of FPSCR, the implicit-def
 // RM should be set.
-let hasSideEffects = 1 in {
+let hasSideEffects = 1, Defs = [RM] in {
 def MTFSB0 : XForm_43<63, 70, (outs), (ins u5imm:$FM),
                       "mtfsb0 $FM", IIC_IntMTFSB0,
                       [(int_ppc_mtfsb0 timm:$FM)]>,
@@ -3155,6 +3163,10 @@ def MODSW : XForm_8<31, 779, (outs gprc:$rT), (ins gprc:$rA, gprc:$rB),
 def MODUW : XForm_8<31, 267, (outs gprc:$rT), (ins gprc:$rA, gprc:$rB),
                         "moduw $rT, $rA, $rB", IIC_IntDivW,
                         [(set i32:$rT, (urem i32:$rA, i32:$rB))]>;
+let hasSideEffects = 1 in
+def ADDEX : Z23Form_RTAB5_CY2<31, 170, (outs gprc:$rT),
+                              (ins gprc:$rA, gprc:$rB, u2imm:$CY),
+                              "addex $rT, $rA, $rB, $CY", IIC_IntGeneral, []>;
 }
 
 let PPC970_Unit = 1, hasSideEffects = 0 in {  // FXU Operations.
@@ -5049,7 +5061,7 @@ def RLWNMbm_rec : PPCAsmPseudo<"rlwnm. $rA, $rS, $n, $b",
 
 // These generic branch instruction forms are used for the assembler parser only.
 // Defs and Uses are conservative, since we don't know the BO value.
-let PPC970_Unit = 7, isBranch = 1 in {
+let PPC970_Unit = 7, isBranch = 1, hasSideEffects = 0 in {
   let Defs = [CTR], Uses = [CTR, RM] in {
     def gBC : BForm_3<16, 0, 0, (outs),
                       (ins u5imm:$bo, crbitrc:$bi, condbrtarget:$dst),
@@ -5463,6 +5475,8 @@ def : Pat<(i64 (bitreverse i64:$A)),
 
 def : Pat<(int_ppc_stwcx ForceXForm:$dst, gprc:$A),
           (STWCX gprc:$A, ForceXForm:$dst)>;
+def : Pat<(int_ppc_stbcx ForceXForm:$dst, gprc:$A),
+          (STBCX gprc:$A, ForceXForm:$dst)>;
 def : Pat<(int_ppc_tw gprc:$A, gprc:$B, i32:$IMM),
           (TW $IMM, $A, $B)>;
 def : Pat<(int_ppc_trap gprc:$A),

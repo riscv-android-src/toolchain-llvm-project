@@ -306,13 +306,17 @@ config("compiler_defaults") {
   if (use_ubsan) {
     assert(is_clang && current_os == "linux",
            "ubsan only supported on Linux/Clang")
-    cflags += [ "-fsanitize=undefined", "-fno-sanitize-recover=all" ]
+    cflags += [
+      "-fsanitize=undefined",
+      "-fno-sanitize-recover=all",
+    ]
     ldflags += [ "-fsanitize=undefined" ]
   }
 
   if (use_asan) {
-    assert(is_clang && current_os == "linux",
-           "asan only supported on Linux/Clang")
+    assert(is_clang && (current_os == "ios" || current_os == "linux" ||
+                            current_os == "mac"),
+           "asan only supported on iOS/Clang, Linux/Clang, and macOS/Clang")
     cflags += [ "-fsanitize=address" ]
     ldflags += [ "-fsanitize=address" ]
   }
@@ -373,6 +377,9 @@ config("llvm_code") {
     "//llvm/include",
     "$root_gen_dir/llvm/include",
   ]
+  if (current_os != "win") {
+    cflags = [ "-fPIC" ]
+  }
 }
 
 config("lld_code") {
@@ -400,12 +407,13 @@ config("crt_code") {
     "-gline-tables-only",
     "-fvisibility=hidden",
   ]
-  assert(is_clang, "CRT code is always built with just-built clang")
-  cflags += [
-    "-Werror=thread-safety",
-    "-Werror=thread-safety-reference",
-    "-Werror=thread-safety-beta",
-  ]
+  if (is_clang) {
+    cflags += [
+      "-Werror=thread-safety",
+      "-Werror=thread-safety-reference",
+      "-Werror=thread-safety-beta",
+    ]
+  }
 }
 
 config("warn_covered_switch_default") {

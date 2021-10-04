@@ -56,6 +56,10 @@ enum tgt_map_type {
   OMP_TGT_MAPTYPE_CLOSE           = 0x400,
   // runtime error if not already allocated
   OMP_TGT_MAPTYPE_PRESENT         = 0x1000,
+  // use a separate reference counter so that the data cannot be unmapped within
+  // the structured region
+  // This is an OpenMP extension for the sake of OpenACC support.
+  OMP_TGT_MAPTYPE_OMPX_HOLD       = 0x2000,
   // descriptor for non-contiguous target-update
   OMP_TGT_MAPTYPE_NON_CONTIG      = 0x100000000000,
   // member of struct, member given by [16 MSBs] - 1
@@ -210,6 +214,9 @@ void __tgt_register_requires(int64_t flags);
 /// adds a target shared library to the target execution image
 void __tgt_register_lib(__tgt_bin_desc *desc);
 
+/// Initialize all RTLs at once
+void __tgt_init_all_rtls();
+
 /// removes a target shared library from the target execution image
 void __tgt_unregister_lib(__tgt_bin_desc *desc);
 
@@ -333,6 +340,7 @@ void __kmpc_push_target_tripcount_mapper(ident_t *loc, int64_t device_id,
 
 void __tgt_set_info_flag(uint32_t);
 
+int __tgt_print_device_info(int64_t device_id);
 #ifdef __cplusplus
 }
 #endif

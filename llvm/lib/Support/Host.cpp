@@ -324,8 +324,11 @@ StringRef getCPUNameFromS390Model(unsigned int Id, bool HaveVectorSupport) {
       return HaveVectorSupport? "z14" : "zEC12";
     case 8561:
     case 8562:
-    default:
       return HaveVectorSupport? "z15" : "zEC12";
+    case 3931:
+    case 3932:
+    default:
+      return HaveVectorSupport? "arch14" : "zEC12";
   }
 }
 } // end anonymous namespace
@@ -767,6 +770,22 @@ getIntelProcessorTypeAndSubtype(unsigned Family, unsigned Model,
       CPU = "icelake-client";
       *Type = X86::INTEL_COREI7;
       *Subtype = X86::INTEL_COREI7_ICELAKE_CLIENT;
+      break;
+
+    // Tigerlake:
+    case 0x8c:
+    case 0x8d:
+      CPU = "tigerlake";
+      *Type = X86::INTEL_COREI7;
+      *Subtype = X86::INTEL_COREI7_TIGERLAKE;
+      break;
+
+    // Alderlake:
+    case 0x97:
+    case 0x9a:
+      CPU = "alderlake";
+      *Type = X86::INTEL_COREI7;
+      *Subtype = X86::INTEL_COREI7_ALDERLAKE;
       break;
 
     // Icelake Xeon:
@@ -1614,6 +1633,7 @@ bool sys::getHostCPUFeatures(StringMap<bool> &Features) {
   // For more info, see X86 ISA docs.
   Features["pconfig"] = HasLeaf7 && ((EDX >> 18) & 1);
   Features["amx-bf16"]   = HasLeaf7 && ((EDX >> 22) & 1) && HasAMXSave;
+  Features["avx512fp16"] = HasLeaf7 && ((EDX >> 23) & 1) && HasAVX512Save;
   Features["amx-tile"]   = HasLeaf7 && ((EDX >> 24) & 1) && HasAMXSave;
   Features["amx-int8"]   = HasLeaf7 && ((EDX >> 25) & 1) && HasAMXSave;
   bool HasLeaf7Subleaf1 =

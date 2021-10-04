@@ -495,7 +495,12 @@ public:
            (A == LangAS::Default &&
             (B == LangAS::sycl_private || B == LangAS::sycl_local ||
              B == LangAS::sycl_global || B == LangAS::sycl_global_device ||
-             B == LangAS::sycl_global_host));
+             B == LangAS::sycl_global_host)) ||
+           // In HIP device compilation, any cuda address space is allowed
+           // to implicitly cast into the default address space.
+           (A == LangAS::Default &&
+            (B == LangAS::cuda_constant || B == LangAS::cuda_device ||
+             B == LangAS::cuda_shared));
   }
 
   /// Returns true if the address space in these qualifiers is equal to or
@@ -3450,10 +3455,6 @@ class ConstantMatrixType final : public MatrixType {
 protected:
   friend class ASTContext;
 
-  /// The element type of the matrix.
-  // FIXME: Appears to be unused? There is also MatrixType::ElementType...
-  QualType ElementType;
-
   /// Number of rows and columns.
   unsigned NumRows;
   unsigned NumColumns;
@@ -3523,13 +3524,9 @@ class DependentSizedMatrixType final : public MatrixType {
                            Expr *ColumnExpr, SourceLocation loc);
 
 public:
-  QualType getElementType() const { return ElementType; }
   Expr *getRowExpr() const { return RowExpr; }
   Expr *getColumnExpr() const { return ColumnExpr; }
   SourceLocation getAttributeLoc() const { return loc; }
-
-  bool isSugared() const { return false; }
-  QualType desugar() const { return QualType(this, 0); }
 
   static bool classof(const Type *T) {
     return T->getTypeClass() == DependentSizedMatrix;
