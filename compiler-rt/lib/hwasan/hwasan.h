@@ -142,13 +142,18 @@ void AndroidTestTlsSlot();
     RunFreeHooks(ptr);            \
   } while (false)
 
-#if HWASAN_WITH_INTERCEPTORS && defined(__aarch64__)
+#if HWASAN_WITH_INTERCEPTORS && (defined(__aarch64__) || SANITIZER_RISCV64)
 // For both bionic and glibc __sigset_t is an unsigned long.
 typedef unsigned long __hw_sigset_t;
+#if defined(__aarch64__)
 // Setjmp and longjmp implementations are platform specific, and hence the
 // interception code is platform specific too.  As yet we've only implemented
 // the interception for AArch64.
 typedef unsigned long long __hw_register_buf[22];
+#else
+// riscv64, refer impl of __sigsetjmp
+typedef unsigned long long __hw_register_buf[1 + 12 + 1 + 12];
+#endif
 struct __hw_jmp_buf_struct {
   // NOTE: The machine-dependent definition of `__sigsetjmp'
   // assume that a `__hw_jmp_buf' begins with a `__hw_register_buf' and that

@@ -13,8 +13,9 @@
 
 #include "sanitizer_common/sanitizer_asm.h"
 
-#if HWASAN_WITH_INTERCEPTORS && defined(__aarch64__)
+#if HWASAN_WITH_INTERCEPTORS
 #include "sanitizer_common/sanitizer_platform.h"
+#if defined(__aarch64__)
 
 // We want to save the context of the calling function.
 // That requires
@@ -94,7 +95,95 @@ ALIAS __interceptor_sigsetjmp, __sigsetjmp
 
 ALIAS __interceptor_setjmp, _setjmp
 .weak _setjmp
+
+#elif SANITIZER_RISCV64
+
+.section .text
+.file "hwasan_setjmp.S"
+
+.global __interceptor_setjmp
+ASM_TYPE_FUNCTION(__interceptor_setjmp)
+__interceptor_setjmp:
+  CFI_STARTPROC
+  addi	x11, x0, 0
+  j	__interceptor_sigsetjmp
+  CFI_ENDPROC
+ASM_SIZE(__interceptor_setjmp)
+
+#if SANITIZER_ANDROID
+// Bionic also defines a function `setjmp` that calls `sigsetjmp` saving the
+// current signal.
+.global __interceptor_setjmp_bionic
+ASM_TYPE_FUNCTION(__interceptor_setjmp_bionic)
+__interceptor_setjmp_bionic:
+  CFI_STARTPROC
+  addi	x11, x0, 1
+  j	__interceptor_sigsetjmp
+  CFI_ENDPROC
+ASM_SIZE(__interceptor_setjmp_bionic)
 #endif
+
+.hidden __interceptor_sigsetjmp
+ASM_TYPE_FUNCTION(__interceptor_sigsetjmp)
+__interceptor_sigsetjmp:
+  CFI_STARTPROC
+  sd    ra,   0<<3(x10)
+  sd    s0,   1<<3(x10)
+  sd    s1,   2<<3(x10)
+  sd    s2,   3<<3(x10)
+  sd    s3,   4<<3(x10)
+  sd    s4,   5<<3(x10)
+  sd    s5,   6<<3(x10)
+  sd    s6,   7<<3(x10)
+  sd    s7,   8<<3(x10)
+  sd    s8,   9<<3(x10)
+  sd    s9,   10<<3(x10)
+  sd    s10,  11<<3(x10)
+  sd    s11,  12<<3(x10)
+  sd    sp,   13<<3(x10)
+#ifndef __riscv_float_abi_soft
+  fsd   fs0,  14<<3(x10)
+  fsd   fs1,  15<<3(x10)
+  fsd   fs2,  16<<3(x10)
+  fsd   fs3,  17<<3(x10)
+  fsd   fs4,  18<<3(x10)
+  fsd   fs5,  19<<3(x10)
+  fsd   fs6,  20<<3(x10)
+  fsd   fs7,  21<<3(x10)
+  fsd   fs8,  22<<3(x10)
+  fsd   fs9,  23<<3(x10)
+  fsd   fs10, 24<<3(x10)
+  fsd   fs11, 25<<3(x10)
+#endif
+  // We always have the second argument to __sigjmp_save (savemask) set, since
+  // the _setjmp function above has set it for us as `false`.
+  // This function is defined in hwasan_interceptors.cc
+  j	__sigjmp_save
+  CFI_ENDPROC
+ASM_SIZE(__interceptor_sigsetjmp)
+
+
+.macro ALIAS first second
+  .globl \second
+  .equ \second\(), \first
+.endm
+
+#if SANITIZER_ANDROID
+ALIAS __interceptor_sigsetjmp, sigsetjmp
+.weak sigsetjmp
+
+ALIAS __interceptor_setjmp_bionic, setjmp
+.weak setjmp
+#else
+ALIAS __interceptor_sigsetjmp, __sigsetjmp
+.weak __sigsetjmp
+#endif
+
+ALIAS __interceptor_setjmp, _setjmp
+.weak _setjmp
+#else
+#endif
+#endif //HWASAN_WITH_INTERCEPTORS
 
 // We do not need executable stack.
 NO_EXEC_STACK_DIRECTIVE

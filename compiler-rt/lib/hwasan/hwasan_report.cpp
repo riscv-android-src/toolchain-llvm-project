@@ -657,8 +657,14 @@ void ReportRegisters(uptr *frame, uptr pc) {
        frame[20], frame[21], frame[22], frame[23]);
   Printf("    x24 %016llx  x25 %016llx  x26 %016llx  x27 %016llx\n",
        frame[24], frame[25], frame[26], frame[27]);
+#if defined(__aarch64__)
   Printf("    x28 %016llx  x29 %016llx  x30 %016llx\n",
        frame[28], frame[29], frame[30]);
+#elif SANITIZER_RISCV64
+  Printf("    x28 %016llx  x29 %016llx  x30 %016llx  x31 %016llx\n",
+       frame[28], frame[29], frame[30], frame[31]);
+#else
+#endif
 }
 
 }  // namespace __hwasan

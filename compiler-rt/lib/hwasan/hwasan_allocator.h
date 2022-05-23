@@ -21,7 +21,7 @@
 #include "sanitizer_common/sanitizer_ring_buffer.h"
 #include "hwasan_poisoning.h"
 
-#if !defined(__aarch64__) && !defined(__x86_64__)
+#if !defined(__aarch64__) && !defined(__x86_64__) && !SANITIZER_RISCV64
 #error Unsupported platform
 #endif
 
