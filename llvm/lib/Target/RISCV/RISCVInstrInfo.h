@@ -15,6 +15,7 @@
 
 #include "RISCVRegisterInfo.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
+#include "llvm/IR/DiagnosticInfo.h"
 
 #define GET_INSTRINFO_HEADER
 #include "RISCVGenInstrInfo.inc"
@@ -133,6 +134,10 @@ public:
   insertOutlinedCall(Module &M, MachineBasicBlock &MBB,
                      MachineBasicBlock::iterator &It, MachineFunction &MF,
                      const outliner::Candidate &C) const override;
+  Register getVLENFactoredAmount(MachineFunction &MF, MachineBasicBlock &MBB,
+                                 MachineBasicBlock::iterator II,
+                                 int64_t Amount) const;
+
 protected:
   const RISCVSubtarget &STI;
 };
