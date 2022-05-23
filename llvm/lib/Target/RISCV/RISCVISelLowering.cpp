@@ -257,6 +257,14 @@ RISCVTargetLowering::RISCVTargetLowering(const TargetMachine &TM,
     }
   }
 
+  static constexpr ISD::NodeType FPLegalNodeTypes[] = {
+      ISD::FMINNUM,        ISD::FMAXNUM,       ISD::LRINT,
+      ISD::LLRINT,         ISD::LROUND,        ISD::LLROUND,
+      ISD::STRICT_LRINT,   ISD::STRICT_LLRINT, ISD::STRICT_LROUND,
+      ISD::STRICT_LLROUND, ISD::STRICT_FMA,    ISD::STRICT_FADD,
+      ISD::STRICT_FSUB,    ISD::STRICT_FMUL,   ISD::STRICT_FDIV,
+      ISD::STRICT_FSQRT,   ISD::STRICT_FSETCC, ISD::STRICT_FSETCCS};
+
   ISD::CondCode FPCCToExpand[] = {
       ISD::SETOGT, ISD::SETOGE, ISD::SETONE, ISD::SETUEQ, ISD::SETUGT,
       ISD::SETUGE, ISD::SETULT, ISD::SETULE, ISD::SETUNE, ISD::SETGT,
@@ -270,20 +278,46 @@ RISCVTargetLowering::RISCVTargetLowering(const TargetMachine &TM,
     setOperationAction(ISD::BITCAST, MVT::i16, Custom);
 
   if (Subtarget.hasStdExtZfh()) {
-    setOperationAction(ISD::FMINNUM, MVT::f16, Legal);
-    setOperationAction(ISD::FMAXNUM, MVT::f16, Legal);
+    for (auto NT : FPLegalNodeTypes)
+      setOperationAction(NT, MVT::f16, Legal);
+    setOperationAction(ISD::STRICT_FP_ROUND, MVT::f16, Legal);
+    setOperationAction(ISD::STRICT_FP_EXTEND, MVT::f32, Legal);
     for (auto CC : FPCCToExpand)
       setCondCodeAction(CC, MVT::f16, Expand);
     setOperationAction(ISD::SELECT_CC, MVT::f16, Expand);
     setOperationAction(ISD::SELECT, MVT::f16, Custom);
     setOperationAction(ISD::BR_CC, MVT::f16, Expand);
-    for (auto Op : FPOpToExpand)
-      setOperationAction(Op, MVT::f16, Expand);
+
+    setOperationAction(ISD::FREM,       MVT::f16, Promote);
+    setOperationAction(ISD::FCEIL,      MVT::f16, Promote);
+    setOperationAction(ISD::FFLOOR,     MVT::f16, Promote);
+    setOperationAction(ISD::FNEARBYINT, MVT::f16, Promote);
+    setOperationAction(ISD::FRINT,      MVT::f16, Promote);
+    setOperationAction(ISD::FROUND,     MVT::f16, Promote);
+    setOperationAction(ISD::FROUNDEVEN, MVT::f16, Promote);
+    setOperationAction(ISD::FTRUNC,     MVT::f16, Promote);
+    setOperationAction(ISD::FPOW,       MVT::f16, Promote);
+    setOperationAction(ISD::FPOWI,      MVT::f16, Promote);
+    setOperationAction(ISD::FCOS,       MVT::f16, Promote);
+    setOperationAction(ISD::FSIN,       MVT::f16, Promote);
+    setOperationAction(ISD::FSINCOS,    MVT::f16, Promote);
+    setOperationAction(ISD::FEXP,       MVT::f16, Promote);
+    setOperationAction(ISD::FEXP2,      MVT::f16, Promote);
+    setOperationAction(ISD::FLOG,       MVT::f16, Promote);
+    setOperationAction(ISD::FLOG2,      MVT::f16, Promote);
+    setOperationAction(ISD::FLOG10,     MVT::f16, Promote);
+
+    // FIXME: Need to promote f16 STRICT_* to f32 libcalls, but we don't have
+    // complete support for all operations in LegalizeDAG.
+
+    // We need to custom promote this.
+    if (Subtarget.is64Bit())
+      setOperationAction(ISD::FPOWI, MVT::i32, Custom);
   }
 
   if (Subtarget.hasStdExtF()) {
-    setOperationAction(ISD::FMINNUM, MVT::f32, Legal);
-    setOperationAction(ISD::FMAXNUM, MVT::f32, Legal);
+    for (auto NT : FPLegalNodeTypes)
+      setOperationAction(NT, MVT::f32, Legal);
     for (auto CC : FPCCToExpand)
       setCondCodeAction(CC, MVT::f32, Expand);
     setOperationAction(ISD::SELECT_CC, MVT::f32, Expand);
@@ -299,8 +333,10 @@ RISCVTargetLowering::RISCVTargetLowering(const TargetMachine &TM,
     setOperationAction(ISD::BITCAST, MVT::i32, Custom);
 
   if (Subtarget.hasStdExtD()) {
-    setOperationAction(ISD::FMINNUM, MVT::f64, Legal);
-    setOperationAction(ISD::FMAXNUM, MVT::f64, Legal);
+    for (auto NT : FPLegalNodeTypes)
+      setOperationAction(NT, MVT::f64, Legal);
+    setOperationAction(ISD::STRICT_FP_ROUND, MVT::f32, Legal);
+    setOperationAction(ISD::STRICT_FP_EXTEND, MVT::f64, Legal);
     for (auto CC : FPCCToExpand)
       setCondCodeAction(CC, MVT::f64, Expand);
     setOperationAction(ISD::SELECT_CC, MVT::f64, Expand);
@@ -372,6 +408,15 @@ RISCVTargetLowering::RISCVTargetLowering(const TargetMachine &TM,
       setOperationAction(ISD::SMAX, VT, Legal);
       setOperationAction(ISD::UMIN, VT, Legal);
       setOperationAction(ISD::UMAX, VT, Legal);
+
+      // RVV has native int->float & float->int conversions where the
+      // element type sizes are within one power-of-two of each other. Any
+      // wider distances between type sizes have to be lowered as sequences
+      // which progressively narrow the gap in stages.
+      setOperationAction(ISD::SINT_TO_FP, VT, Custom);
+      setOperationAction(ISD::UINT_TO_FP, VT, Custom);
+      setOperationAction(ISD::FP_TO_SINT, VT, Custom);
+      setOperationAction(ISD::FP_TO_UINT, VT, Custom);
     }
 
     // We must custom-lower SPLAT_VECTOR vXi64 on RV32
@@ -437,6 +482,9 @@ RISCVTargetLowering::RISCVTargetLowering(const TargetMachine &TM,
   if (Subtarget.hasStdExtZbp()) {
     setTargetDAGCombine(ISD::OR);
   }
+
+  setLibcallName(RTLIB::FPEXT_F16_F32, "__extendhfsf2");
+  setLibcallName(RTLIB::FPROUND_F32_F16, "__truncsfhf2");
 }
 
 EVT RISCVTargetLowering::getSetCCResultType(const DataLayout &DL, LLVMContext &,
@@ -564,8 +612,6 @@ bool RISCVTargetLowering::isFPImmLegal(const APFloat &Imm, EVT VT,
     return false;
   if (VT == MVT::f64 && !Subtarget.hasStdExtD())
     return false;
-  if (Imm.isNegZero())
-    return false;
   return Imm.isZero();
 }
 
@@ -573,6 +619,28 @@ bool RISCVTargetLowering::hasBitPreservingFPLogic(EVT VT) const {
   return (VT == MVT::f16 && Subtarget.hasStdExtZfh()) ||
          (VT == MVT::f32 && Subtarget.hasStdExtF()) ||
          (VT == MVT::f64 && Subtarget.hasStdExtD());
+}
+
+MVT RISCVTargetLowering::getRegisterTypeForCallingConv(LLVMContext &Context,
+                                                      CallingConv::ID CC,
+                                                      EVT VT) const {
+  // Use f32 to pass f16 if it is legal and Zfh is not enabled. We might still
+  // end up using a GPR but that will be decided based on ABI.
+  if (VT == MVT::f16 && Subtarget.hasStdExtF() && !Subtarget.hasStdExtZfh())
+    return MVT::f32;
+
+  return TargetLowering::getRegisterTypeForCallingConv(Context, CC, VT);
+}
+
+unsigned RISCVTargetLowering::getNumRegistersForCallingConv(LLVMContext &Context,
+                                                           CallingConv::ID CC,
+                                                           EVT VT) const {
+  // Use f32 to pass f16 if it is legal and Zfh is not enabled. We might still
+  // end up using a GPR but that will be decided based on ABI.
+  if (VT == MVT::f16 && Subtarget.hasStdExtF() && !Subtarget.hasStdExtZfh())
+    return 1;
+
+  return TargetLowering::getNumRegistersForCallingConv(Context, CC, VT);
 }
 
 // Changes the condition code and swaps operands if necessary, so the SetCC
@@ -697,6 +765,113 @@ SDValue RISCVTargetLowering::LowerOperation(SDValue Op,
     SDValue VScale = DAG.getNode(ISD::SRL, DL, VT, VLENB,
                                  DAG.getConstant(3, DL, VT));
     return DAG.getNode(ISD::MUL, DL, VT, VScale, Op.getOperand(0));
+  }
+  case ISD::FPOWI: {
+    // Custom promote f16 powi with illegal i32 integer type on RV64. Once
+    // promoted this will be legalized into a libcall by LegalizeIntegerTypes.
+    if (Op.getValueType() == MVT::f16 && Subtarget.is64Bit() &&
+        Op.getOperand(1).getValueType() == MVT::i32) {
+      SDLoc DL(Op);
+      SDValue Op0 = DAG.getNode(ISD::FP_EXTEND, DL, MVT::f32, Op.getOperand(0));
+      SDValue Powi =
+          DAG.getNode(ISD::FPOWI, DL, MVT::f32, Op0, Op.getOperand(1));
+      return DAG.getNode(ISD::FP_ROUND, DL, MVT::f16, Powi,
+                         DAG.getIntPtrConstant(0, DL));
+    }
+    return SDValue();
+  }
+  case ISD::FP_EXTEND: {
+    // RVV can only do fp_extend to types double the size as the source. We
+    // custom-lower f16->f64 extensions to two hops of ISD::FP_EXTEND, going
+    // via f32.
+    MVT VT = Op.getSimpleValueType();
+    MVT SrcVT = Op.getOperand(0).getSimpleValueType();
+    // We only need to close the gap between vXf16->vXf64.
+    if (!VT.isVector() || VT.getVectorElementType() != MVT::f64 ||
+        SrcVT.getVectorElementType() != MVT::f16)
+      return Op;
+    SDLoc DL(Op);
+    MVT InterVT = MVT::getVectorVT(MVT::f32, VT.getVectorElementCount());
+    SDValue IntermediateRound =
+        DAG.getFPExtendOrRound(Op.getOperand(0), DL, InterVT);
+    return DAG.getFPExtendOrRound(IntermediateRound, DL, VT);
+  }
+  case ISD::FP_ROUND: {
+    // RVV can only do fp_round to types half the size as the source. We
+    // custom-lower f64->f16 rounds via RVV's round-to-odd float
+    // conversion instruction.
+    MVT VT = Op.getSimpleValueType();
+    MVT SrcVT = Op.getOperand(0).getSimpleValueType();
+    // We only need to close the gap between vXf64<->vXf16.
+    if (!VT.isVector() || VT.getVectorElementType() != MVT::f16 ||
+        SrcVT.getVectorElementType() != MVT::f64)
+      return Op;
+    SDLoc DL(Op);
+    MVT InterVT = MVT::getVectorVT(MVT::f32, VT.getVectorElementCount());
+    SDValue IntermediateRound =
+        DAG.getNode(RISCVISD::VFNCVT_ROD, DL, InterVT, Op.getOperand(0));
+    return DAG.getFPExtendOrRound(IntermediateRound, DL, VT);
+  }
+  case ISD::FP_TO_SINT:
+  case ISD::FP_TO_UINT:
+  case ISD::SINT_TO_FP:
+  case ISD::UINT_TO_FP: {
+    // RVV can only do fp<->int conversions to types half/double the size as
+    // the source. We custom-lower any conversions that do two hops into
+    // sequences.
+    MVT VT = Op.getSimpleValueType();
+    if (!VT.isVector())
+      return Op;
+    SDLoc DL(Op);
+    SDValue Src = Op.getOperand(0);
+    MVT EltVT = VT.getVectorElementType();
+    MVT SrcEltVT = Src.getSimpleValueType().getVectorElementType();
+    unsigned EltSize = EltVT.getSizeInBits();
+    unsigned SrcEltSize = SrcEltVT.getSizeInBits();
+    assert(isPowerOf2_32(EltSize) && isPowerOf2_32(SrcEltSize) &&
+           "Unexpected vector element types");
+    bool IsInt2FP = SrcEltVT.isInteger();
+    // Widening conversions
+    if (EltSize > SrcEltSize && (EltSize / SrcEltSize >= 4)) {
+      if (IsInt2FP) {
+        // Do a regular integer sign/zero extension then convert to float.
+        MVT IVecVT = MVT::getVectorVT(MVT::getIntegerVT(EltVT.getSizeInBits()),
+                                      VT.getVectorElementCount());
+        unsigned ExtOpcode = Op.getOpcode() == ISD::UINT_TO_FP
+                                 ? ISD::ZERO_EXTEND
+                                 : ISD::SIGN_EXTEND;
+        SDValue Ext = DAG.getNode(ExtOpcode, DL, IVecVT, Src);
+        return DAG.getNode(Op.getOpcode(), DL, VT, Ext);
+      }
+      // FP2Int
+      assert(SrcEltVT == MVT::f16 && "Unexpected FP_TO_[US]INT lowering");
+      // Do one doubling fp_extend then complete the operation by converting
+      // to int.
+      MVT InterimFVT = MVT::getVectorVT(MVT::f32, VT.getVectorElementCount());
+      SDValue FExt = DAG.getFPExtendOrRound(Src, DL, InterimFVT);
+      return DAG.getNode(Op.getOpcode(), DL, VT, FExt);
+    }
+
+    // Narrowing conversions
+    if (SrcEltSize > EltSize && (SrcEltSize / EltSize >= 4)) {
+      if (IsInt2FP) {
+        // One narrowing int_to_fp, then an fp_round.
+        assert(EltVT == MVT::f16 && "Unexpected [US]_TO_FP lowering");
+        MVT InterimFVT = MVT::getVectorVT(MVT::f32, VT.getVectorElementCount());
+        SDValue Int2FP = DAG.getNode(Op.getOpcode(), DL, InterimFVT, Src);
+        return DAG.getFPExtendOrRound(Int2FP, DL, VT);
+      }
+      // FP2Int
+      // One narrowing fp_to_int, then truncate the integer. If the float isn't
+      // representable by the integer, the result is poison.
+      MVT IVecVT =
+          MVT::getVectorVT(MVT::getIntegerVT(SrcEltVT.getSizeInBits() / 2),
+                           VT.getVectorElementCount());
+      SDValue FP2Int = DAG.getNode(Op.getOpcode(), DL, IVecVT, Src);
+      return DAG.getNode(ISD::TRUNCATE, DL, VT, FP2Int);
+    }
+
+    return Op;
   }
   }
 }
@@ -3666,6 +3841,7 @@ const char *RISCVTargetLowering::getTargetNodeName(unsigned Opcode) const {
   NODE_NAME_CASE(VMV_X_S)
   NODE_NAME_CASE(SPLAT_VECTOR_I64)
   NODE_NAME_CASE(READ_VLENB)
+  NODE_NAME_CASE(VFNCVT_ROD)
   }
   // clang-format on
   return nullptr;
@@ -3801,12 +3977,18 @@ RISCVTargetLowering::getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI,
                         .Default(RISCV::NoRegister);
     if (FReg != RISCV::NoRegister) {
       assert(RISCV::F0_F <= FReg && FReg <= RISCV::F31_F && "Unknown fp-reg");
-      if (Subtarget.hasStdExtD()) {
+      if (Subtarget.hasStdExtD() && (VT == MVT::f64 || VT == MVT::Other)) {
         unsigned RegNo = FReg - RISCV::F0_F;
         unsigned DReg = RISCV::F0_D + RegNo;
         return std::make_pair(DReg, &RISCV::FPR64RegClass);
       }
-      return std::make_pair(FReg, &RISCV::FPR32RegClass);
+      if (VT == MVT::f32 || VT == MVT::Other)
+        return std::make_pair(FReg, &RISCV::FPR32RegClass);
+      if (Subtarget.hasStdExtZfh() && VT == MVT::f16) {
+        unsigned RegNo = FReg - RISCV::F0_F;
+        unsigned HReg = RISCV::F0_H + RegNo;
+        return std::make_pair(HReg, &RISCV::FPR16RegClass);
+      }
     }
   }
 

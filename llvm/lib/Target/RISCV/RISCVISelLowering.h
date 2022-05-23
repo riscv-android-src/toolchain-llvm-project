@@ -93,6 +93,10 @@ enum NodeType : unsigned {
   SPLAT_VECTOR_I64,
   // Read VLENB CSR
   READ_VLENB,
+  // Matches the semantics of the vfcnvt.rod function (Convert double-width
+  // float to single-width float, rounding towards odd). Takes a double-width
+  // float vector and produces a single-width float vector.
+  VFNCVT_ROD,
 };
 } // namespace RISCVISD
 
@@ -121,6 +125,19 @@ public:
   bool isCheapToSpeculateCtlz() const override;
   bool isFPImmLegal(const APFloat &Imm, EVT VT,
                     bool ForCodeSize) const override;
+
+  bool softPromoteHalfType() const override { return true; }
+
+  /// Return the register type for a given MVT, ensuring vectors are treated
+  /// as a series of gpr sized integers.
+  MVT getRegisterTypeForCallingConv(LLVMContext &Context, CallingConv::ID CC,
+                                    EVT VT) const override;
+
+  /// Return the number of registers for a given MVT, ensuring vectors are
+  /// treated as a series of gpr sized integers.
+  unsigned getNumRegistersForCallingConv(LLVMContext &Context,
+                                         CallingConv::ID CC,
+                                         EVT VT) const override;
 
   bool hasBitPreservingFPLogic(EVT VT) const override;
 

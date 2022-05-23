@@ -27,6 +27,11 @@ using namespace llvm;
 #define GET_SUBTARGETINFO_CTOR
 #include "RISCVGenSubtargetInfo.inc"
 
+static cl::opt<unsigned> RVVVectorELENMax(
+    "riscv-v-fixed-length-vector-elen-max",
+    cl::desc("The maximum ELEN value to use for fixed length vectors."),
+    cl::init(64), cl::Hidden);
+
 void RISCVSubtarget::anchor() {}
 
 RISCVSubtarget &RISCVSubtarget::initializeSubtargetDependencies(

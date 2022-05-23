@@ -271,6 +271,64 @@ multiclass VPatFPSetCCSDNode_VV_VF_FV<CondCode cc,
   defm : VPatFPSetCCSDNode_FV<cc, swapped_op_inst_name>;
 }
 
+multiclass VPatConvertI2FPSDNode_V<SDNode vop, string instruction_name> {
+  foreach fvti = AllFloatVectors in {
+    defvar ivti = GetIntVTypeInfo<fvti>.Vti;
+    def : Pat<(fvti.Vector (vop (ivti.Vector ivti.RegClass:$rs1))),
+              (!cast<Instruction>(instruction_name#"_"#fvti.LMul.MX)
+                  ivti.RegClass:$rs1, VLMax, fvti.SEW)>;
+  }
+}
+
+multiclass VPatConvertFP2ISDNode_V<SDNode vop, string instruction_name> {
+  foreach fvti = AllFloatVectors in {
+    defvar ivti = GetIntVTypeInfo<fvti>.Vti;
+    def : Pat<(ivti.Vector (vop (fvti.Vector fvti.RegClass:$rs1))),
+              (!cast<Instruction>(instruction_name#"_"#ivti.LMul.MX)
+                  fvti.RegClass:$rs1, VLMax, ivti.SEW)>;
+  }
+}
+
+multiclass VPatWConvertI2FPSDNode_V<SDNode vop, string instruction_name> {
+  foreach vtiToWti = AllWidenableIntToFloatVectors in {
+    defvar ivti = vtiToWti.Vti;
+    defvar fwti = vtiToWti.Wti;
+    def : Pat<(fwti.Vector (vop (ivti.Vector ivti.RegClass:$rs1))),
+              (!cast<Instruction>(instruction_name#"_"#ivti.LMul.MX)
+                  ivti.RegClass:$rs1, VLMax, ivti.SEW)>;
+  }
+}
+
+multiclass VPatWConvertFP2ISDNode_V<SDNode vop, string instruction_name> {
+  foreach fvtiToFWti = AllWidenableFloatVectors in {
+    defvar fvti = fvtiToFWti.Vti;
+    defvar iwti = GetIntVTypeInfo<fvtiToFWti.Wti>.Vti;
+    def : Pat<(iwti.Vector (vop (fvti.Vector fvti.RegClass:$rs1))),
+              (!cast<Instruction>(instruction_name#"_"#fvti.LMul.MX)
+                  fvti.RegClass:$rs1, VLMax, fvti.SEW)>;
+  }
+}
+
+multiclass VPatNConvertI2FPSDNode_V<SDNode vop, string instruction_name> {
+  foreach fvtiToFWti = AllWidenableFloatVectors in {
+    defvar fvti = fvtiToFWti.Vti;
+    defvar iwti = GetIntVTypeInfo<fvtiToFWti.Wti>.Vti;
+    def : Pat<(fvti.Vector (vop (iwti.Vector iwti.RegClass:$rs1))),
+              (!cast<Instruction>(instruction_name#"_"#fvti.LMul.MX)
+                  iwti.RegClass:$rs1, VLMax, fvti.SEW)>;
+  }
+}
+
+multiclass VPatNConvertFP2ISDNode_V<SDNode vop, string instruction_name> {
+  foreach vtiToWti = AllWidenableIntToFloatVectors in {
+    defvar vti = vtiToWti.Vti;
+    defvar fwti = vtiToWti.Wti;
+    def : Pat<(vti.Vector (vop (fwti.Vector fwti.RegClass:$rs1))),
+              (!cast<Instruction>(instruction_name#"_"#vti.LMul.MX)
+                  fwti.RegClass:$rs1, VLMax, vti.SEW)>;
+  }
+}
+
 //===----------------------------------------------------------------------===//
 // Patterns.
 //===----------------------------------------------------------------------===//
@@ -396,6 +454,10 @@ foreach mti = AllMasks in {
 
 } // Predicates = [HasStdExtV]
 
+def riscv_fncvt_rod
+    : SDNode<"RISCVISD::VFNCVT_ROD",
+             SDTypeProfile<1, 1, [SDTCisVec<0>, SDTCisVec<1>]>, []>;
+
 let Predicates = [HasStdExtV, HasStdExtF] in {
 
 // 14.2. Vector Single-Width Floating-Point Add/Subtract Instructions
@@ -445,6 +507,43 @@ foreach fvti = AllFloatVectors in {
             (!cast<Instruction>("PseudoVMERGE_VIM_"#fvti.LMul.MX)
                  fvti.RegClass:$rs2, 0, VMV0:$vm, VLMax, fvti.SEW)>;
 }
+
+// 14.15. Vector Single-Width Floating-Point/Integer Type-Convert Instructions
+defm "" : VPatConvertFP2ISDNode_V<fp_to_sint, "PseudoVFCVT_RTZ_X_F_V">;
+defm "" : VPatConvertFP2ISDNode_V<fp_to_uint, "PseudoVFCVT_RTZ_XU_F_V">;
+defm "" : VPatConvertI2FPSDNode_V<sint_to_fp, "PseudoVFCVT_F_X_V">;
+defm "" : VPatConvertI2FPSDNode_V<uint_to_fp, "PseudoVFCVT_F_XU_V">;
+
+// 14.16. Widening Floating-Point/Integer Type-Convert Instructions
+defm "" : VPatWConvertFP2ISDNode_V<fp_to_sint, "PseudoVFWCVT_RTZ_X_F_V">;
+defm "" : VPatWConvertFP2ISDNode_V<fp_to_uint, "PseudoVFWCVT_RTZ_XU_F_V">;
+defm "" : VPatWConvertI2FPSDNode_V<sint_to_fp, "PseudoVFWCVT_F_X_V">;
+defm "" : VPatWConvertI2FPSDNode_V<uint_to_fp, "PseudoVFWCVT_F_XU_V">;
+foreach fvtiToFWti = AllWidenableFloatVectors in {
+  defvar fvti = fvtiToFWti.Vti;
+  defvar fwti = fvtiToFWti.Wti;
+  def : Pat<(fwti.Vector (fpextend (fvti.Vector fvti.RegClass:$rs1))),
+            (!cast<Instruction>("PseudoVFWCVT_F_F_V_"#fvti.LMul.MX)
+                fvti.RegClass:$rs1, VLMax, fvti.SEW)>;
+}
+
+// 14.17. Narrowing Floating-Point/Integer Type-Convert Instructions
+defm "" : VPatNConvertFP2ISDNode_V<fp_to_sint, "PseudoVFNCVT_RTZ_X_F_W">;
+defm "" : VPatNConvertFP2ISDNode_V<fp_to_uint, "PseudoVFNCVT_RTZ_XU_F_W">;
+defm "" : VPatNConvertI2FPSDNode_V<sint_to_fp, "PseudoVFNCVT_F_X_W">;
+defm "" : VPatNConvertI2FPSDNode_V<uint_to_fp, "PseudoVFNCVT_F_XU_W">;
+foreach fvtiToFWti = AllWidenableFloatVectors in {
+  defvar fvti = fvtiToFWti.Vti;
+  defvar fwti = fvtiToFWti.Wti;
+  def : Pat<(fvti.Vector (fpround (fwti.Vector fwti.RegClass:$rs1))),
+            (!cast<Instruction>("PseudoVFNCVT_F_F_W_"#fvti.LMul.MX)
+                fwti.RegClass:$rs1, VLMax, fvti.SEW)>;
+
+  def : Pat<(fvti.Vector (riscv_fncvt_rod (fwti.Vector fwti.RegClass:$rs1))),
+            (!cast<Instruction>("PseudoVFNCVT_ROD_F_F_W_"#fvti.LMul.MX)
+                fwti.RegClass:$rs1, VLMax, fvti.SEW)>;
+}
+
 } // Predicates = [HasStdExtV, HasStdExtF]
 
 //===----------------------------------------------------------------------===//

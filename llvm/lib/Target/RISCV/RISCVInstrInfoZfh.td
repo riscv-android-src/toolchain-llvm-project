@@ -258,6 +258,7 @@ let Predicates = [HasStdExtZfh] in {
 
 /// Float constants
 def : Pat<(f16 (fpimm0)), (FMV_H_X X0)>;
+def : Pat<(f16 (fpimmneg0)), (FSGNJN_H (FMV_H_X X0), (FMV_H_X X0))>;
 
 /// Float conversion operations
 
@@ -266,12 +267,12 @@ def : Pat<(f16 (fpimm0)), (FMV_H_X X0)>;
 
 /// Float arithmetic operations
 
-def : PatFpr16Fpr16DynFrm<fadd, FADD_H>;
-def : PatFpr16Fpr16DynFrm<fsub, FSUB_H>;
-def : PatFpr16Fpr16DynFrm<fmul, FMUL_H>;
-def : PatFpr16Fpr16DynFrm<fdiv, FDIV_H>;
+def : PatFpr16Fpr16DynFrm<any_fadd, FADD_H>;
+def : PatFpr16Fpr16DynFrm<any_fsub, FSUB_H>;
+def : PatFpr16Fpr16DynFrm<any_fmul, FMUL_H>;
+def : PatFpr16Fpr16DynFrm<any_fdiv, FDIV_H>;
 
-def : Pat<(fsqrt FPR16:$rs1), (FSQRT_H FPR16:$rs1, 0b111)>;
+def : Pat<(any_fsqrt FPR16:$rs1), (FSQRT_H FPR16:$rs1, 0b111)>;
 
 def : Pat<(fneg FPR16:$rs1), (FSGNJN_H $rs1, $rs1)>;
 def : Pat<(fabs FPR16:$rs1), (FSGNJX_H $rs1, $rs1)>;
@@ -286,19 +287,19 @@ def : Pat<(fcopysign FPR32:$rs1, FPR16:$rs2), (FSGNJ_S $rs1, (FCVT_S_H $rs2))>;
 def : Pat<(fcopysign FPR64:$rs1, FPR16:$rs2), (FSGNJ_D $rs1, (FCVT_D_H $rs2))>;
 
 // fmadd: rs1 * rs2 + rs3
-def : Pat<(fma FPR16:$rs1, FPR16:$rs2, FPR16:$rs3),
+def : Pat<(any_fma FPR16:$rs1, FPR16:$rs2, FPR16:$rs3),
           (FMADD_H $rs1, $rs2, $rs3, 0b111)>;
 
 // fmsub: rs1 * rs2 - rs3
-def : Pat<(fma FPR16:$rs1, FPR16:$rs2, (fneg FPR16:$rs3)),
+def : Pat<(any_fma FPR16:$rs1, FPR16:$rs2, (fneg FPR16:$rs3)),
           (FMSUB_H FPR16:$rs1, FPR16:$rs2, FPR16:$rs3, 0b111)>;
 
 // fnmsub: -rs1 * rs2 + rs3
-def : Pat<(fma (fneg FPR16:$rs1), FPR16:$rs2, FPR16:$rs3),
+def : Pat<(any_fma (fneg FPR16:$rs1), FPR16:$rs2, FPR16:$rs3),
           (FNMSUB_H FPR16:$rs1, FPR16:$rs2, FPR16:$rs3, 0b111)>;
 
 // fnmadd: -rs1 * rs2 - rs3
-def : Pat<(fma (fneg FPR16:$rs1), FPR16:$rs2, (fneg FPR16:$rs3)),
+def : Pat<(any_fma (fneg FPR16:$rs1), FPR16:$rs2, (fneg FPR16:$rs3)),
           (FNMADD_H FPR16:$rs1, FPR16:$rs2, FPR16:$rs3, 0b111)>;
 
 def : PatFpr16Fpr16<fminnum, FMIN_H>;
@@ -335,11 +336,17 @@ def : Pat<(riscv_fmv_x_anyexth FPR16:$src), (FMV_X_H FPR16:$src)>;
 } // Predicates = [HasStdExtZfh]
 
 let Predicates = [HasStdExtZfh, IsRV32] in {
-// float->[u]int. Round-to-zero must be used.
+// half->[u]int. Round-to-zero must be used.
 def : Pat<(fp_to_sint FPR16:$rs1), (FCVT_W_H $rs1, 0b001)>;
 def : Pat<(fp_to_uint FPR16:$rs1), (FCVT_WU_H $rs1, 0b001)>;
 
-// [u]int->float. Match GCC and default to using dynamic rounding mode.
+// half->int32 with current rounding mode.
+def : Pat<(i32 (any_lrint FPR16:$rs1)), (FCVT_W_H $rs1, 0b111)>;
+
+// half->int32 rounded to nearest with ties rounded away from zero.
+def : Pat<(i32 (any_lround FPR16:$rs1)), (FCVT_W_H $rs1, 0b100)>;
+
+// [u]int->half. Match GCC and default to using dynamic rounding mode.
 def : Pat<(sint_to_fp GPR:$rs1), (FCVT_H_W $rs1, 0b111)>;
 def : Pat<(uint_to_fp GPR:$rs1), (FCVT_H_WU $rs1, 0b111)>;
 } // Predicates = [HasStdExtZfh, IsRV32]
@@ -352,9 +359,17 @@ let Predicates = [HasStdExtZfh, IsRV64] in {
 def : Pat<(sext_inreg (assertzexti32 (fp_to_uint FPR16:$rs1)), i32),
           (FCVT_WU_H $rs1, 0b001)>;
 
-// FP->[u]int64
+// half->[u]int64. Round-to-zero must be used.
 def : Pat<(fp_to_sint FPR16:$rs1), (FCVT_L_H $rs1, 0b001)>;
 def : Pat<(fp_to_uint FPR16:$rs1), (FCVT_LU_H $rs1, 0b001)>;
+
+// half->int64 with current rounding mode.
+def : Pat<(i64 (any_lrint FPR16:$rs1)), (FCVT_L_H $rs1, 0b111)>;
+def : Pat<(i64 (any_llrint FPR16:$rs1)), (FCVT_L_H $rs1, 0b111)>;
+
+// half->int64 rounded to nearest with ties rounded away from zero.
+def : Pat<(i64 (any_lround FPR16:$rs1)), (FCVT_L_H $rs1, 0b100)>;
+def : Pat<(i64 (any_llround FPR16:$rs1)), (FCVT_L_H $rs1, 0b100)>;
 
 // [u]int->fp. Match GCC and default to using dynamic rounding mode.
 def : Pat<(sint_to_fp (sexti32 GPR:$rs1)), (FCVT_H_W $rs1, 0b111)>;
