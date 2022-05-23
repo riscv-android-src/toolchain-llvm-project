@@ -9,12 +9,15 @@
 #ifndef LLVM_LIB_TARGET_RISCV_RISCVTARGETSTREAMER_H
 #define LLVM_LIB_TARGET_RISCV_RISCVTARGETSTREAMER_H
 
+#include "RISCV.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCSubtargetInfo.h"
 
 namespace llvm {
 
 class RISCVTargetStreamer : public MCTargetStreamer {
+  RISCVABI::ABI TargetABI = RISCVABI::ABI_Unknown;
+
 public:
   RISCVTargetStreamer(MCStreamer &S);
   void finish() override;
@@ -34,6 +37,8 @@ public:
                                     StringRef StringValue);
 
   void emitTargetAttributes(const MCSubtargetInfo &STI);
+  void setTargetABI(RISCVABI::ABI ABI);
+  RISCVABI::ABI getTargetABI() const { return TargetABI; }
 };
 
 // This part is for ascii assembly output

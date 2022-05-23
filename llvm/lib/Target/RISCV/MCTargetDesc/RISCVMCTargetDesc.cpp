@@ -64,10 +64,18 @@ static MCAsmInfo *createRISCVMCAsmInfo(const MCRegisterInfo &MRI,
 
 static MCSubtargetInfo *createRISCVMCSubtargetInfo(const Triple &TT,
                                                    StringRef CPU, StringRef FS) {
-  std::string CPUName = std::string(CPU);
-  if (CPUName.empty())
-    CPUName = TT.isArch64Bit() ? "generic-rv64" : "generic-rv32";
-  return createRISCVMCSubtargetInfoImpl(TT, CPUName, /*TuneCPU*/ CPUName, FS);
+  if (CPU.empty() || CPU == "generic")
+    CPU = TT.isArch64Bit() ? "generic-rv64" : "generic-rv32";
+  MCSubtargetInfo *STI =
+      createRISCVMCSubtargetInfoImpl(TT, CPU, /*TuneCPU*/ CPU, FS);
+
+  // Check if Feature string is valid
+  auto ISAInfo =
+      RISCVFeatures::parseFeatureBits(TT.isArch64Bit(), STI->getFeatureBits());
+  if (!ISAInfo)
+    report_fatal_error(ISAInfo.takeError());
+  else
+    return STI;
 }
 
 static MCInstPrinter *createRISCVMCInstPrinter(const Triple &T,
