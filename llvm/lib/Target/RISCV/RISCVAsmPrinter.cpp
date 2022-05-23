@@ -182,8 +182,16 @@ bool RISCVAsmPrinter::runOnMachineFunction(MachineFunction &MF) {
 }
 
 void RISCVAsmPrinter::emitStartOfAsmFile(Module &M) {
+  RISCVTargetStreamer &RTS =
+      static_cast<RISCVTargetStreamer &>(*OutStreamer->getTargetStreamer());
+
   if (TM.getTargetTriple().isOSBinFormatELF())
     emitAttributes();
+
+  if (const MDString *ModuleTargetABI = dyn_cast_or_null<MDString>(
+          M.getModuleFlag("target-abi"))) {
+    RTS.setTargetABI(RISCVABI::getTargetABI(ModuleTargetABI->getString()));
+  }
 }
 
 void RISCVAsmPrinter::emitEndOfAsmFile(Module &M) {
@@ -197,15 +205,6 @@ void RISCVAsmPrinter::emitEndOfAsmFile(Module &M) {
 void RISCVAsmPrinter::emitAttributes() {
   RISCVTargetStreamer &RTS =
       static_cast<RISCVTargetStreamer &>(*OutStreamer->getTargetStreamer());
-
-  const Triple &TT = TM.getTargetTriple();
-  StringRef CPU = TM.getTargetCPU();
-  StringRef FS = TM.getTargetFeatureString();
-  const RISCVTargetMachine &RTM = static_cast<const RISCVTargetMachine &>(TM);
-  /* TuneCPU doesn't impact emission of ELF attributes, ELF attributes only
-     care about arch related features, so we can set TuneCPU as CPU.  */
-  const RISCVSubtarget STI(TT, CPU, /*TuneCPU=*/CPU, FS, /*ABIName=*/"", RTM);
-
   RTS.emitTargetAttributes(*MCSTI);
 }
 

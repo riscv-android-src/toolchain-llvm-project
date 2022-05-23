@@ -40,7 +40,7 @@ RISCVSubtarget &RISCVSubtarget::initializeSubtargetDependencies(
   bool Is64Bit = TT.isArch64Bit();
   std::string CPUName = std::string(CPU);
   std::string TuneCPUName = std::string(TuneCPU);
-  if (CPUName.empty())
+  if (CPUName.empty() || CPUName == "generic")
     CPUName = Is64Bit ? "generic-rv64" : "generic-rv32";
   if (TuneCPUName.empty())
     TuneCPUName = CPUName;
