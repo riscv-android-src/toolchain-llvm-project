@@ -1968,8 +1968,9 @@ static void SetRISCVSmallDataLimit(const ToolChain &TC, const ArgList &Args,
   // Default small data limitation is eight.
   const char *SmallDataLimit = "8";
   // Get small data limitation.
-  if (Args.getLastArg(options::OPT_shared, options::OPT_fpic,
-                      options::OPT_fPIC)) {
+  if (Args.getLastArg(options::OPT_shared,
+                      options::OPT_fpic, options::OPT_fPIC,
+                      options::OPT_fpie, options::OPT_fPIE)) {
     // Not support linker relaxation for PIC.
     SmallDataLimit = "0";
     if (Args.hasArg(options::OPT_G)) {
