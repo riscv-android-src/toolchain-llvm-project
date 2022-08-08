@@ -620,7 +620,11 @@ if (NOT ${CMAKE_SYSTEM_NAME} MATCHES "AIX")
 endif()
 set(powerpc64le_SOURCES ${powerpc64_SOURCES})
 
-set(riscv_SOURCES ${GENERIC_SOURCES} ${GENERIC_TF_SOURCES})
+set(riscv_SOURCES
+  riscv/fp_mode.c
+  ${GENERIC_SOURCES}
+  ${GENERIC_TF_SOURCES}
+)
 set(riscv32_SOURCES
   riscv/mulsi3.S
   ${riscv_SOURCES}
