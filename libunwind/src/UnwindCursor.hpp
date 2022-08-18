@@ -925,7 +925,7 @@ private:
   }
 #endif
 
-#if defined(_LIBUNWIND_TARGET_LINUX) && defined(_LIBUNWIND_TARGET_AARCH64)
+#if defined(_LIBUNWIND_TARGET_LINUX) && (defined(_LIBUNWIND_TARGET_AARCH64) || defined(_LIBUNWIND_TARGET_RISCV))
   bool setInfoForSigReturn() {
     R dummy;
     return setInfoForSigReturn(dummy);
@@ -934,8 +934,14 @@ private:
     R dummy;
     return stepThroughSigReturn(dummy);
   }
+#if defined(_LIBUNWIND_TARGET_AARCH64)
   bool setInfoForSigReturn(Registers_arm64 &);
   int stepThroughSigReturn(Registers_arm64 &);
+#endif
+#if defined(_LIBUNWIND_TARGET_RISCV)
+  bool setInfoForSigReturn(Registers_riscv &);
+  int stepThroughSigReturn(Registers_riscv &);
+#endif
   template <typename Registers> bool setInfoForSigReturn(Registers &) {
     return false;
   }
@@ -1198,7 +1204,7 @@ private:
   unw_proc_info_t  _info;
   bool             _unwindInfoMissing;
   bool             _isSignalFrame;
-#if defined(_LIBUNWIND_TARGET_LINUX) && defined(_LIBUNWIND_TARGET_AARCH64)
+#if defined(_LIBUNWIND_TARGET_LINUX) && (defined(_LIBUNWIND_TARGET_AARCH64) || defined(_LIBUNWIND_TARGET_RISCV))
   bool             _isSigReturn = false;
 #endif
 };
@@ -1895,7 +1901,7 @@ bool UnwindCursor<A, R>::getInfoFromSEH(pint_t pc) {
 
 template <typename A, typename R>
 void UnwindCursor<A, R>::setInfoBasedOnIPRegister(bool isReturnAddress) {
-#if defined(_LIBUNWIND_TARGET_LINUX) && defined(_LIBUNWIND_TARGET_AARCH64)
+#if defined(_LIBUNWIND_TARGET_LINUX) && (defined(_LIBUNWIND_TARGET_AARCH64) || defined(_LIBUNWIND_TARGET_RISCV))
   _isSigReturn = false;
 #endif
 
@@ -1997,7 +2003,7 @@ void UnwindCursor<A, R>::setInfoBasedOnIPRegister(bool isReturnAddress) {
   }
 #endif // #if defined(_LIBUNWIND_SUPPORT_DWARF_UNWIND)
 
-#if defined(_LIBUNWIND_TARGET_LINUX) && defined(_LIBUNWIND_TARGET_AARCH64)
+#if defined(_LIBUNWIND_TARGET_LINUX) && (defined(_LIBUNWIND_TARGET_AARCH64) || defined(_LIBUNWIND_TARGET_RISCV))
   if (setInfoForSigReturn())
     return;
 #endif
@@ -2068,6 +2074,52 @@ int UnwindCursor<A, R>::stepThroughSigReturn(Registers_arm64 &) {
 }
 #endif // defined(_LIBUNWIND_TARGET_LINUX) && defined(_LIBUNWIND_TARGET_AARCH64)
 
+#if defined(_LIBUNWIND_TARGET_LINUX) && defined(_LIBUNWIND_TARGET_RISCV)
+template <typename A, typename R>
+bool UnwindCursor<A, R>::setInfoForSigReturn(Registers_riscv &) {
+  const pint_t pc = static_cast<pint_t>(this->getReg(UNW_REG_IP));
+  // Look for instructions: li a7,139; ecall
+  if (_addressSpace.get32(pc) == 0x08b00893 &&
+      _addressSpace.get32(pc + 4) == 0x00000073) {
+    _info = {};
+    _isSigReturn = true;
+    return true;
+  }
+  return false;
+}
+
+template <typename A, typename R>
+int UnwindCursor<A, R>::stepThroughSigReturn(Registers_riscv &) {
+  // riscv has the similar signal frame layout as aarch64:
+  //   - 128-byte siginfo struct
+  //   - ucontext struct:
+  //     - 8-byte long (uc_flags)
+  //     - 8-byte pointer (uc_link)
+  //     - 24-byte stack_t
+  //     - 8-byte signal set
+  //     - 120-byte __glibc_reserved
+  //     - 8-byte padding because uc_mcontext has 16-byte alignment
+  //     - mcontext_t uc_mcontext;
+  // https://github.com/torvalds/linux/blob/master/arch/riscv/kernel/signal.c
+
+  const pint_t kOffsetSpToSigcontext = (128 + 8 + 8 + 24 + 128 + 8); // 304
+  // Offsets from sigcontext to each register
+  // 0:pc 8:ra 16:sp 24:gp 32:tp 72:fp
+  const pint_t kOffsetSp = 16;
+  const pint_t kOffsetPc = 0;
+
+  pint_t sigctx = _registers.getSP() + kOffsetSpToSigcontext;
+  for (int i = 0; i <= 31; ++i) {
+    uint64_t value = _addressSpace.get64(sigctx + static_cast<pint_t>(i * 8));
+    _registers.setRegister(UNW_RISCV_X0 + i, value);
+  }
+  _registers.setSP(_addressSpace.get64(sigctx + kOffsetSp));
+  _registers.setIP(_addressSpace.get64(sigctx + kOffsetPc));
+  _isSignalFrame = true;
+  return UNW_STEP_SUCCESS;
+}
+#endif // defined(_LIBUNWIND_TARGET_LINUX) && defined(_LIBUNWIND_TARGET_RISCV)
+
 template <typename A, typename R>
 int UnwindCursor<A, R>::step() {
   // Bottom of stack is defined is when unwind info cannot be found.
@@ -2076,7 +2128,7 @@ int UnwindCursor<A, R>::step() {
 
   // Use unwinding info to modify register set as if function returned.
   int result;
-#if defined(_LIBUNWIND_TARGET_LINUX) && defined(_LIBUNWIND_TARGET_AARCH64)
+#if defined(_LIBUNWIND_TARGET_LINUX) && (defined(_LIBUNWIND_TARGET_AARCH64) || defined(_LIBUNWIND_TARGET_RISCV))
   if (_isSigReturn) {
     result = this->stepThroughSigReturn();
   } else
