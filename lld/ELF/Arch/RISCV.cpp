@@ -243,8 +243,8 @@ RelExpr RISCV::getRelExpr(const RelType type, const Symbol &s,
     // Not just a hint; always padded to the worst-case number of NOPs, so may
     // not currently be aligned, and without linker relaxation support we can't
     // delete NOPs to realign.
-    errorOrWarn(getErrorLocation(loc) + "relocation R_RISCV_ALIGN requires "
-                "unimplemented linker relaxation; recompile with -mno-relax");
+//    errorOrWarn(getErrorLocation(loc) + "relocation R_RISCV_ALIGN requires "
+//                "unimplemented linker relaxation; recompile with -mno-relax");
     return R_NONE;
   default:
     error(getErrorLocation(loc) + "unknown relocation (" + Twine(type) +
